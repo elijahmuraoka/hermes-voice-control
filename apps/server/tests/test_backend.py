@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 import subprocess
 import pytest
 from fastapi.testclient import TestClient
@@ -48,6 +49,15 @@ def test_readyz_fails_real_gemini_without_client(tmp_path, monkeypatch):
     assert res.json()["ok"] is False
     assert res.json()["checks"]["gemini_api_key_configured"] is True
     assert res.json()["checks"]["gemini_client_available"] is False
+def test_readyz_reports_database_connection_failure(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+    def fail_connect():
+        raise sqlite3.OperationalError("cannot open database")
+    monkeypatch.setattr(client.app.state.store, "connect", fail_connect)
+    res = client.get("/readyz")
+    assert res.status_code == 503
+    assert res.json()["ok"] is False
+    assert res.json()["checks"]["database"] == "failed"
 def test_pin_auth_and_session(tmp_path):
     client = make_pin_client(tmp_path); assert client.post("/auth/pin", json={"pin": "wrong"}).status_code == 401
     token = login(client); assert client.get("/auth/session", headers={"Authorization": f"Bearer {token}"}).status_code == 200

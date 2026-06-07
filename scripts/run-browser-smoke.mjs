@@ -14,21 +14,57 @@ function spawnCommand(command, args, options = {}) {
   });
 }
 
-async function waitForApp(url, timeoutMs = 20_000) {
+function currentExit(child) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { code: child.exitCode, signal: child.signalCode };
+  }
+  return null;
+}
+
+function describeExit({ code, signal }) {
+  if (code !== null) return `exit code ${code}`;
+  return `signal ${signal ?? "unknown"}`;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function assertServerStillRunning(server, url) {
+  const existingExit = currentExit(server);
+  if (existingExit) {
+    throw new Error(`Vite exited before ${url} was ready (${describeExit(existingExit)})`);
+  }
+  const exit = await Promise.race([waitForExit(server), delay(250).then(() => null)]);
+  if (exit) {
+    throw new Error(`Vite exited before ${url} was ready (${describeExit(exit)})`);
+  }
+}
+
+async function waitForApp(url, server, timeoutMs = 20_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
+    const exit = currentExit(server);
+    if (exit) {
+      throw new Error(`Vite exited before ${url} was ready (${describeExit(exit)})`);
+    }
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.ok) {
+        await assertServerStillRunning(server, url);
+        return;
+      }
     } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await delay(250);
   }
   throw new Error(`Timed out waiting for ${url}`);
 }
 
 function waitForExit(child) {
+  const exit = currentExit(child);
+  if (exit) return Promise.resolve(exit);
   return new Promise((resolve) => {
-    child.on("exit", (code, signal) => resolve({ code, signal }));
+    child.once("exit", (code, signal) => resolve({ code, signal }));
   });
 }
 
@@ -43,7 +79,7 @@ async function main() {
 
   let exitCode = 0;
   try {
-    await waitForApp(appUrl);
+    await waitForApp(appUrl, server);
     const smoke = spawnCommand(
       "pnpm",
       [

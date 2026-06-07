@@ -12,6 +12,8 @@ Defaults:
 - Reject wildcard CORS origins because credentials are enabled.
 - Keep `/logs` disabled unless `HVC_ALLOW_LOGS_ENDPOINT=true` is set for a
   trusted debugging session.
+- Prune audit logs at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
+  `HVC_AUDIT_LOG_MAX_ROWS`.
 - Allow secure session cookies with `HVC_SECURE_COOKIES=true` when serving over
   HTTPS/private reverse proxy.
 - Deny unknown tools.
@@ -34,17 +36,19 @@ Not allowed by default:
 
 `/gemini/ephemeral-token` returns a short-lived Gemini token to the browser, but audit logs only record mode, expiry, and that a token was issued. `/gemini/status` reports whether a real Gemini key is configured as a boolean and never returns the key value.
 
-`/readyz` reports safe runtime posture, including database reachability, Gemini
-mode, adapter mode, PIN requirement, and whether the logs endpoint is enabled.
-It returns `503` when real Gemini mode is selected without a configured API key.
+`/readyz` reports safe runtime posture, including database writeability, Gemini
+mode/model, adapter mode, PIN requirement, log-retention controls, and whether
+the logs endpoint is enabled. It returns `503` when real Gemini mode is selected
+without a configured API key.
 
 ## Hermes agent bridge
 
-The backend allowlist exposes a compatibility `ask_bob` tool id for speakable
-agent answers and `propose_action` for confirmation records. Agent-answer
-requests accept only `quick` and `deep` modes. The local Hermes adapter prompt
-is read-only and tells Hermes not to mutate files, send messages, or claim an
-action was performed.
+The backend allowlist exposes `ask_agent` for speakable agent answers and keeps
+`ask_bob` as a compatibility alias. `propose_action` records action proposals
+for review. Approval records intent only and does not execute external actions
+in v1. Agent-answer requests accept only `quick` and `deep` modes. The local
+Hermes adapter prompt is read-only and tells Hermes not to mutate files, send
+messages, or claim an action was performed.
 
 ## Cancellation
 

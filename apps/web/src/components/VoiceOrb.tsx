@@ -48,7 +48,7 @@ function subcopy(callState: CallState, agentName: string) {
       return "Tap to pause. Hold for a longer thought.";
     case "paused":
       return `Tap the orb to resume ${agentName}.`;
-    case "bob-speaking":
+    case "agent-speaking":
       return "Hold the orb to barge in.";
     case "error":
       return "Open transcript for recovery details.";

@@ -51,7 +51,7 @@ export function defaultTools(): GeminiToolDeclaration[] {
     {
       functionDeclarations: [
         {
-          name: "ask_bob",
+          name: "ask_agent",
           description: "Ask the configured Hermes agent for a speakable answer.",
           parameters: {
             type: "OBJECT",

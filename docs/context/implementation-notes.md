@@ -34,8 +34,13 @@
   allowlist.
 - Backend supports cancellable agent-answer tool calls, `propose_action`
   confirmation records, and `/tools/cancel`.
+- Canonical tool/state identifiers use `ask_agent`, `agent-thinking`,
+  `agent-speaking`, and transcript role `agent`. The backend still accepts
+  `ask_bob` as a compatibility alias for older clients.
 - Backend exposes `/readyz` for safe readiness checks. It verifies database
-  reachability and fails when real Gemini mode is configured without an API key.
+  writeability and fails when real Gemini mode is configured without an API key.
+- Backend prunes audit logs at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
+  `HVC_AUDIT_LOG_MAX_ROWS`.
 - `/logs` is disabled by default and only available with
   `HVC_ALLOW_LOGS_ENDPOINT=true`.
 - PIN session cookies can be marked secure with `HVC_SECURE_COOKIES=true` for
@@ -43,11 +48,14 @@
 - Mock Gemini mode can smoke-test the local app and token broker without real
   Gemini credentials.
 - Real Gemini Live requires `HVC_GEMINI_MODE=real`, `google-genai`, and a Gemini
-  API key in the backend environment.
+  API key in the backend environment. The constrained Live model is configurable
+  with `HVC_GEMINI_MODEL`.
 - No-PIN remote/proxy access is blocked unless explicitly overridden; Tailscale
   Serve should use PIN/session auth.
 - `LocalHermesAdapter` launches Hermes with a direct argv, safe toolset, timeout
   handling, cancellation handling, and launch-error handling.
+- Root operator scripts now include `pnpm dev`, `pnpm env:check`,
+  `pnpm smoke:browser`, `pnpm screenshots:update`, and `pnpm perf:budget`.
 
 ## Tradeoffs
 
@@ -90,15 +98,19 @@
   26 tests. Backend: 26 tests with one Starlette/httpx deprecation warning.
 - 2026-06-07: `pnpm build`, `pnpm docs:verify`, and `tomoji docs audit --json`
   passed after productionization changes.
+- 2026-06-07: follow-up productionization added generic agent identifiers,
+  private-network runbook/env validation, startup audit-log pruning, DB
+  writeability readiness, reduced-motion/focus browser checks, screenshot
+  update script, bundle budget, read-only v1 action semantics, and configurable
+  `HVC_GEMINI_MODEL`.
+- 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`,
+  `pnpm smoke:browser`, and `git diff --check`.
 
 ## Remaining gaps
 
 - Run one credentialed Gemini Live smoke test with real backend
   `HVC_GEMINI_MODE=real` and microphone permission.
-- Decide whether `LocalHermesAdapter` should stay read-only only, or later
-  support confirmation-gated actions.
 - Decide the default Gemini voice/personality guidance for Hermes agents once
   real audio is enabled.
-- Complete log retention/pruning and broader observability work.
-- Finish a credentialed real Gemini Live smoke run.
-- Decide and implement or explicitly defer confirmation-gated action execution.
+- Do a final independent review after credentialed real Gemini Live smoke.

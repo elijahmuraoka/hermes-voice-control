@@ -30,6 +30,10 @@ class RealGeminiTokenBroker(GeminiTokenBroker):
     mode = "real"
 
     @property
+    def model(self) -> str:
+        return os.getenv("HVC_GEMINI_MODEL", "gemini-2.5-flash-native-audio-latest")
+
+    @property
     def api_key_configured(self) -> bool:
         return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
 
@@ -44,7 +48,7 @@ class RealGeminiTokenBroker(GeminiTokenBroker):
         client = genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
         expires_at = datetime.now(UTC) + timedelta(minutes=10)
         new_session_expires = datetime.now(UTC) + timedelta(seconds=60)
-        token = client.auth_tokens.create(config={"uses": 1, "expire_time": expires_at.isoformat().replace("+00:00", "Z"), "new_session_expire_time": new_session_expires.isoformat().replace("+00:00", "Z"), "live_connect_constraints": {"model": "gemini-2.5-flash-native-audio-latest", "config": {"response_modalities": ["AUDIO"]}}})
+        token = client.auth_tokens.create(config={"uses": 1, "expire_time": expires_at.isoformat().replace("+00:00", "Z"), "new_session_expire_time": new_session_expires.isoformat().replace("+00:00", "Z"), "live_connect_constraints": {"model": self.model, "config": {"response_modalities": ["AUDIO"]}}})
         name = getattr(token, "name", None)
         if not name:
             raise RuntimeError("Gemini did not return an ephemeral token")

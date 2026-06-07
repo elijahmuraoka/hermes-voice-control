@@ -6,7 +6,7 @@ Hermes agent.
 The first product shape is deliberately narrow: a phone or laptop browser talks
 to Gemini Live through a local FastAPI broker, and Gemini can call back into a
 small backend tool surface that asks local Hermes for read-only answers or
-records confirmation-gated action proposals. The browser is convenient, but it
+records read-only action proposals. The browser is convenient, but it
 is not trusted with long-lived API keys, Hermes config, or arbitrary local tool
 execution.
 

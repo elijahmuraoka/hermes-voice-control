@@ -6,6 +6,10 @@ const AGENT_NAME_PATTERN = AGENT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const SCREENSHOT_DIR = "docs/assets/screenshots";
 const WRITE_SCREENSHOTS = process.env.HVC_E2E_WRITE_SCREENSHOTS === "true";
 const RUN_TOKEN_FLOW = process.env.HVC_E2E_RUN_TOKEN_FLOW === "true";
+const screenshotTargets: Record<string, string> = {
+  "mobile-390": "mobile-idle.png",
+  "desktop-1280": "desktop.png",
+};
 const viewports = [
   { name: "mobile-320", width: 320, height: 740 },
   { name: "mobile-390", width: 390, height: 844 },
@@ -35,14 +39,20 @@ for (const viewport of viewports) {
     });
     await page.goto(APP_URL, { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: /Voice orb:/ }),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: /^Mute$/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^End$/ })).toBeVisible();
-    await expect(
-      page.getByLabel("Type a message to your Hermes agent"),
-    ).toBeVisible();
+    const orbButton = page.getByRole("button", { name: /Voice orb:/ });
+    const muteButton = page.getByRole("button", { name: /^Mute$/ });
+    const endButton = page.getByRole("button", { name: /^End$/ });
+    const textInput = page.getByLabel("Type a message to your Hermes agent");
+    await expect(orbButton).toBeVisible();
+    await expect(muteButton).toBeVisible();
+    await expect(endButton).toBeVisible();
+    await expect(textInput).toBeVisible();
+    await page.keyboard.press("Tab");
+    await expect(orbButton).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(muteButton).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(endButton).toBeFocused();
     await expect(page.getByText("Interrupt")).toHaveCount(0);
     await expect(page.getByText(/PIN/i)).toHaveCount(0);
     const overflow = await page.evaluate(
@@ -75,15 +85,29 @@ for (const viewport of viewports) {
         (chatBox?.y ?? 0) + (chatBox?.height ?? 0),
       ).toBeLessThanOrEqual((transcriptBox?.y ?? 0) - 4);
     }
-    if (WRITE_SCREENSHOTS) {
+    const screenshotTarget = screenshotTargets[viewport.name];
+    if (WRITE_SCREENSHOTS && screenshotTarget) {
       await page.screenshot({
-        path: `${SCREENSHOT_DIR}/${viewport.name}.png`,
+        path: `${SCREENSHOT_DIR}/${screenshotTarget}`,
         fullPage: true,
       });
     }
     expect(consoleErrors).toEqual([]);
   });
 }
+
+test("honors reduced motion preference", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto(APP_URL, { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
+  const duration = await page
+    .locator(".orb-aura")
+    .evaluate((element) => getComputedStyle(element).animationDuration);
+  const durationMs = duration.endsWith("ms")
+    ? Number.parseFloat(duration)
+    : Number.parseFloat(duration) * 1000;
+  expect(durationMs).toBeLessThanOrEqual(0.001);
+});
 
 test.describe("real backend token flow", () => {
   test.skip(

@@ -11,7 +11,7 @@ Phone/laptop browser over localhost or Tailscale
   -> Gemini tool call normalization
   -> backend tool policy and cancellation checks
   -> Hermes agent adapter
-  -> speakable response or confirmation proposal
+  -> speakable response or recorded confirmation proposal
 ```
 
 ## Components
@@ -19,7 +19,7 @@ Phone/laptop browser over localhost or Tailscale
 - `apps/web`: React voice UI, orb state machine, audio worklets, Gemini Live
   protocol wrapper, transcript drawer, and text fallback.
 - `apps/server`: FastAPI auth/session layer, Gemini token broker, tool allowlist,
-  SQLite store, confirmation queue, readiness/log controls, and Hermes adapter
+  SQLite store, confirmation records, readiness/log controls, and Hermes adapter
   implementations.
 - `scripts/browser-responsive.spec.ts`: Playwright responsive/browser smoke with
   fake microphone permission and screenshot capture.
@@ -43,17 +43,21 @@ late responses for that call to be ignored.
 
 ## Data Stores
 
-SQLite stores sessions, transcripts/events, confirmations, and tool-call
-cancellation markers. Confirmation approval is intentionally not an external
-action executor; it records intent for a future reviewed action path.
+SQLite stores sessions, transcripts/events, confirmations, audit logs, and
+tool-call cancellation markers. Confirmation approval is intentionally not an
+external action executor in v1; it records intent for a future reviewed action
+path.
 
 `/healthz` is a basic liveness endpoint. `/readyz` checks database reachability
-and safe runtime posture without exposing secrets. `/logs` is disabled by
-default and requires `HVC_ALLOW_LOGS_ENDPOINT=true`.
+and writeability plus safe runtime posture without exposing secrets. `/logs` is
+disabled by default and requires `HVC_ALLOW_LOGS_ENDPOINT=true`. Audit logs are
+pruned at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
+`HVC_AUDIT_LOG_MAX_ROWS`.
 
 ## Context Documents
 
 - [Security model](context/security-model.md)
+- [Private network runbook](context/runbooks/private-network.md)
 - [Tailscale private exposure](context/tailscale-private-exposure.md)
 - [Hermes integration](context/hermes-integration.md)
 - [UX state machine](context/ux-state-machine.md)

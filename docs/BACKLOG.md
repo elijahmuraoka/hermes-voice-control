@@ -33,22 +33,29 @@ Open work not yet scoped into its own spec.
 - [#4](https://github.com/elijahmuraoka/hermes-voice-control/issues/4):
   auth, cookies, and log access hardening.
 - [#5](https://github.com/elijahmuraoka/hermes-voice-control/issues/5):
-  generic internal agent/tool identifiers.
+  generic internal agent/tool identifiers. Implemented by `ask_agent`,
+  `agent-*` states, and `agent` transcript role; `ask_bob` remains a backend
+  compatibility alias.
 - [#6](https://github.com/elijahmuraoka/hermes-voice-control/issues/6):
   dependency version pinning and update policy.
 - [#7](https://github.com/elijahmuraoka/hermes-voice-control/issues/7):
-  one-command local/dev production runbooks and env validation.
+  one-command local/dev production runbooks and env validation. Implemented
+  with `pnpm dev`, `pnpm env:check`, and the private-network runbook.
 - [#8](https://github.com/elijahmuraoka/hermes-voice-control/issues/8):
-  production health, observability, and log-retention controls.
+  production health, observability, and log-retention controls. Implemented
+  with `/readyz`, DB writeability checks, log pruning, and tests.
 - [#9](https://github.com/elijahmuraoka/hermes-voice-control/issues/9):
-  UX, accessibility, and performance QA.
+  UX, accessibility, and performance QA. Implemented with responsive,
+  keyboard/focus, reduced-motion, screenshot, and bundle-budget checks.
 - [#10](https://github.com/elijahmuraoka/hermes-voice-control/issues/10):
-  confirmation-gated action semantics.
+  confirmation-gated action semantics. Decided as read-only v1; approvals
+  record intent only and do not execute external actions.
 
 ## Product Decisions
 
 - [ ] Choose the default Gemini voice/personality once real audio is stable.
-- [ ] Decide whether `LocalHermesAdapter` remains read-only forever or later
-  supports confirmation-gated local actions.
+- [x] Decide v1 action semantics: `LocalHermesAdapter` stays read-only and
+  confirmation approval records intent only. A future executor would need its
+  own design and issue.
 - [ ] Revisit LiveKit/Pipecat only if HVC needs multi-device rooms, telephony,
   or provider-neutral media pipelines.

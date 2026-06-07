@@ -41,7 +41,7 @@ export function TranscriptDrawer({
             <article key={e.id} className={`message role-${e.role}`}>
               <div className="message-meta">
                 <span>
-                  {e.role === "bob"
+                  {e.role === "agent"
                     ? agentName
                     : e.role === "user"
                       ? "You"

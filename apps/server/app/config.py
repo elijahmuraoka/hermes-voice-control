@@ -38,6 +38,13 @@ def env_bool(name: str, default: bool = False) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
+
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return int(value)
+
 @dataclass(frozen=True)
 class Settings:
     host: str = "127.0.0.1"
@@ -53,6 +60,8 @@ class Settings:
     allow_remote_bind: bool = False
     allow_no_pin_remote: bool = False
     allow_logs_endpoint: bool = False
+    audit_log_retention_days: int = 30
+    audit_log_max_rows: int = 5_000
     secure_cookies: bool = False
     debug_errors: bool = False
 
@@ -73,6 +82,8 @@ class Settings:
             allow_remote_bind=env_bool("HVC_ALLOW_REMOTE_BIND", False),
             allow_no_pin_remote=env_bool("HVC_ALLOW_NO_PIN_REMOTE", False),
             allow_logs_endpoint=env_bool("HVC_ALLOW_LOGS_ENDPOINT", False),
+            audit_log_retention_days=env_int("HVC_AUDIT_LOG_RETENTION_DAYS", 30),
+            audit_log_max_rows=env_int("HVC_AUDIT_LOG_MAX_ROWS", 5000),
             secure_cookies=env_bool("HVC_SECURE_COOKIES", False),
             debug_errors=env_bool("HVC_DEBUG_ERRORS", False),
         )

@@ -27,3 +27,11 @@
   the explicitly gated real backend token-flow test.
 - Backend hardening added configurable secure cookies, a default-disabled logs
   endpoint, `/readyz`, and tests for those controls.
+- Follow-up productionization added generic `ask_agent`/`agent-*` identifiers
+  with `ask_bob` compatibility, private-network runbook/env validation, audit
+  log pruning, DB writeability readiness, reduced-motion/focus browser checks,
+  bundle-size budget, screenshot update script, and read-only v1 action
+  semantics.
+- Follow-up verification passed `pnpm env:check`, `pnpm verify`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`,
+  `pnpm smoke:browser`, and `git diff --check`.

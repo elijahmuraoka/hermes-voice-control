@@ -252,12 +252,12 @@ input {
     0 0 45px rgba(246, 240, 232, 0.14);
 }
 
-.state-bob-speaking .orb-wave,
+.state-agent-speaking .orb-wave,
 .state-user-speaking .orb-wave {
   animation: ripple 1.9s ease-out infinite;
 }
 
-.state-bob-thinking .orb-ring {
+.state-agent-thinking .orb-ring {
   animation: spin 2.4s linear infinite;
   border-top-color: var(--cyan);
 }
@@ -423,8 +423,19 @@ input {
   background: rgba(214, 179, 106, 0.1);
 }
 
-.role-bob {
+.role-agent {
   background: rgba(157, 232, 255, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 @keyframes breathe {

@@ -17,7 +17,7 @@ class ToolCallRequest(BaseModel):
 class ToolCancelRequest(BaseModel):
     request_ids: list[str] = Field(min_length=1, max_length=50)
 
-class AskBobArgs(BaseModel):
+class AskAgentArgs(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     mode: str = Field(default="quick", pattern="^(quick|deep)$")
     transcript_window: list[dict[str, Any]] = Field(default_factory=list)
@@ -34,8 +34,9 @@ class ToolDef:
     requires_confirmation: bool
 
 TOOLS = {
-    "ask_bob": ToolDef("ask_bob", "Ask the configured Hermes agent for a speakable answer.", "low", False),
-    "propose_action": ToolDef("propose_action", "Queue a risky action proposal for explicit approval.", "high", True),
+    "ask_agent": ToolDef("ask_agent", "Ask the configured Hermes agent for a speakable answer.", "low", False),
+    "ask_bob": ToolDef("ask_bob", "Compatibility alias for ask_agent.", "low", False),
+    "propose_action": ToolDef("propose_action", "Record a proposed action for review. Approval records intent only and does not execute external actions.", "high", True),
 }
 
 class ToolService:
@@ -56,13 +57,13 @@ class ToolService:
         if not tool:
             self.store.log("tool.denied", "denied", {"tool": req.tool}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="TOOL_NOT_ALLOWED")
             raise HTTPException(status_code=403, detail="Tool not allowed")
-        if req.tool == "ask_bob":
+        if req.tool in {"ask_agent", "ask_bob"}:
             try:
-                args = AskBobArgs.model_validate(req.arguments)
+                args = AskAgentArgs.model_validate(req.arguments)
             except ValidationError as exc:
                 self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": exc.errors()}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
                 raise HTTPException(status_code=422, detail="Invalid tool arguments") from exc
-            result = self.adapter.ask_bob(args.message, mode=args.mode, transcript_window=args.transcript_window, should_cancel=lambda: self._is_cancelled(req.request_id, session_hash))
+            result = self.adapter.ask_agent(args.message, mode=args.mode, transcript_window=args.transcript_window, should_cancel=lambda: self._is_cancelled(req.request_id, session_hash))
             if self._is_cancelled(req.request_id, session_hash):
                 self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id, "suppressed_after_adapter": True}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
                 raise HTTPException(status_code=409, detail="Tool call was cancelled")

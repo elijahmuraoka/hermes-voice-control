@@ -12,11 +12,14 @@ class AdapterResult:
     safe_message: str | None = None
 
 class HermesAdapter:
-    def ask_bob(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
+    def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
         raise NotImplementedError
 
-class MockHermesAdapter(HermesAdapter):
     def ask_bob(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
+        return self.ask_agent(message, mode=mode, transcript_window=transcript_window, should_cancel=should_cancel)
+
+class MockHermesAdapter(HermesAdapter):
+    def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
         text = message.strip() or "I heard silence."
         return AdapterResult(ok=True, data={"speakable": f"Mock Hermes agent heard: {text}", "display": f"Mock Hermes agent heard: {text}", "mode": mode})
 
@@ -27,7 +30,7 @@ class LocalHermesAdapter(HermesAdapter):
         if os.path.sep in self.hermes_bin or (os.path.altsep and os.path.altsep in self.hermes_bin):
             return self.hermes_bin if os.path.exists(self.hermes_bin) else None
         return shutil.which(self.hermes_bin)
-    def ask_bob(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
+    def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
         hermes_bin = self._resolve_hermes_bin()
         if not hermes_bin:
             return AdapterResult(ok=False, error_code="HERMES_NOT_FOUND", safe_message="Local Hermes binary was not found.")

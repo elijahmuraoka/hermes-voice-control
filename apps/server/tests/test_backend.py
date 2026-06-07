@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.adapters import LocalHermesAdapter
 from app.config import Settings
 from app.main import create_app
+from app.store import Store
 
 TEST_PIN = "voice-9Kq2"
 
@@ -27,6 +28,8 @@ def test_readyz_reports_safe_runtime_posture(tmp_path):
     assert body["checks"]["database"] == "ok"
     assert body["checks"]["gemini_mode"] == "mock"
     assert body["checks"]["gemini_api_key_configured"] is False
+    assert body["checks"]["audit_log_retention_days"] == 30
+    assert body["checks"]["audit_log_max_rows"] == 5000
     assert TEST_PIN not in res.text
 def test_readyz_fails_real_gemini_without_key(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -71,7 +74,7 @@ def test_no_pin_remote_requires_explicit_override(tmp_path):
 
 def test_pin_mode_protected_endpoints_require_auth(tmp_path):
     client = make_pin_client(tmp_path); assert client.post("/gemini/ephemeral-token").status_code == 401
-    assert client.post("/tools/call", json={"request_id": "r", "tool": "ask_bob", "arguments": {"message": "hi"}}).status_code == 401
+    assert client.post("/tools/call", json={"request_id": "r", "tool": "ask_agent", "arguments": {"message": "hi"}}).status_code == 401
 
 def test_pin_mode_requires_non_default_strong_pin(tmp_path):
     with pytest.raises(RuntimeError):
@@ -112,11 +115,13 @@ def test_real_gemini_status_only_reports_key_presence(tmp_path, monkeypatch):
 def test_tool_allowlist_and_mock_agent(tmp_path):
     client = make_client(tmp_path)
     denied = client.post("/tools/call", json={"request_id": "r1", "tool": "shell", "arguments": {}}); assert denied.status_code == 403
-    ok = client.post("/tools/call", json={"request_id": "r2", "tool": "ask_bob", "arguments": {"message": "hello", "mode": "quick"}})
+    ok = client.post("/tools/call", json={"request_id": "r2", "tool": "ask_agent", "arguments": {"message": "hello", "mode": "quick"}})
     assert ok.status_code == 200; assert ok.json()["status"] == "completed"; assert "Mock Hermes agent heard" in ok.json()["result"]["speakable"]
-def test_ask_bob_denies_action_mode(tmp_path):
+    alias = client.post("/tools/call", json={"request_id": "r2-alias", "tool": "ask_bob", "arguments": {"message": "hello", "mode": "quick"}})
+    assert alias.status_code == 200
+def test_ask_agent_denies_action_mode(tmp_path):
     client = make_client(tmp_path)
-    res = client.post("/tools/call", json={"request_id": "r-action", "tool": "ask_bob", "arguments": {"message": "send it", "mode": "action"}})
+    res = client.post("/tools/call", json={"request_id": "r-action", "tool": "ask_agent", "arguments": {"message": "send it", "mode": "action"}})
     assert res.status_code == 422
 
 def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
@@ -132,7 +137,7 @@ def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
         calls.append((cmd, kwargs))
         return FakeProc()
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    result = LocalHermesAdapter(str(hermes)).ask_bob("hi", mode="quick")
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi", mode="quick")
     assert result.ok is True
     assert calls[0][0][-2:] == ["--toolsets", "safe"]
 
@@ -152,7 +157,7 @@ def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
             self.returncode = -9
         def communicate(self, timeout=None): return ("", "")
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
-    result = LocalHermesAdapter(str(hermes)).ask_bob("hi", should_cancel=lambda: True)
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi", should_cancel=lambda: True)
     assert result.ok is False
     assert result.error_code == "HERMES_CANCELLED"
     assert events == ["terminate"]
@@ -180,6 +185,17 @@ def test_tool_cancel_rejects_pending_confirmation_and_blocks_late_call(tmp_path)
     late = client.post("/tools/call", json={"request_id": "late-call", "tool": "propose_action", "arguments": {"summary": "Should not queue"}})
     assert late.status_code == 409
     assert client.get("/confirmations").json()["items"] == []
+
+def test_audit_log_pruning_by_age_and_row_count(tmp_path):
+    store = Store(tmp_path / "retention.sqlite3")
+    for index in range(6):
+        store.log("test.event", "ok", {"index": index})
+    with store.connect() as conn:
+        conn.execute("UPDATE audit_logs SET timestamp='2000-01-01T00:00:00+00:00' WHERE id=1")
+    deleted = store.prune_audit_logs(retention_days=7, max_rows=3)
+    assert deleted["age"] == 1
+    assert deleted["rows"] == 2
+    assert len(store.recent_logs(10)) == 3
 
 def test_cors_rejects_evil_origin(tmp_path):
     res = make_client(tmp_path).options("/auth/session", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"})

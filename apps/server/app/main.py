@@ -37,6 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.assert_safe_cors()
     settings.assert_safe_auth()
     store = Store(settings.db_path)
+    store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
     auth = AuthManager(settings.pin, settings.session_ttl_seconds, store)
     broker = build_broker(settings.gemini_mode)
     adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin)
@@ -67,17 +68,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         checks = {
             "database": "unknown",
             "gemini_mode": broker.mode,
+            "gemini_model": getattr(broker, "model", None),
             "gemini_api_key_configured": broker.api_key_configured,
             "hermes_adapter": settings.hermes_adapter,
             "pin_required": settings.require_pin,
             "logs_endpoint_enabled": settings.allow_logs_endpoint,
+            "audit_log_retention_days": settings.audit_log_retention_days,
+            "audit_log_max_rows": settings.audit_log_max_rows,
         }
         ok = True
-        try:
-            with store.connect() as conn:
-                conn.execute("SELECT 1").fetchone()
+        if store.check_writeable():
             checks["database"] = "ok"
-        except Exception:
+        else:
             checks["database"] = "failed"
             ok = False
         if broker.mode == "real" and not broker.api_key_configured:
@@ -120,7 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def cancel_tool(req: ToolCancelRequest, session_hash: str = Depends(session_dep)): return tools.cancel(req, session_hash)
     @app.post("/chat/text")
     def chat_text(payload: TextMessage, session_hash: str = Depends(session_dep)):
-        req = ToolCallRequest(request_id="text-chat", tool="ask_bob", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
+        req = ToolCallRequest(request_id="text-chat", tool="ask_agent", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
         return tools.call(req, session_hash)
     @app.get("/confirmations")
     def confirmations(session_hash: str = Depends(session_dep)): return {"items": tools.pending_confirmations(session_hash)}

@@ -281,7 +281,7 @@ describe("GeminiLiveSession", () => {
     ws.receive({
       toolCall: {
         functionCalls: [
-          { id: "call-canceled", name: "ask_bob", args: { message: "hi" } },
+          { id: "call-canceled", name: "ask_agent", args: { message: "hi" } },
         ],
       },
     });
@@ -294,7 +294,7 @@ describe("GeminiLiveSession", () => {
     expect(toolCaller).toHaveBeenCalledWith(
       {
         id: "call-canceled",
-        name: "ask_bob",
+        name: "ask_agent",
         args: { message: "hi" },
       },
       { signal: observedSignal },
@@ -328,7 +328,7 @@ describe("GeminiLiveSession", () => {
 
     await session.connect();
     ws.open();
-    ws.receive({ toolCall: { functionCalls: [{ id: "call-active", name: "ask_bob", args: { message: "hi" } }] } });
+    ws.receive({ toolCall: { functionCalls: [{ id: "call-active", name: "ask_agent", args: { message: "hi" } }] } });
     await Promise.resolve();
     session.disconnect();
 
@@ -364,8 +364,8 @@ describe("GeminiLiveSession", () => {
     ws.receive({
       toolCall: {
         functionCalls: [
-          { id: "call-1", name: "ask_bob", args: { message: "one" } },
-          { id: "call-2", name: "ask_bob", args: { message: "two" } },
+          { id: "call-1", name: "ask_agent", args: { message: "one" } },
+          { id: "call-2", name: "ask_agent", args: { message: "two" } },
         ],
       },
     });
@@ -377,11 +377,11 @@ describe("GeminiLiveSession", () => {
     await Promise.resolve();
 
     expect(onToolResponse).toHaveBeenCalledTimes(1);
-    expect(onToolResponse).toHaveBeenCalledWith({ id: "call-2", name: "ask_bob", response: { status: "completed", result: { display: "two" } } });
+    expect(onToolResponse).toHaveBeenCalledWith({ id: "call-2", name: "ask_agent", response: { status: "completed", result: { display: "two" } } });
     expect(ws.sent.at(-1)).toEqual({
       toolResponse: {
         functionResponses: [
-          { id: "call-2", name: "ask_bob", response: { status: "completed", result: { display: "two" } } },
+          { id: "call-2", name: "ask_agent", response: { status: "completed", result: { display: "two" } } },
         ],
       },
     });
@@ -412,7 +412,7 @@ describe("GeminiLiveSession", () => {
     ws.receive({
       toolCall: {
         functionCalls: [
-          { id: "call-1", name: "ask_bob", args: { message: "hi" } },
+          { id: "call-1", name: "ask_agent", args: { message: "hi" } },
         ],
       },
     });
@@ -421,7 +421,7 @@ describe("GeminiLiveSession", () => {
     expect(toolCaller).toHaveBeenCalledWith(
       {
         id: "call-1",
-        name: "ask_bob",
+        name: "ask_agent",
         args: { message: "hi" },
       },
       { signal: expect.any(AbortSignal) },
@@ -431,7 +431,7 @@ describe("GeminiLiveSession", () => {
         functionResponses: [
           {
             id: "call-1",
-            name: "ask_bob",
+            name: "ask_agent",
             response: { status: "completed", result: { display: "ok" } },
           },
         ],

@@ -47,6 +47,9 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
+      - name: Check performance budget
+        run: pnpm perf:budget
+
       - name: Run browser smoke
         run: pnpm smoke:browser
 

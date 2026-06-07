@@ -56,18 +56,18 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       };
     case "POINTER_UP":
       if (state.callState !== "hold-to-talk") return state;
-      return { ...state, callState: "bob-thinking", inputMode: "hands-free" };
+      return { ...state, callState: "agent-thinking", inputMode: "hands-free" };
     case "POINTER_CANCEL":
       if (state.callState !== "hold-to-talk") return state;
       return {
         ...state,
-        callState: state.partialTranscript ? "bob-thinking" : "listening",
+        callState: state.partialTranscript ? "agent-thinking" : "listening",
         inputMode: "hands-free",
       };
     case "THINK":
-      return { ...state, callState: "bob-thinking" };
+      return { ...state, callState: "agent-thinking" };
     case "SPEAK":
-      return { ...state, callState: "bob-speaking" };
+      return { ...state, callState: "agent-speaking" };
     case "DONE":
       return {
         ...state,
@@ -115,8 +115,8 @@ export function stateLabel(state: VoiceState, agentName = "Hermes Agent"): strin
     paused: "Paused",
     "user-speaking": "Hearing you",
     "hold-to-talk": "Holding to talk",
-    "bob-thinking": `${agentName} is thinking...`,
-    "bob-speaking": `${agentName} is speaking`,
+    "agent-thinking": `${agentName} is thinking...`,
+    "agent-speaking": `${agentName} is speaking`,
     muted: "Mic paused",
     reconnecting: "Reconnecting...",
     error: state.error || "Something needs attention",

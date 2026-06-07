@@ -5,8 +5,8 @@ export type CallState =
   | "paused"
   | "user-speaking"
   | "hold-to-talk"
-  | "bob-thinking"
-  | "bob-speaking"
+  | "agent-thinking"
+  | "agent-speaking"
   | "muted"
   | "reconnecting"
   | "error";
@@ -14,7 +14,7 @@ export type InputMode = "hands-free" | "hold-to-talk" | "text";
 export type DrawerState = "closed" | "peeking" | "open";
 export interface TranscriptEntry {
   id: string;
-  role: "user" | "bob" | "system";
+  role: "user" | "agent" | "system";
   text: string;
   status:
     | "draft"

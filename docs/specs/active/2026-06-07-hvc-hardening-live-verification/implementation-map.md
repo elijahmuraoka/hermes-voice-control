@@ -8,8 +8,9 @@
   `/tools/cancel`.
 - `apps/server/app/store.py`: confirmation request ids and tool-call
   cancellation persistence.
-- `apps/server/app/tools.py`: allowlisted tools, cancellable `ask_bob`,
-  confirmation proposal records, and cancellation checks.
+- `apps/server/app/tools.py`: allowlisted tools, cancellable `ask_agent`
+  requests, `ask_bob` compatibility alias, confirmation records, and
+  cancellation checks.
 - `apps/server/app/adapters.py`: mock/local Hermes adapters, direct argv launch,
   safe toolset, timeout/cancel/error handling.
 - `apps/server/tests/test_backend.py`: auth, remote guard, confirmation, and

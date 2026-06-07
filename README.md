@@ -24,7 +24,8 @@ can use the name of its own Hermes agent.
 - Persistent transcript drawer for conversation state and recovery.
 - Backend-issued Gemini Live ephemeral tokens so long-lived API keys never reach
   the browser.
-- Allowlisted Hermes-agent tool calls with confirmation records for risky work.
+- Allowlisted Hermes-agent tool calls with read-only confirmation records for
+  risky work.
 - Mock adapters by default so local development does not spend API quota or
   mutate local systems.
 
@@ -37,7 +38,7 @@ Browser voice UI
   -> Gemini Live websocket session in the browser
   -> allowlisted backend tool calls
   -> Hermes agent adapter
-  -> speakable answer or confirmation proposal
+  -> speakable answer or recorded confirmation proposal
 ```
 
 The browser is intentionally untrusted. It can request short-lived Gemini Live
@@ -50,7 +51,7 @@ long-lived Gemini API key or direct access to local tools.
 - **Audio:** Web Audio API worklets for capture, resampling, and PCM playback.
 - **Realtime model path:** Gemini Live websocket protocol.
 - **Backend:** FastAPI, Pydantic, SQLite, uv.
-- **Tool boundary:** allowlisted agent-answer tool calls, confirmation proposal
+- **Tool boundary:** allowlisted agent-answer tool calls, read-only confirmation
   records, and cancellable tool calls.
 - **Private network posture:** localhost first, Tailscale Serve compatible, PIN
   sessions available for remote/private-network exposure.
@@ -68,8 +69,8 @@ Hermes Voice Control is designed for private use before public exposure:
 - No-PIN mode is intended for direct localhost development only.
 - Unknown tools are denied.
 - Agent-answer tool calls are read-only by default.
-- Action-like requests should become confirmation records; approval does not
-  execute external actions in the current implementation.
+- Action-like requests can become confirmation records; approval records intent
+  only and does not execute external actions in v1.
 
 ## Quick Start
 
@@ -77,7 +78,7 @@ Requirements:
 
 - Node.js 22+
 - pnpm 10+
-- Python 3.14+
+- Python 3.11+
 - uv
 
 ```bash
@@ -94,20 +95,22 @@ cd ../..
 Run the test/build checks:
 
 ```bash
+pnpm env:check
 pnpm verify
 ```
 
 ## Local Development
 
-Start the backend in mock mode:
+Start the backend and web app together:
+
+```bash
+pnpm dev
+```
+
+Or start each process separately:
 
 ```bash
 pnpm dev:server
-```
-
-Start the web app:
-
-```bash
 pnpm dev:web
 ```
 
@@ -128,6 +131,7 @@ Live requires a Gemini API key in the backend environment:
 
 ```bash
 HVC_GEMINI_MODE=real
+HVC_GEMINI_MODEL=gemini-2.5-flash-native-audio-latest
 GEMINI_API_KEY=...
 ```
 
@@ -156,23 +160,30 @@ HVC_REQUIRE_PIN=true
 HVC_PIN=<at-least-8-chars-not-common>
 HVC_SECURE_COOKIES=true
 HVC_ALLOW_LOGS_ENDPOINT=false
+HVC_AUDIT_LOG_RETENTION_DAYS=30
+HVC_AUDIT_LOG_MAX_ROWS=5000
 ```
 
 Keep the backend bound to `127.0.0.1` and expose it through a private reverse
 proxy such as Tailscale Serve. Do not use Tailscale Funnel or a public bind
 without a separate security review.
 
+See the [private-network runbook](docs/context/runbooks/private-network.md) for
+Tailscale Serve setup, mode-specific environment checks, and failure modes.
+
 ## Verification Scripts
 
 ```bash
 pnpm verify
 pnpm smoke:browser
+pnpm screenshots:update
 node scripts/e2e-real-gemini-live.mjs
 ```
 
 `pnpm smoke:browser` starts the web app, runs responsive Playwright checks, and
 skips the real backend token-flow test unless `HVC_E2E_RUN_TOKEN_FLOW=true` is
-set. The real Gemini script expects the backend to be running with
+set. `pnpm screenshots:update` rewrites README screenshot assets from the same
+browser smoke path. The real Gemini script expects the backend to be running with
 `HVC_GEMINI_MODE=real`.
 
 ## Docs

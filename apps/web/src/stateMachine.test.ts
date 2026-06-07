@@ -24,7 +24,7 @@ describe("voiceReducer", () => {
     );
     expect(s.callState).toBe("hold-to-talk");
     s = voiceReducer(s, { type: "POINTER_UP" });
-    expect(s.callState).toBe("bob-thinking");
+    expect(s.callState).toBe("agent-thinking");
     s = voiceReducer(s, { type: "DONE" });
     expect(s.callState).toBe("listening");
     s = voiceReducer(s, { type: "POINTER_DOWN" });

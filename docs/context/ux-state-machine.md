@@ -8,15 +8,14 @@ Top-level call states:
 - `listening`
 - `user-speaking`
 - `hold-to-talk`
-- `bob-thinking`
-- `bob-speaking`
+- `agent-thinking`
+- `agent-speaking`
 - `muted`
 - `reconnecting`
 - `error`
 
-`bob-thinking` and `bob-speaking` are legacy internal state ids from the first
-implementation pass. The visible UI labels use the configured Hermes agent
-name.
+`agent-thinking` and `agent-speaking` are generic internal state ids. The
+visible UI labels use the configured Hermes agent name.
 
 Rules:
 

@@ -99,7 +99,7 @@ export default function App() {
 
   function appendTranscript(event: GeminiTranscriptEvent) {
     const role: TranscriptEntry["role"] =
-      event.role === "model" ? "bob" : "user";
+      event.role === "model" ? "agent" : "user";
     const status: TranscriptEntry["status"] = event.final
       ? "complete"
       : "streaming";
@@ -276,7 +276,7 @@ export default function App() {
     const activateHold = () => {
       sessionRef.current?.setHoldToTalk(true);
       sessionRef.current?.setMicrophoneEnabled(true);
-      if (stateRef.current.callState === "bob-speaking")
+      if (stateRef.current.callState === "agent-speaking")
         sessionRef.current?.interrupt();
       dispatch({ type: "POINTER_DOWN" });
     };
@@ -362,7 +362,7 @@ export default function App() {
         ...items,
         {
           id: uid(),
-          role: "bob",
+          role: "agent",
           text: res.result.display,
           status: "complete",
           at: Date.now(),

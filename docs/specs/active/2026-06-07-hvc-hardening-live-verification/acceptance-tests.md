@@ -4,6 +4,7 @@
 
 - `pnpm test`
 - `pnpm build`
+- `pnpm perf:budget`
 - `pnpm docs:verify`
 - `tomoji docs index --verify`
 - `tomoji docs audit`
@@ -38,3 +39,9 @@ node scripts/e2e-real-gemini-live.mjs
   26 tests. Backend: 26 tests with one Starlette/httpx deprecation warning.
 - 2026-06-07: `pnpm build`, `pnpm docs:verify`, `pnpm smoke:browser`, and
   `tomoji docs audit --json` passed after CI/smoke/backend changes.
+- 2026-06-07: follow-up tests added backend audit-log pruning coverage,
+  canonical `ask_agent` coverage with `ask_bob` alias coverage, browser
+  keyboard/focus checks, reduced-motion checks, and bundle-budget verification.
+- 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`,
+  `pnpm smoke:browser`, and `git diff --check`.

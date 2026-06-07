@@ -6,13 +6,13 @@ through Tailscale Serve.
 ## Required posture
 
 ```bash
-HVC_HOST=127.0.0.1
-HVC_REQUIRE_PIN=true
-HVC_PIN=<at-least-8-chars-not-common>
-HVC_SECURE_COOKIES=true
-HVC_ALLOW_LOGS_ENDPOINT=false
-HVC_AUDIT_LOG_RETENTION_DAYS=30
-HVC_AUDIT_LOG_MAX_ROWS=5000
+export HVC_HOST=127.0.0.1
+export HVC_REQUIRE_PIN=true
+export HVC_PIN=<at-least-8-chars-not-common>
+export HVC_SECURE_COOKIES=true
+export HVC_ALLOW_LOGS_ENDPOINT=false
+export HVC_AUDIT_LOG_RETENTION_DAYS=30
+export HVC_AUDIT_LOG_MAX_ROWS=5000
 ```
 
 Run the validator before starting the server:
@@ -32,8 +32,8 @@ Keep unsafe public exposure out of scope for v1:
 ## Mock mode
 
 ```bash
-HVC_GEMINI_MODE=mock
-HVC_HERMES_ADAPTER=mock
+export HVC_GEMINI_MODE=mock
+export HVC_HERMES_ADAPTER=mock
 pnpm env:check
 pnpm dev
 ```
@@ -44,9 +44,9 @@ quota or a local Hermes binary.
 ## Local Hermes mode
 
 ```bash
-HVC_GEMINI_MODE=mock
-HVC_HERMES_ADAPTER=local
-HVC_HERMES_BIN=hermes
+export HVC_GEMINI_MODE=mock
+export HVC_HERMES_ADAPTER=local
+export HVC_HERMES_BIN=hermes
 pnpm env:check
 pnpm dev
 ```
@@ -57,9 +57,9 @@ adapter invokes only `hermes chat -q <prompt> --toolsets safe`.
 ## Real Gemini mode
 
 ```bash
-HVC_GEMINI_MODE=real
-HVC_GEMINI_MODEL=gemini-2.5-flash-native-audio-latest
-GEMINI_API_KEY=<redacted>
+export HVC_GEMINI_MODE=real
+export HVC_GEMINI_MODEL=gemini-2.5-flash-native-audio-latest
+export GEMINI_API_KEY=<redacted>
 pnpm env:check
 cd apps/server && uv pip install -e '.[dev,real-gemini]'
 ```

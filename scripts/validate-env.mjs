@@ -50,9 +50,32 @@ function commandExists(command) {
   return result.status === 0;
 }
 
+function intEnv(name, fallback, { min, max } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = raw.trim();
+  if (!/^-?\d+$/.test(value)) {
+    errors.push(`${name} must be an integer.`);
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    errors.push(`${name} must be a safe integer.`);
+    return fallback;
+  }
+  if (min !== undefined && parsed < min) {
+    errors.push(`${name} must be at least ${min}.`);
+  }
+  if (max !== undefined && parsed > max) {
+    errors.push(`${name} must be at most ${max}.`);
+  }
+  return parsed;
+}
+
 const errors = [];
 const warnings = [];
 const host = process.env.HVC_HOST ?? "127.0.0.1";
+const port = intEnv("HVC_PORT", 8765, { min: 1, max: 65535 });
 const geminiMode = process.env.HVC_GEMINI_MODE ?? "mock";
 const hermesAdapter = process.env.HVC_HERMES_ADAPTER ?? "mock";
 const requirePin = boolEnv("HVC_REQUIRE_PIN", false);
@@ -60,6 +83,9 @@ const allowRemoteBind = boolEnv("HVC_ALLOW_REMOTE_BIND", false);
 const allowNoPinRemote = boolEnv("HVC_ALLOW_NO_PIN_REMOTE", false);
 const allowLogs = boolEnv("HVC_ALLOW_LOGS_ENDPOINT", false);
 const secureCookies = boolEnv("HVC_SECURE_COOKIES", false);
+const sessionTtlSeconds = intEnv("HVC_SESSION_TTL_SECONDS", 86_400, { min: 1 });
+const auditLogRetentionDays = intEnv("HVC_AUDIT_LOG_RETENTION_DAYS", 30, { min: 0 });
+const auditLogMaxRows = intEnv("HVC_AUDIT_LOG_MAX_ROWS", 5_000, { min: 0 });
 
 if (!["mock", "real"].includes(geminiMode)) {
   errors.push("HVC_GEMINI_MODE must be mock or real.");
@@ -99,7 +125,16 @@ if (hermesAdapter === "local" && !commandExists(process.env.HVC_HERMES_BIN ?? "h
 
 const result = {
   ok: errors.length === 0,
-  mode: { host, geminiMode, hermesAdapter, requirePin },
+  mode: {
+    host,
+    port,
+    geminiMode,
+    hermesAdapter,
+    requirePin,
+    sessionTtlSeconds,
+    auditLogRetentionDays,
+    auditLogMaxRows,
+  },
   warnings,
   errors,
 };

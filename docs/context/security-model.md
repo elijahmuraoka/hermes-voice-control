@@ -10,6 +10,10 @@ Defaults:
 - Reject weak configured PINs such as empty values, `000000`, `123456`, or
   values shorter than 8 characters when PIN auth is required.
 - Reject wildcard CORS origins because credentials are enabled.
+- Keep `/logs` disabled unless `HVC_ALLOW_LOGS_ENDPOINT=true` is set for a
+  trusted debugging session.
+- Allow secure session cookies with `HVC_SECURE_COOKIES=true` when serving over
+  HTTPS/private reverse proxy.
 - Deny unknown tools.
 - Execute only the narrow agent-answer tool by default.
 - Queue risky action proposals for explicit confirmation.
@@ -29,6 +33,10 @@ Not allowed by default:
 ## Gemini token broker
 
 `/gemini/ephemeral-token` returns a short-lived Gemini token to the browser, but audit logs only record mode, expiry, and that a token was issued. `/gemini/status` reports whether a real Gemini key is configured as a boolean and never returns the key value.
+
+`/readyz` reports safe runtime posture, including database reachability, Gemini
+mode, adapter mode, PIN requirement, and whether the logs endpoint is enabled.
+It returns `503` when real Gemini mode is selected without a configured API key.
 
 ## Hermes agent bridge
 

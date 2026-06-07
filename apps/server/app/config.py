@@ -52,6 +52,8 @@ class Settings:
     hermes_bin: str = "hermes"
     allow_remote_bind: bool = False
     allow_no_pin_remote: bool = False
+    allow_logs_endpoint: bool = False
+    secure_cookies: bool = False
     debug_errors: bool = False
 
     @classmethod
@@ -70,6 +72,8 @@ class Settings:
             hermes_bin=os.getenv("HVC_HERMES_BIN", "hermes"),
             allow_remote_bind=env_bool("HVC_ALLOW_REMOTE_BIND", False),
             allow_no_pin_remote=env_bool("HVC_ALLOW_NO_PIN_REMOTE", False),
+            allow_logs_endpoint=env_bool("HVC_ALLOW_LOGS_ENDPOINT", False),
+            secure_cookies=env_bool("HVC_SECURE_COOKIES", False),
             debug_errors=env_bool("HVC_DEBUG_ERRORS", False),
         )
 

@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      frontend:
+        patterns:
+          - "*"
+  - package-ecosystem: pip
+    directory: /apps/server
+    schedule:
+      interval: weekly

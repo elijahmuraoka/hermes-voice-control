@@ -94,8 +94,7 @@ cd ../..
 Run the test/build checks:
 
 ```bash
-pnpm test
-pnpm build
+pnpm verify
 ```
 
 ## Local Development
@@ -103,14 +102,13 @@ pnpm build
 Start the backend in mock mode:
 
 ```bash
-cd apps/server
-HVC_GEMINI_MODE=mock uv run uvicorn app.main:app --host 127.0.0.1 --port 8765
+pnpm dev:server
 ```
 
 Start the web app:
 
 ```bash
-pnpm --filter @hvc/web dev --host 127.0.0.1 --port 5173
+pnpm dev:web
 ```
 
 Open `http://127.0.0.1:5173`.
@@ -149,15 +147,33 @@ The local adapter invokes `hermes chat -q <prompt> --toolsets safe`, treats the
 prompt as read-only, and surfaces timeout/cancellation/launch errors without
 hanging the browser session.
 
+## Production Controls
+
+These defaults are intentionally conservative:
+
+```bash
+HVC_REQUIRE_PIN=true
+HVC_PIN=<at-least-8-chars-not-common>
+HVC_SECURE_COOKIES=true
+HVC_ALLOW_LOGS_ENDPOINT=false
+```
+
+Keep the backend bound to `127.0.0.1` and expose it through a private reverse
+proxy such as Tailscale Serve. Do not use Tailscale Funnel or a public bind
+without a separate security review.
+
 ## Verification Scripts
 
 ```bash
-pnpm exec playwright test scripts/browser-responsive.spec.ts --reporter=list
+pnpm verify
+pnpm smoke:browser
 node scripts/e2e-real-gemini-live.mjs
 ```
 
-The Playwright script expects the web app to be running. The real Gemini script
-expects the backend to be running with `HVC_GEMINI_MODE=real`.
+`pnpm smoke:browser` starts the web app, runs responsive Playwright checks, and
+skips the real backend token-flow test unless `HVC_E2E_RUN_TOKEN_FLOW=true` is
+set. The real Gemini script expects the backend to be running with
+`HVC_GEMINI_MODE=real`.
 
 ## Docs
 

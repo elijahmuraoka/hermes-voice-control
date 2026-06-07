@@ -4,6 +4,8 @@ const APP_URL = process.env.HVC_E2E_APP_URL ?? "http://127.0.0.1:5173";
 const AGENT_NAME = process.env.HVC_E2E_AGENT_NAME ?? "Hermes Agent";
 const AGENT_NAME_PATTERN = AGENT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const SCREENSHOT_DIR = "docs/assets/screenshots";
+const WRITE_SCREENSHOTS = process.env.HVC_E2E_WRITE_SCREENSHOTS === "true";
+const RUN_TOKEN_FLOW = process.env.HVC_E2E_RUN_TOKEN_FLOW === "true";
 const viewports = [
   { name: "mobile-320", width: 320, height: 740 },
   { name: "mobile-390", width: 390, height: 844 },
@@ -73,40 +75,47 @@ for (const viewport of viewports) {
         (chatBox?.y ?? 0) + (chatBox?.height ?? 0),
       ).toBeLessThanOrEqual((transcriptBox?.y ?? 0) - 4);
     }
-    await page.screenshot({
-      path: `${SCREENSHOT_DIR}/${viewport.name}.png`,
-      fullPage: true,
-    });
+    if (WRITE_SCREENSHOTS) {
+      await page.screenshot({
+        path: `${SCREENSHOT_DIR}/${viewport.name}.png`,
+        fullPage: true,
+      });
+    }
     expect(consoleErrors).toEqual([]);
   });
 }
 
-test("real backend token flow connects from the browser app", async ({
-  page,
-}) => {
-  const consoleErrors: string[] = [];
-  page.on("console", (msg) => {
-    if (msg.type() === "error") consoleErrors.push(msg.text());
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(APP_URL, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: /Voice orb:/ }).click();
-  await expect(page.getByText("real voice")).toBeVisible({ timeout: 20_000 });
-  await expect(
-    page.getByText(
-      new RegExp(
-        `Connecting voice|Listening|${AGENT_NAME_PATTERN} is speaking|Hold-to-talk`,
-        "i",
-      ),
-    ),
-  ).toBeVisible({ timeout: 20_000 });
-  await page.screenshot({
-    path: `${SCREENSHOT_DIR}/real-browser-connected.png`,
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: /^End$/ }).click();
-  const actionableErrors = consoleErrors.filter(
-    (line) => !line.includes("AudioContext"),
+test.describe("real backend token flow", () => {
+  test.skip(
+    !RUN_TOKEN_FLOW,
+    "Set HVC_E2E_RUN_TOKEN_FLOW=true with a real backend to run this check.",
   );
-  expect(actionableErrors).toEqual([]);
+
+  test("connects from the browser app", async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error") consoleErrors.push(msg.text());
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(APP_URL, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: /Voice orb:/ }).click();
+    await expect(page.getByText("real voice")).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByText(
+        new RegExp(
+          `Connecting voice|Listening|${AGENT_NAME_PATTERN} is speaking|Hold-to-talk`,
+          "i",
+        ),
+      ),
+    ).toBeVisible({ timeout: 20_000 });
+    await page.screenshot({
+      path: `${SCREENSHOT_DIR}/real-browser-connected.png`,
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: /^End$/ }).click();
+    const actionableErrors = consoleErrors.filter(
+      (line) => !line.includes("AudioContext"),
+    );
+    expect(actionableErrors).toEqual([]);
+  });
 });

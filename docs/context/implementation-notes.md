@@ -34,6 +34,12 @@
   allowlist.
 - Backend supports cancellable agent-answer tool calls, `propose_action`
   confirmation records, and `/tools/cancel`.
+- Backend exposes `/readyz` for safe readiness checks. It verifies database
+  reachability and fails when real Gemini mode is configured without an API key.
+- `/logs` is disabled by default and only available with
+  `HVC_ALLOW_LOGS_ENDPOINT=true`.
+- PIN session cookies can be marked secure with `HVC_SECURE_COOKIES=true` for
+  HTTPS/private reverse-proxy deployments.
 - Mock Gemini mode can smoke-test the local app and token broker without real
   Gemini credentials.
 - Real Gemini Live requires `HVC_GEMINI_MODE=real`, `google-genai`, and a Gemini
@@ -61,10 +67,6 @@
   and 7 KB CSS before gzip.
 - 2026-06-07: `tomoji docs index --verify --json` passed with `inSync: true`.
 - 2026-06-07: `tomoji docs audit --json` passed with zero findings.
-- 2026-06-07: local health probes to `127.0.0.1:8765` and `127.0.0.1:5173`
-  failed because the backend and Vite app were not running.
-- 2026-06-07: browser-responsive and real Gemini Live smoke scripts exist but
-  were not rerun in this pass because the app/server were not running.
 - 2026-06-07: public repo target selected:
   `https://github.com/elijahmuraoka/hermes-voice-control`.
 - 2026-06-07: public copy and visible app labels were generalized to a
@@ -75,8 +77,19 @@
 - 2026-06-07: after the generalization pass, `pnpm test`, `pnpm build`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`, and
   `git diff --check` passed.
-- 2026-06-07: `pnpm exec playwright --version` did not find Playwright in the
-  current workspace, so the Playwright responsive script remains pending.
+- 2026-06-07: GitHub issues #1-#10 were created from a production-readiness
+  audit covering CI, browser smoke, real Gemini validation, auth/log hardening,
+  generic internal ids, dependency pinning, runbooks, observability, UX
+  budgets, and action semantics.
+- 2026-06-07: CI workflow runs `pnpm test`, `pnpm build`,
+  `pnpm smoke:browser`, and `pnpm docs:verify`. Root `@playwright/test`,
+  repo-contained docs verification, and Dependabot config were added.
+- 2026-06-07: `pnpm smoke:browser` passed four responsive viewport tests and
+  skipped only the explicitly gated real backend token-flow test.
+- 2026-06-07: after auth/readiness hardening, `pnpm test` passed. Web: 4 files /
+  26 tests. Backend: 26 tests with one Starlette/httpx deprecation warning.
+- 2026-06-07: `pnpm build`, `pnpm docs:verify`, and `tomoji docs audit --json`
+  passed after productionization changes.
 
 ## Remaining gaps
 
@@ -86,6 +99,6 @@
   support confirmation-gated actions.
 - Decide the default Gemini voice/personality guidance for Hermes agents once
   real audio is enabled.
-- If exposing beyond local/Tailscale, add an explicit auth/rate-limit/reverse
-  proxy review before changing bind or access posture.
-- Add CI after the first public push.
+- Complete log retention/pruning and broader observability work.
+- Finish a credentialed real Gemini Live smoke run.
+- Decide and implement or explicitly defer confirmation-gated action execution.

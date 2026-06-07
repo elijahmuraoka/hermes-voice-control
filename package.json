@@ -6,6 +6,9 @@
   "scripts": {
     "test": "pnpm --filter @hvc/web test && cd apps/server && uv run pytest",
     "build": "pnpm --filter @hvc/web build",
+    "docs:verify": "node scripts/verify-docs.mjs",
+    "verify": "pnpm test && pnpm build && pnpm docs:verify",
+    "smoke:browser": "node scripts/run-browser-smoke.mjs",
     "dev:web": "pnpm --filter @hvc/web dev --host 127.0.0.1 --port 5173",
     "dev:server": "cd apps/server && uv run uvicorn app.main:app --host 127.0.0.1 --port 8765"
   },
@@ -15,5 +18,8 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@10.26.0"
+  "packageManager": "pnpm@10.26.0",
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
 }

@@ -19,7 +19,8 @@ Phone/laptop browser over localhost or Tailscale
 - `apps/web`: React voice UI, orb state machine, audio worklets, Gemini Live
   protocol wrapper, transcript drawer, and text fallback.
 - `apps/server`: FastAPI auth/session layer, Gemini token broker, tool allowlist,
-  SQLite store, confirmation queue, and Hermes adapter implementations.
+  SQLite store, confirmation queue, readiness/log controls, and Hermes adapter
+  implementations.
 - `scripts/browser-responsive.spec.ts`: Playwright responsive/browser smoke with
   fake microphone permission and screenshot capture.
 - `scripts/e2e-real-gemini-live.mjs`: credentialed Gemini Live smoke that mints
@@ -45,6 +46,10 @@ late responses for that call to be ignored.
 SQLite stores sessions, transcripts/events, confirmations, and tool-call
 cancellation markers. Confirmation approval is intentionally not an external
 action executor; it records intent for a future reviewed action path.
+
+`/healthz` is a basic liveness endpoint. `/readyz` checks database reachability
+and safe runtime posture without exposing secrets. `/logs` is disabled by
+default and requires `HVC_ALLOW_LOGS_ENDPOINT=true`.
 
 ## Context Documents
 

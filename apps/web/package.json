@@ -1,1 +1,29 @@
-{"name":"@hvc/web","version":"0.1.0","private":true,"type":"module","scripts":{"dev":"vite","build":"tsc -b && vite build","test":"vitest run","preview":"vite preview"},"dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","typescript":"latest","react":"latest","react-dom":"latest","lucide-react":"latest"},"devDependencies":{"vitest":"latest","@testing-library/react":"latest","@testing-library/user-event":"latest","@testing-library/jest-dom":"latest","jsdom":"latest","@types/react":"latest","@types/react-dom":"latest"}}
+{
+  "name": "@hvc/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "lucide-react": "^1.17.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "jsdom": "^29.1.1",
+    "vitest": "^4.1.8"
+  }
+}

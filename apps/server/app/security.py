@@ -65,5 +65,5 @@ class AuthManager:
         return token_hash
 
     @staticmethod
-    def set_cookie(response: Response, token: str, expires_at: datetime) -> None:
-        response.set_cookie("hvc_session", token, httponly=True, samesite="lax", secure=False, expires=expires_at)
+    def set_cookie(response: Response, token: str, expires_at: datetime, secure: bool = False) -> None:
+        response.set_cookie("hvc_session", token, httponly=True, samesite="lax", secure=secure, expires=expires_at)

@@ -62,6 +62,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "Internal server error", "code": "INTERNAL_ERROR"})
     @app.get("/healthz")
     def healthz(): return {"ok": True}
+    @app.get("/readyz")
+    def readyz():
+        checks = {
+            "database": "unknown",
+            "gemini_mode": broker.mode,
+            "gemini_api_key_configured": broker.api_key_configured,
+            "hermes_adapter": settings.hermes_adapter,
+            "pin_required": settings.require_pin,
+            "logs_endpoint_enabled": settings.allow_logs_endpoint,
+        }
+        ok = True
+        try:
+            with store.connect() as conn:
+                conn.execute("SELECT 1").fetchone()
+            checks["database"] = "ok"
+        except Exception:
+            checks["database"] = "failed"
+            ok = False
+        if broker.mode == "real" and not broker.api_key_configured:
+            ok = False
+        status_code = 200 if ok else 503
+        return JSONResponse(status_code=status_code, content={"ok": ok, "checks": checks})
     @app.post("/auth/pin")
     def auth_pin(payload: PinRequest, response: Response, request: Request):
         if not settings.require_pin:
@@ -69,9 +91,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="PIN auth is disabled")
         client_key = request.client.host if request.client else "local"
         if not auth.verify_pin(payload.pin, client_key=client_key):
-            store.log("auth.pin", "failed", {"pin": payload.pin}, error_code="INVALID_PIN")
+            store.log("auth.pin", "failed", {"pin_supplied": bool(payload.pin)}, error_code="INVALID_PIN")
             raise HTTPException(status_code=401, detail="Invalid PIN")
-        session = auth.create_session(); auth.set_cookie(response, session.token, session.expires_at)
+        session = auth.create_session(); auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
         store.log("auth.pin", "success", {"session_id": session.token})
         return {"ok": True, "session_id": session.token, "expires_at": session.expires_at.isoformat()}
     @app.post("/auth/logout")
@@ -107,6 +129,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/confirmations/{confirmation_id}/reject")
     def reject(confirmation_id: str, session_hash: str = Depends(session_dep)): return tools.reject(confirmation_id, session_hash)
     @app.get("/logs")
-    def logs(limit: int = 50, session_hash: str = Depends(session_dep)): return {"items": store.recent_logs(limit)}
+    def logs(limit: int = 50, session_hash: str = Depends(session_dep)):
+        if not settings.allow_logs_endpoint:
+            raise HTTPException(status_code=404, detail="Logs endpoint is disabled")
+        return {"items": store.recent_logs(limit)}
     return app
 app = create_app()

@@ -8,19 +8,42 @@ from app.main import create_app
 
 TEST_PIN = "voice-9Kq2"
 
-def make_client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(Settings(pin=TEST_PIN, db_path=tmp_path / "test.sqlite3")))
+def make_client(tmp_path: Path, **overrides) -> TestClient:
+    settings = Settings(pin=TEST_PIN, db_path=tmp_path / "test.sqlite3", allow_logs_endpoint=True, **overrides)
+    return TestClient(create_app(settings))
 def make_real_gemini_client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(Settings(pin=TEST_PIN, db_path=tmp_path / "test-real-gemini.sqlite3", gemini_mode="real")))
 def make_pin_client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, db_path=tmp_path / "test-pin.sqlite3")))
+    return TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, allow_logs_endpoint=True, db_path=tmp_path / "test-pin.sqlite3")))
 def login(client: TestClient) -> str:
     res = client.post("/auth/pin", json={"pin": TEST_PIN}); assert res.status_code == 200; return res.json()["session_id"]
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
+def test_readyz_reports_safe_runtime_posture(tmp_path):
+    res = make_client(tmp_path).get("/readyz")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["checks"]["database"] == "ok"
+    assert body["checks"]["gemini_mode"] == "mock"
+    assert body["checks"]["gemini_api_key_configured"] is False
+    assert TEST_PIN not in res.text
+def test_readyz_fails_real_gemini_without_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    res = make_real_gemini_client(tmp_path).get("/readyz")
+    assert res.status_code == 503
+    assert res.json()["ok"] is False
+    assert res.json()["checks"]["gemini_mode"] == "real"
 def test_pin_auth_and_session(tmp_path):
     client = make_pin_client(tmp_path); assert client.post("/auth/pin", json={"pin": "wrong"}).status_code == 401
     token = login(client); assert client.get("/auth/session", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+def test_pin_cookie_can_be_marked_secure(tmp_path):
+    client = TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, secure_cookies=True, db_path=tmp_path / "secure-cookie.sqlite3")))
+    res = client.post("/auth/pin", json={"pin": TEST_PIN})
+    assert res.status_code == 200
+    assert "secure" in res.headers["set-cookie"].lower()
 def test_pin_endpoint_disabled_by_default(tmp_path):
     client = make_client(tmp_path)
     assert client.post("/auth/pin", json={"pin": "12345678"}).status_code == 404
@@ -67,6 +90,19 @@ def test_mock_gemini_token_not_logged_raw(tmp_path):
     assert "tailscale-local" not in logs
     assert "[REDACTED]" in logs
     assert "token_issued" in logs
+
+def test_logs_endpoint_disabled_by_default(tmp_path):
+    client = TestClient(create_app(Settings(pin=TEST_PIN, db_path=tmp_path / "logs-disabled.sqlite3")))
+    assert client.post("/gemini/ephemeral-token").status_code == 200
+    assert client.get("/logs").status_code == 404
+
+def test_failed_pin_log_does_not_store_supplied_pin(tmp_path):
+    client = make_pin_client(tmp_path)
+    assert client.post("/auth/pin", json={"pin": "voice-secret-pin"}).status_code == 401
+    token = login(client)
+    logs = client.get("/logs", headers={"Authorization": f"Bearer {token}"}).text
+    assert "voice-secret-pin" not in logs
+    assert "pin_supplied" in logs
 def test_real_gemini_status_only_reports_key_presence(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "super-secret-gemini-key")
     res = make_real_gemini_client(tmp_path).get("/gemini/status")

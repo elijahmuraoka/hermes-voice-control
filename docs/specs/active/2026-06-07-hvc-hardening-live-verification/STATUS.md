@@ -9,7 +9,7 @@
 - `tomoji docs index --verify --json` passed.
 - `tomoji docs audit --json` passed with zero findings.
 - `pnpm test` and `pnpm build` passed in the current working tree.
-- Full Playwright responsive and real Gemini Live smoke checks remain pending.
+- Real Gemini Live smoke remains pending until credentials are available.
 - Public repo target selected:
   `https://github.com/elijahmuraoka/hermes-voice-control`.
 - Public README and visible app copy were generalized from a named local
@@ -20,5 +20,10 @@
 - `pnpm test`, `pnpm build`, `tomoji docs index --verify --json`,
   `tomoji docs audit --json`, and `git diff --check` passed after the
   generalization pass.
-- The Playwright responsive script was not rerun in this pass because
-  `@playwright/test` is not installed in the current workspace.
+- GitHub issues #1-#10 were created from the production-readiness audit.
+- CI now runs tests, build, browser smoke, and repo-contained docs verification.
+  Dependabot, root `pnpm docs:verify`, and root `pnpm smoke:browser` were added.
+- `pnpm smoke:browser` passed four responsive viewport checks and skipped only
+  the explicitly gated real backend token-flow test.
+- Backend hardening added configurable secure cookies, a default-disabled logs
+  endpoint, `/readyz`, and tests for those controls.

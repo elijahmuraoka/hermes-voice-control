@@ -17,10 +17,12 @@ export async function login(pin: string) {
   );
 }
 export async function getGeminiToken() {
-  return jsonFetch<{ token: string; expires_at: string; mode: string }>(
-    "/gemini/ephemeral-token",
-    { method: "POST" },
-  );
+  return jsonFetch<{
+    token: string;
+    expires_at: string;
+    mode: string;
+    model?: string | null;
+  }>("/gemini/ephemeral-token", { method: "POST" });
 }
 export async function sendText(message: string, transcript: TranscriptEntry[]) {
   return jsonFetch<{

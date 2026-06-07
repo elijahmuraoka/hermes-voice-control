@@ -87,7 +87,9 @@ def test_pin_mode_requires_non_default_strong_pin(tmp_path):
 def test_mock_gemini_token_not_logged_raw(tmp_path):
     client = make_client(tmp_path)
     res = client.post("/gemini/ephemeral-token"); assert res.status_code == 200
-    gemini_token = res.json()["token"]
+    body = res.json()
+    gemini_token = body["token"]
+    assert body["model"] == "gemini-2.5-flash-native-audio-latest"
     logs = client.get("/logs").text
     assert gemini_token not in logs
     assert "tailscale-local" not in logs

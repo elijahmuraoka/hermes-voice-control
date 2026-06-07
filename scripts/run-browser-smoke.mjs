@@ -41,6 +41,7 @@ async function main() {
   server.stdout.on("data", (chunk) => process.stdout.write(chunk));
   server.stderr.on("data", (chunk) => process.stderr.write(chunk));
 
+  let exitCode = 0;
   try {
     await waitForApp(appUrl);
     const smoke = spawnCommand(
@@ -55,7 +56,7 @@ async function main() {
       { env: { HVC_E2E_APP_URL: appUrl } },
     );
     const result = await waitForExit(smoke);
-    if (result.code !== 0) process.exit(result.code ?? 1);
+    if (result.code !== 0) exitCode = result.code ?? 1;
   } finally {
     server.kill("SIGINT");
     await Promise.race([
@@ -63,6 +64,7 @@ async function main() {
       new Promise((resolve) => setTimeout(resolve, 2_000)),
     ]);
   }
+  if (exitCode !== 0) process.exit(exitCode);
 }
 
 main().catch((error) => {

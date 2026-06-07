@@ -9,6 +9,7 @@ class EphemeralToken:
     token: str
     expires_at: datetime
     mode: str
+    model: str | None = None
 
 class GeminiTokenBroker:
     mode = "unknown"
@@ -22,9 +23,10 @@ class GeminiTokenBroker:
 
 class MockGeminiTokenBroker(GeminiTokenBroker):
     mode = "mock"
+    model = "gemini-2.5-flash-native-audio-latest"
 
     def create_token(self) -> EphemeralToken:
-        return EphemeralToken("mock_gemini_ephemeral_" + secrets.token_urlsafe(18), datetime.now(UTC) + timedelta(minutes=5), "mock")
+        return EphemeralToken("mock_gemini_ephemeral_" + secrets.token_urlsafe(18), datetime.now(UTC) + timedelta(minutes=5), "mock", self.model)
 
 class RealGeminiTokenBroker(GeminiTokenBroker):
     mode = "real"
@@ -52,7 +54,7 @@ class RealGeminiTokenBroker(GeminiTokenBroker):
         name = getattr(token, "name", None)
         if not name:
             raise RuntimeError("Gemini did not return an ephemeral token")
-        return EphemeralToken(name, expires_at, "real")
+        return EphemeralToken(name, expires_at, "real", self.model)
 
 def build_broker(mode: str) -> GeminiTokenBroker:
     return RealGeminiTokenBroker() if mode == "real" else MockGeminiTokenBroker()

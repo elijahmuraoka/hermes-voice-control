@@ -110,7 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def gemini_token(session_hash: str = Depends(session_dep)):
         token = broker.create_token()
         store.log("gemini.token", "created", {"mode": token.mode, "token_issued": True, "expires_at": token.expires_at.isoformat()}, session_hash=session_hash)
-        return {"token": token.token, "expires_at": token.expires_at.isoformat(), "mode": token.mode}
+        return {"token": token.token, "expires_at": token.expires_at.isoformat(), "mode": token.mode, "model": token.model}
     @app.get("/gemini/status")
     def gemini_status(session_hash: str = Depends(session_dep)):
         return {"mode": broker.mode, "api_key_configured": broker.api_key_configured}

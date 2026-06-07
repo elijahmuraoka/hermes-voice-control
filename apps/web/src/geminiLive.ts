@@ -94,12 +94,14 @@ export class GeminiLiveSession {
     this.callbacks.onToken?.({
       expires_at: token.expires_at,
       mode: token.mode,
+      model: token.model,
     });
 
+    const setupModel = this.sessionOptions.model ?? token.model ?? this.options.model;
     const socket = this.webSocketFactory(buildGeminiLiveUrl(token.token));
     this.socket = socket;
     socket.onopen = () => {
-      this.sendJson(this.buildSetupMessage());
+      this.sendJson(this.buildSetupMessage(setupModel));
       this.emitStatus("connected");
     };
     socket.onmessage = (event) => void this.handleMessage(event);
@@ -145,9 +147,9 @@ export class GeminiLiveSession {
     });
   }
 
-  private buildSetupMessage(): Record<string, unknown> {
+  private buildSetupMessage(model: string): Record<string, unknown> {
     const setup: Record<string, unknown> = {
-      model: toGeminiModelResource(this.options.model),
+      model: toGeminiModelResource(model),
       generationConfig: this.sessionOptions.generationConfig ?? {
         responseModalities: ["AUDIO"],
       },

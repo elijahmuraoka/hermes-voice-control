@@ -107,16 +107,16 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       return state;
   }
 }
-export function stateLabel(state: VoiceState): string {
+export function stateLabel(state: VoiceState, agentName = "Hermes Agent"): string {
   const labels: Record<string, string> = {
-    idle: "Tap to talk to Bob",
+    idle: `Tap to talk to ${agentName}`,
     connecting: "Connecting voice...",
     listening: "Listening hands-free",
     paused: "Paused",
     "user-speaking": "Hearing you",
     "hold-to-talk": "Holding to talk",
-    "bob-thinking": "Bob is thinking...",
-    "bob-speaking": "Bob is speaking",
+    "bob-thinking": `${agentName} is thinking...`,
+    "bob-speaking": `${agentName} is speaking`,
     muted: "Mic paused",
     reconnecting: "Reconnecting...",
     error: state.error || "Something needs attention",

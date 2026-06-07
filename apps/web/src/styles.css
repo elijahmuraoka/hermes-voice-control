@@ -151,6 +151,8 @@ input {
 
 .orb-stage {
   z-index: 1;
+  width: 100%;
+  max-width: min(100%, 640px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -265,13 +267,17 @@ input {
 }
 
 .state-copy {
+  width: 100%;
+  max-width: 100%;
   text-align: center;
 }
 
 .state-copy p {
   margin: 0;
+  max-width: 100%;
   font-size: 28px;
   font-family: Georgia, serif;
+  text-wrap: balance;
 }
 
 .state-copy span {
@@ -498,14 +504,19 @@ input {
 @media (max-width: 430px) {
   .topbar {
     align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
   }
   .eyebrow {
     font-size: 11px;
   }
   .topbar h1 {
     font-size: 46px;
+    max-width: 100%;
   }
   .status-pill {
+    align-self: flex-start;
+    max-width: 100%;
     padding: 8px 10px;
   }
   .state-copy p {

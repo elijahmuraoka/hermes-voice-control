@@ -30,3 +30,10 @@ node scripts/e2e-real-gemini-live.mjs
   responsive and real Gemini smoke were not rerun in this pass.
 - 2026-06-07: public repo target selected:
   `https://github.com/elijahmuraoka/hermes-voice-control`.
+- 2026-06-07: README screenshots regenerated from local Vite with Chrome
+  DevTools Protocol at 390x844 and 1280x900 after the public copy was
+  generalized to a configurable Hermes agent.
+- 2026-06-07: `git diff --check` passed and README references exactly one
+  mobile screenshot plus one desktop screenshot.
+- 2026-06-07: `pnpm exec playwright --version` did not find Playwright in the
+  current workspace, so the Playwright responsive script remains pending.

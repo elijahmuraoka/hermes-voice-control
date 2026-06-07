@@ -1,27 +1,33 @@
 # Hermes integration
 
-The app integrates with Bob/Hermes through an adapter interface.
+The app integrates with a local Hermes-compatible agent through an adapter
+interface.
 
 Adapters:
 
 - `MockHermesAdapter` — default; deterministic tests and local UX development.
 - `LocalHermesAdapter` — optional; invokes local Hermes only when `HVC_HERMES_ADAPTER=local`.
 
-The adapter is intentionally narrow: `ask_bob(message, mode, transcript_window) -> speakable response`.
+The adapter is intentionally narrow: an agent-answer request becomes a
+speakable response. The current internal tool id is `ask_bob` for compatibility
+with the first implementation pass, but the user-facing product is configurable
+for any Hermes agent.
 
 Safety contract:
 
-- `ask_bob` is for answers only. It accepts `quick` and `deep` modes.
+- Agent-answer requests are for answers only. They accept `quick` and `deep`
+  modes.
 - The backend denies unknown tools.
 - Risky requests should be represented as `propose_action` confirmation records.
 - Approving a confirmation records approval only; it does not execute a real Hermes/local action.
-- `LocalHermesAdapter` invokes the configured Hermes binary only for `ask_bob` and frames the prompt as read-only.
+- `LocalHermesAdapter` invokes the configured Hermes binary only for
+  agent-answer requests and frames the prompt as read-only.
 
 ## Local adapter shape
 
 The local adapter runs the configured Hermes binary directly with an argument
 array rather than through a shell. Its default binary path is the local Hermes
-agent virtualenv path on Bob's machine, and it invokes:
+agent binary path from configuration, and it invokes:
 
 ```bash
 hermes chat -q <prompt> --toolsets safe

@@ -14,7 +14,7 @@ Phone/laptop browser over Tailscale
   -> browser Gemini Live session
   -> Gemini tool call to backend
   -> tool policy + confirmation queue
-  -> Bob/Hermes adapter
+  -> Hermes agent adapter
 ```
 
 The browser is untrusted. It receives only short-lived Gemini ephemeral tokens

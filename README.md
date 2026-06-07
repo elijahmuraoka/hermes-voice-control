@@ -1,15 +1,15 @@
 # Hermes Voice Control
 
 Hermes Voice Control is a private-by-default browser voice surface for talking
-to Bob from a phone or laptop.
+to your Hermes agent from a phone or laptop.
 
-Bob is the named assistant/persona this app is built around. The app keeps that
-experience simple: open the page, tap the orb, talk naturally, interrupt by
-holding the orb, and keep a transcript open without ending the conversation.
+The app keeps the experience simple: open the page, tap the orb, talk
+naturally, interrupt by holding the orb, and keep a transcript open without
+ending the conversation. The visible agent name is configurable, so each setup
+can use the name of its own Hermes agent.
 
 <p align="center">
-  <img src="docs/assets/screenshots/mobile-idle.png" width="245" alt="Hermes Voice Control mobile idle screen for Bob" />
-  <img src="docs/assets/screenshots/mobile-listening.png" width="245" alt="Hermes Voice Control mobile listening screen for Bob" />
+  <img src="docs/assets/screenshots/mobile-idle.png" width="260" alt="Hermes Voice Control mobile voice screen for a Hermes agent" />
 </p>
 
 <p align="center">
@@ -18,13 +18,13 @@ holding the orb, and keep a transcript open without ending the conversation.
 
 ## What It Does
 
-- Mobile-first voice UI centered on a single Bob orb.
+- Mobile-first voice UI centered on a single agent orb.
 - Hands-free conversation, hold-to-talk, mute, end, and barge-in gestures.
 - Text fallback for moments when voice is not right.
 - Persistent transcript drawer for conversation state and recovery.
 - Backend-issued Gemini Live ephemeral tokens so long-lived API keys never reach
   the browser.
-- Allowlisted Bob/Hermes tool calls with confirmation records for risky work.
+- Allowlisted Hermes-agent tool calls with confirmation records for risky work.
 - Mock adapters by default so local development does not spend API quota or
   mutate local systems.
 
@@ -36,7 +36,7 @@ Browser voice UI
   -> Gemini ephemeral token broker
   -> Gemini Live websocket session in the browser
   -> allowlisted backend tool calls
-  -> Bob/Hermes adapter
+  -> Hermes agent adapter
   -> speakable answer or confirmation proposal
 ```
 
@@ -50,8 +50,8 @@ long-lived Gemini API key or direct access to local tools.
 - **Audio:** Web Audio API worklets for capture, resampling, and PCM playback.
 - **Realtime model path:** Gemini Live websocket protocol.
 - **Backend:** FastAPI, Pydantic, SQLite, uv.
-- **Tool boundary:** allowlisted `ask_bob`, confirmation proposal records, and
-  cancellable tool calls.
+- **Tool boundary:** allowlisted agent-answer tool calls, confirmation proposal
+  records, and cancellable tool calls.
 - **Private network posture:** localhost first, Tailscale Serve compatible, PIN
   sessions available for remote/private-network exposure.
 - **Verification:** Vitest, pytest, Playwright responsive smoke scripts, and a
@@ -67,7 +67,7 @@ Hermes Voice Control is designed for private use before public exposure:
 - `HVC_REQUIRE_PIN=true` enables server-side PIN/session auth.
 - No-PIN mode is intended for direct localhost development only.
 - Unknown tools are denied.
-- `ask_bob` is answer/read-only by default.
+- Agent-answer tool calls are read-only by default.
 - Action-like requests should become confirmation records; approval does not
   execute external actions in the current implementation.
 
@@ -115,6 +115,14 @@ pnpm --filter @hvc/web dev --host 127.0.0.1 --port 5173
 
 Open `http://127.0.0.1:5173`.
 
+To customize the visible assistant name, set:
+
+```bash
+VITE_HVC_AGENT_NAME="My Hermes Agent"
+```
+
+Use any name that makes sense for your Hermes agent.
+
 ## Real Gemini Live Mode
 
 Mock mode verifies the local UI, token broker, and backend shape. Real Gemini
@@ -127,10 +135,10 @@ GEMINI_API_KEY=...
 
 Then start the backend and web app as above.
 
-## Optional Local Hermes Adapter
+## Optional Local Hermes Agent Adapter
 
-The default Hermes adapter is mock. To connect a local Hermes-compatible CLI,
-set:
+The default Hermes agent adapter is mock. To connect a local Hermes-compatible
+CLI or agent wrapper, set:
 
 ```bash
 HVC_HERMES_ADAPTER=local

@@ -18,6 +18,7 @@ import type { TranscriptEntry } from "./types";
 import { VoiceOrb } from "./components/VoiceOrb";
 import { TranscriptDrawer } from "./components/TranscriptDrawer";
 import { FloatingChat } from "./components/FloatingChat";
+import { agentName, agentNounLower } from "./config";
 import "./styles.css";
 
 const uid = () => Math.random().toString(36).slice(2);
@@ -167,7 +168,7 @@ export default function App() {
       },
       onTranscript: appendTranscript,
       onToolCall: (call) =>
-        appendSystem(`Bob is using ${call.name}.`, "streaming"),
+        appendSystem(`${agentName} is using ${call.name}.`, "streaming"),
       onToolResponse: (response) =>
         appendSystem(`${response.name} finished.`, "complete"),
       onError: (error) => {
@@ -218,7 +219,7 @@ export default function App() {
       dispatch({
         type: "ERROR",
         error:
-          "Could not prepare Bob voice. Confirm you are on the private network and try again.",
+          `Could not prepare ${agentNounLower} voice. Confirm you are on the private network and try again.`,
       });
     } finally {
       connectingRef.current = false;
@@ -371,7 +372,7 @@ export default function App() {
       window.setTimeout(() => dispatch({ type: "DONE" }), 900);
     } catch {
       appendSystem(
-        "Text fallback could not reach Bob. The draft was not lost by the server because it never left this UI successfully.",
+        `Text fallback could not reach ${agentNounLower}. The draft was not lost by the server because it never left this UI successfully.`,
         "failed",
       );
       dispatch({ type: "ERROR", error: "Text fallback failed." });
@@ -384,7 +385,7 @@ export default function App() {
         <header className="topbar">
           <div>
             <span className="eyebrow">private voice control</span>
-            <h1>Bob</h1>
+            <h1>{agentName}</h1>
           </div>
           <div className="status-pill">
             <Sparkles size={14} />
@@ -396,6 +397,7 @@ export default function App() {
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           onPointerCancel={cancelPress}
+          agentName={agentName}
         />
         <div className="control-row">
           <button type="button" onClick={toggleMute}>
@@ -411,11 +413,13 @@ export default function App() {
           onSubmit={submitText}
           onFocus={focusText}
           onBlur={blurText}
+          agentNoun={agentNounLower}
         />
       </section>
       <TranscriptDrawer
         drawer={state.drawer}
         entries={entries}
+        agentName={agentName}
         onToggle={() =>
           dispatch({
             type: "SET_DRAWER",

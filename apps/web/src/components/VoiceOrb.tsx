@@ -3,12 +3,14 @@ import { stateLabel } from "../stateMachine";
 import type { VoiceState } from "../types";
 interface Props {
   state: VoiceState;
+  agentName: string;
   onPointerDown: React.PointerEventHandler<HTMLButtonElement>;
   onPointerUp: React.PointerEventHandler<HTMLButtonElement>;
   onPointerCancel: React.PointerEventHandler<HTMLButtonElement>;
 }
 export function VoiceOrb({
   state,
+  agentName,
   onPointerDown,
   onPointerUp,
   onPointerCancel,
@@ -19,7 +21,7 @@ export function VoiceOrb({
       <button
         type="button"
         className={cls}
-        aria-label={`Voice orb: ${stateLabel(state)}`}
+        aria-label={`Voice orb: ${stateLabel(state, agentName)}`}
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
@@ -32,20 +34,20 @@ export function VoiceOrb({
         <span className="orb-wave w2" />
       </button>
       <div className="state-copy">
-        <p>{stateLabel(state)}</p>
-        <span>{subcopy(state.callState)}</span>
+        <p>{stateLabel(state, agentName)}</p>
+        <span>{subcopy(state.callState, agentName)}</span>
       </div>
     </div>
   );
 }
-function subcopy(callState: CallState) {
+function subcopy(callState: CallState, agentName: string) {
   switch (callState) {
     case "hold-to-talk":
       return "Release to finish the turn.";
     case "listening":
       return "Tap to pause. Hold for a longer thought.";
     case "paused":
-      return "Tap the orb to resume Bob.";
+      return `Tap the orb to resume ${agentName}.`;
     case "bob-speaking":
       return "Hold the orb to barge in.";
     case "error":

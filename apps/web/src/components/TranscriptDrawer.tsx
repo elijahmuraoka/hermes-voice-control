@@ -3,9 +3,15 @@ import type { DrawerState, TranscriptEntry } from "../types";
 interface Props {
   drawer: DrawerState;
   entries: TranscriptEntry[];
+  agentName: string;
   onToggle: () => void;
 }
-export function TranscriptDrawer({ drawer, entries, onToggle }: Props) {
+export function TranscriptDrawer({
+  drawer,
+  entries,
+  agentName,
+  onToggle,
+}: Props) {
   return (
     <aside
       className={`transcript drawer-${drawer}`}
@@ -36,7 +42,7 @@ export function TranscriptDrawer({ drawer, entries, onToggle }: Props) {
               <div className="message-meta">
                 <span>
                   {e.role === "bob"
-                    ? "Bob"
+                    ? agentName
                     : e.role === "user"
                       ? "You"
                       : "System"}

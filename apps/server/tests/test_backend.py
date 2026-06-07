@@ -73,11 +73,11 @@ def test_real_gemini_status_only_reports_key_presence(tmp_path, monkeypatch):
     assert res.status_code == 200
     assert res.json() == {"mode": "real", "api_key_configured": True}
     assert "super-secret-gemini-key" not in res.text
-def test_tool_allowlist_and_mock_bob(tmp_path):
+def test_tool_allowlist_and_mock_agent(tmp_path):
     client = make_client(tmp_path)
     denied = client.post("/tools/call", json={"request_id": "r1", "tool": "shell", "arguments": {}}); assert denied.status_code == 403
     ok = client.post("/tools/call", json={"request_id": "r2", "tool": "ask_bob", "arguments": {"message": "hello", "mode": "quick"}})
-    assert ok.status_code == 200; assert ok.json()["status"] == "completed"; assert "Mock Bob heard" in ok.json()["result"]["speakable"]
+    assert ok.status_code == 200; assert ok.json()["status"] == "completed"; assert "Mock Hermes agent heard" in ok.json()["result"]["speakable"]
 def test_ask_bob_denies_action_mode(tmp_path):
     client = make_client(tmp_path)
     res = client.post("/tools/call", json={"request_id": "r-action", "tool": "ask_bob", "arguments": {"message": "send it", "mode": "action"}})

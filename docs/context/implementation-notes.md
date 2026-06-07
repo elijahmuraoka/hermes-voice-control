@@ -7,13 +7,13 @@
 - The orb is both status indicator and primary input control.
 - Hands-free and hold-to-talk are complementary modes.
 - Tap starts, pauses, or resumes. Hold captures a longer thought. Holding while
-  Bob is speaking is the interrupt/barge-in gesture.
+  the Hermes agent is speaking is the interrupt/barge-in gesture.
 - No visible Interrupt button and no default PIN wall for direct localhost
   development. Tailscale Serve should use PIN/session auth.
 - Transcript drawer and floating text fallback are first-class.
 - Backend defaults to mock Gemini and mock Hermes so local development cannot
   accidentally spend API quota or mutate local systems.
-- FastAPI is used because the eventual real Bob/Hermes adapter is Python-native.
+- FastAPI is used because the local Hermes adapter path is Python-native.
 - Confirmation approval records intent only. No real external action execution
   is wired to approvals.
 
@@ -32,8 +32,8 @@
 - Gemini Live client sends `audioStreamEnd` when finalizing captured audio.
 - Gemini Live tool calls are routed through backend `/tools/call` with an
   allowlist.
-- Backend supports cancellable `ask_bob`, `propose_action` confirmation records,
-  and `/tools/cancel`.
+- Backend supports cancellable agent-answer tool calls, `propose_action`
+  confirmation records, and `/tools/cancel`.
 - Mock Gemini mode can smoke-test the local app and token broker without real
   Gemini credentials.
 - Real Gemini Live requires `HVC_GEMINI_MODE=real`, `google-genai`, and a Gemini
@@ -67,6 +67,16 @@
   were not rerun in this pass because the app/server were not running.
 - 2026-06-07: public repo target selected:
   `https://github.com/elijahmuraoka/hermes-voice-control`.
+- 2026-06-07: public copy and visible app labels were generalized to a
+  configurable Hermes agent name via `VITE_HVC_AGENT_NAME`.
+- 2026-06-07: README screenshots were regenerated from local Vite using Chrome
+  DevTools Protocol at 390x844 and 1280x900. The README now embeds one mobile
+  screenshot and one desktop screenshot.
+- 2026-06-07: after the generalization pass, `pnpm test`, `pnpm build`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`, and
+  `git diff --check` passed.
+- 2026-06-07: `pnpm exec playwright --version` did not find Playwright in the
+  current workspace, so the Playwright responsive script remains pending.
 
 ## Remaining gaps
 
@@ -74,8 +84,8 @@
   `HVC_GEMINI_MODE=real` and microphone permission.
 - Decide whether `LocalHermesAdapter` should stay read-only only, or later
   support confirmation-gated actions.
-- Decide the default Gemini voice/personality for Bob once real audio is
-  enabled.
+- Decide the default Gemini voice/personality guidance for Hermes agents once
+  real audio is enabled.
 - If exposing beyond local/Tailscale, add an explicit auth/rate-limit/reverse
   proxy review before changing bind or access posture.
 - Add CI after the first public push.

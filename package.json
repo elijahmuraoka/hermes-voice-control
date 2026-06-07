@@ -2,7 +2,7 @@
   "name": "hermes-voice-control",
   "version": "0.1.0",
   "private": true,
-  "description": "Private Gemini Live voice control surface for Bob/Hermes.",
+  "description": "Private Gemini Live voice control surface for your Hermes agent.",
   "scripts": {
     "test": "pnpm --filter @hvc/web test && cd apps/server && uv run pytest",
     "build": "pnpm --filter @hvc/web build",

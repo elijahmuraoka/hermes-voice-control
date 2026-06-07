@@ -34,7 +34,7 @@ class ToolDef:
     requires_confirmation: bool
 
 TOOLS = {
-    "ask_bob": ToolDef("ask_bob", "Ask Bob/Hermes for a speakable answer.", "low", False),
+    "ask_bob": ToolDef("ask_bob", "Ask the configured Hermes agent for a speakable answer.", "low", False),
     "propose_action": ToolDef("propose_action", "Queue a risky action proposal for explicit approval.", "high", True),
 }
 

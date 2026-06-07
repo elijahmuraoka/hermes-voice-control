@@ -69,7 +69,7 @@ describe("App", () => {
 
   it("renders premium voice surface and transcript toggle", () => {
     render(<App />);
-    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.getByText("Hermes Agent")).toBeInTheDocument();
     expect(screen.getByLabelText(/Voice orb/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Toggle transcript/ }),
@@ -87,7 +87,7 @@ describe("App", () => {
   it("keeps text fallback available through the backend", async () => {
     const user = userEvent.setup();
     render(<App />);
-    const input = screen.getByLabelText("Type a message to Bob");
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
 
     await user.type(input, "hello");
     await user.click(
@@ -173,7 +173,9 @@ describe("App", () => {
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
 
-    await user.click(screen.getByLabelText("Type a message to Bob"));
+    await user.click(
+      screen.getByLabelText("Type a message to your Hermes agent"),
+    );
 
     expect(
       geminiMock.instances[0].setMicrophoneEnabled,
@@ -205,10 +207,10 @@ describe("App", () => {
     expect(geminiMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
       false,
     );
-    expect(screen.getByText("Bob is thinking...")).toBeInTheDocument();
+    expect(screen.getByText("Hermes Agent is thinking...")).toBeInTheDocument();
   });
 
-  it("long hold while Bob is speaking interrupts playback", async () => {
+  it("long hold while the agent is speaking interrupts playback", async () => {
     render(<App />);
     const orb = screen.getByLabelText(/Voice orb/);
 
@@ -220,7 +222,7 @@ describe("App", () => {
 
     act(() => geminiMock.instances[0].callbacks.onStatus("model-speaking"));
     await waitFor(() =>
-      expect(screen.getByText("Bob is speaking")).toBeInTheDocument(),
+      expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument(),
     );
 
     vi.useFakeTimers();
@@ -247,6 +249,6 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /End/ }));
 
     expect(geminiMock.instances[0].disconnect).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
   });
 });

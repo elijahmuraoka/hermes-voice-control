@@ -11,7 +11,7 @@ Defaults:
   values shorter than 8 characters when PIN auth is required.
 - Reject wildcard CORS origins because credentials are enabled.
 - Deny unknown tools.
-- Execute only the narrow `ask_bob` answer tool by default.
+- Execute only the narrow agent-answer tool by default.
 - Queue risky action proposals for explicit confirmation.
 - Record confirmation approval without executing external actions.
 - Redact secrets before logging or persisting events.
@@ -30,9 +30,13 @@ Not allowed by default:
 
 `/gemini/ephemeral-token` returns a short-lived Gemini token to the browser, but audit logs only record mode, expiry, and that a token was issued. `/gemini/status` reports whether a real Gemini key is configured as a boolean and never returns the key value.
 
-## Bob/Hermes bridge
+## Hermes agent bridge
 
-The backend allowlist exposes `ask_bob` for speakable answers and `propose_action` for confirmation records. `ask_bob` accepts only `quick` and `deep` modes. The local Hermes adapter prompt is read-only and tells Hermes not to mutate files, send messages, or claim an action was performed.
+The backend allowlist exposes a compatibility `ask_bob` tool id for speakable
+agent answers and `propose_action` for confirmation records. Agent-answer
+requests accept only `quick` and `deep` modes. The local Hermes adapter prompt
+is read-only and tells Hermes not to mutate files, send messages, or claim an
+action was performed.
 
 ## Cancellation
 

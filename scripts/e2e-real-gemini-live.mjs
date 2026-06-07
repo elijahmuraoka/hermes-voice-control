@@ -31,7 +31,7 @@ function makeSpeechPcm() {
     run("/usr/bin/say", [
       "-o",
       aiff,
-      "In one short sentence, say that Bob voice is connected.",
+      "In one short sentence, say the Hermes voice connection is ready.",
     ]);
     run("/opt/homebrew/bin/ffmpeg", [
       "-hide_banner",
@@ -176,7 +176,8 @@ async function main() {
           systemInstruction: {
             parts: [
               {
-                text: "You are Bob in a Gemini Live smoke test. Answer briefly.",
+                text:
+                  "You are the user's Hermes voice agent in a Gemini Live smoke test. Answer briefly.",
               },
             ],
           },

@@ -2,11 +2,18 @@ import { Send } from "lucide-react";
 import { useState } from "react";
 interface Props {
   disabled?: boolean;
+  agentNoun: string;
   onSubmit: (text: string) => Promise<void> | void;
   onFocus: () => void;
   onBlur: () => void;
 }
-export function FloatingChat({ disabled, onSubmit, onFocus, onBlur }: Props) {
+export function FloatingChat({
+  disabled,
+  agentNoun,
+  onSubmit,
+  onFocus,
+  onBlur,
+}: Props) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit() {
@@ -33,8 +40,8 @@ export function FloatingChat({ disabled, onSubmit, onFocus, onBlur }: Props) {
         onChange={(e) => setDraft(e.target.value)}
         onFocus={onFocus}
         onBlur={onBlur}
-        placeholder="Type to Bob instead…"
-        aria-label="Type a message to Bob"
+        placeholder={`Type to ${agentNoun}...`}
+        aria-label={`Type a message to ${agentNoun}`}
         disabled={disabled || busy}
       />
       <button

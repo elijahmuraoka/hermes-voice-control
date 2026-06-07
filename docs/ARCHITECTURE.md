@@ -10,7 +10,7 @@ Phone/laptop browser over localhost or Tailscale
   -> browser Gemini Live websocket session
   -> Gemini tool call normalization
   -> backend tool policy and cancellation checks
-  -> Bob/Hermes adapter
+  -> Hermes agent adapter
   -> speakable response or confirmation proposal
 ```
 

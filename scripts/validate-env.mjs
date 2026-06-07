@@ -12,6 +12,8 @@ const weakPins = new Set([
   "password",
   "password1",
   "qwertyui",
+  "change-me",
+  "changeme",
 ]);
 
 function boolEnv(name, fallback = false) {
@@ -69,7 +71,7 @@ if (!localHosts.has(host) && !requirePin && !allowNoPinRemote) {
 }
 
 if (requirePin && isWeakPin(process.env.HVC_PIN ?? "000000")) {
-  errors.push("HVC_REQUIRE_PIN=true requires a non-default PIN of at least 8 characters.");
+  errors.push("HVC_REQUIRE_PIN=true requires a non-default, non-placeholder PIN of at least 8 characters.");
 }
 
 if (requirePin && !secureCookies) {

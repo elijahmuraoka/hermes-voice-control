@@ -65,11 +65,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def healthz(): return {"ok": True}
     @app.get("/readyz")
     def readyz():
+        gemini_client_available = broker.client_available
         checks = {
             "database": "unknown",
             "gemini_mode": broker.mode,
             "gemini_model": getattr(broker, "model", None),
             "gemini_api_key_configured": broker.api_key_configured,
+            "gemini_client_available": gemini_client_available,
             "hermes_adapter": settings.hermes_adapter,
             "pin_required": settings.require_pin,
             "logs_endpoint_enabled": settings.allow_logs_endpoint,
@@ -82,7 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             checks["database"] = "failed"
             ok = False
-        if broker.mode == "real" and not broker.api_key_configured:
+        if broker.mode == "real" and (not broker.api_key_configured or not gemini_client_available):
             ok = False
         status_code = 200 if ok else 503
         return JSONResponse(status_code=status_code, content={"ok": ok, "checks": checks})

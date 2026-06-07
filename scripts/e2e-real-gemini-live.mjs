@@ -157,9 +157,10 @@ function waitForOutcome(ws) {
 }
 
 async function main() {
-  const { token, mode } = await postJson("/gemini/ephemeral-token");
+  const { token, mode, model } = await postJson("/gemini/ephemeral-token");
   if (!token || mode !== "real")
     throw new Error(`expected real token, got mode=${mode}`);
+  const setupModel = model ?? MODEL;
   const tmp = makeSpeechPcm();
   const ws = new WebSocket(
     `${LIVE_ENDPOINT}?access_token=${encodeURIComponent(token)}`,
@@ -169,7 +170,7 @@ async function main() {
     ws.send(
       JSON.stringify({
         setup: {
-          model: toGeminiModelResource(MODEL),
+          model: toGeminiModelResource(setupModel),
           generationConfig: { responseModalities: ["AUDIO"] },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -211,6 +212,7 @@ async function main() {
       JSON.stringify({
         ok: true,
         mode,
+        model: setupModel,
         setupComplete: outcome.setupComplete,
         outputAudio: outcome.outputAudio,
         outputTextChars: outcome.outputText.length,

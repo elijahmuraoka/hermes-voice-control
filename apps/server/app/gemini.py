@@ -11,11 +11,22 @@ class EphemeralToken:
     mode: str
     model: str | None = None
 
+def google_genai_available() -> bool:
+    try:
+        from google import genai  # type: ignore # noqa: F401
+    except Exception:
+        return False
+    return True
+
 class GeminiTokenBroker:
     mode = "unknown"
 
     @property
     def api_key_configured(self) -> bool:
+        return False
+
+    @property
+    def client_available(self) -> bool:
         return False
 
     def create_token(self) -> EphemeralToken:
@@ -24,6 +35,10 @@ class GeminiTokenBroker:
 class MockGeminiTokenBroker(GeminiTokenBroker):
     mode = "mock"
     model = "gemini-2.5-flash-native-audio-latest"
+
+    @property
+    def client_available(self) -> bool:
+        return True
 
     def create_token(self) -> EphemeralToken:
         return EphemeralToken("mock_gemini_ephemeral_" + secrets.token_urlsafe(18), datetime.now(UTC) + timedelta(minutes=5), "mock", self.model)
@@ -38,6 +53,10 @@ class RealGeminiTokenBroker(GeminiTokenBroker):
     @property
     def api_key_configured(self) -> bool:
         return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+
+    @property
+    def client_available(self) -> bool:
+        return google_genai_available()
 
     def create_token(self) -> EphemeralToken:
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")

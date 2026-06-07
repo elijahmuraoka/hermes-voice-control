@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 import pytest
 from fastapi.testclient import TestClient
+from app import gemini as gemini_module
 from app.adapters import LocalHermesAdapter
 from app.config import Settings
 from app.main import create_app
@@ -28,6 +29,7 @@ def test_readyz_reports_safe_runtime_posture(tmp_path):
     assert body["checks"]["database"] == "ok"
     assert body["checks"]["gemini_mode"] == "mock"
     assert body["checks"]["gemini_api_key_configured"] is False
+    assert body["checks"]["gemini_client_available"] is True
     assert body["checks"]["audit_log_retention_days"] == 30
     assert body["checks"]["audit_log_max_rows"] == 5000
     assert TEST_PIN not in res.text
@@ -38,6 +40,14 @@ def test_readyz_fails_real_gemini_without_key(tmp_path, monkeypatch):
     assert res.status_code == 503
     assert res.json()["ok"] is False
     assert res.json()["checks"]["gemini_mode"] == "real"
+def test_readyz_fails_real_gemini_without_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "super-secret-gemini-key")
+    monkeypatch.setattr(gemini_module, "google_genai_available", lambda: False)
+    res = make_real_gemini_client(tmp_path).get("/readyz")
+    assert res.status_code == 503
+    assert res.json()["ok"] is False
+    assert res.json()["checks"]["gemini_api_key_configured"] is True
+    assert res.json()["checks"]["gemini_client_available"] is False
 def test_pin_auth_and_session(tmp_path):
     client = make_pin_client(tmp_path); assert client.post("/auth/pin", json={"pin": "wrong"}).status_code == 401
     token = login(client); assert client.get("/auth/session", headers={"Authorization": f"Bearer {token}"}).status_code == 200
@@ -79,7 +89,7 @@ def test_pin_mode_protected_endpoints_require_auth(tmp_path):
 def test_pin_mode_requires_non_default_strong_pin(tmp_path):
     with pytest.raises(RuntimeError):
         create_app(Settings(require_pin=True, db_path=tmp_path / "default-pin.sqlite3"))
-    for weak_pin in ("1234567", "12345678", "87654321", "aaaaaaaa", "password", "0000000 ", " 1234567"):
+    for weak_pin in ("1234567", "12345678", "87654321", "aaaaaaaa", "password", "change-me", "changeme", "0000000 ", " 1234567"):
         with pytest.raises(RuntimeError):
             create_app(Settings(pin=weak_pin, require_pin=True, db_path=tmp_path / f"weak-{weak_pin}.sqlite3"))
 

@@ -70,7 +70,8 @@ Start the backend, then verify readiness:
 curl http://127.0.0.1:8765/readyz
 ```
 
-`/readyz` returns `503` when real mode is selected without a configured API key.
+`/readyz` returns `503` when real mode is selected without a configured API key
+or without the `google-genai` client installed.
 
 ## Tailscale Serve
 
@@ -92,5 +93,7 @@ frontend process on `127.0.0.1:5173`. Confirm the browser origin is listed in
   PIN before private-network exposure.
 - `HVC_GEMINI_MODE=real requires GEMINI_API_KEY or GOOGLE_API_KEY`: configure
   credentials on the backend only.
+- `gemini_client_available=false` in `/readyz`: install the real Gemini extra
+  with `cd apps/server && uv pip install -e '.[dev,real-gemini]'`.
 - `HVC_HERMES_ADAPTER=local requires HVC_HERMES_BIN`: install Hermes or point
   `HVC_HERMES_BIN` at the executable.

@@ -97,7 +97,7 @@ export class GeminiLiveSession {
       model: token.model,
     });
 
-    const setupModel = this.sessionOptions.model ?? token.model ?? this.options.model;
+    const setupModel = token.model ?? this.sessionOptions.model ?? this.options.model;
     const socket = this.webSocketFactory(buildGeminiLiveUrl(token.token));
     this.socket = socket;
     socket.onopen = () => {

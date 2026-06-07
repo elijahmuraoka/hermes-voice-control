@@ -115,6 +115,7 @@ describe("GeminiLiveSession", () => {
     const onToken = vi.fn();
     const session = new GeminiLiveSession(
       {
+        model: "gemini-client-override",
         callbacks: { onToken },
         audio: { startCapture: false },
       },

@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from .adapters import build_adapter
+from .config import LOCAL_CLIENT_HOSTS, Settings
+from .gemini import build_broker
+from .security import AuthManager
+from .store import Store
+from .tools import ToolCallRequest, ToolCancelRequest, ToolService
+
+class PinRequest(BaseModel):
+    pin: str
+class TextMessage(BaseModel):
+    message: str
+    mode: str = "quick"
+    transcript_window: list[dict] = Field(default_factory=list)
+
+LOCAL_HOST_HEADERS = {"127.0.0.1", "localhost", "::1", "testserver"}
+
+
+def host_header_is_local(request: Request) -> bool:
+    host = request.headers.get("host", "").strip().lower()
+    if not host:
+        return False
+    if host.startswith("[") and "]" in host:
+        hostname = host[1:].split("]", 1)[0]
+    else:
+        hostname = host.rsplit(":", 1)[0]
+    return hostname in LOCAL_HOST_HEADERS
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings.from_env()
+    settings.assert_safe_bind()
+    settings.assert_safe_cors()
+    settings.assert_safe_auth()
+    store = Store(settings.db_path)
+    auth = AuthManager(settings.pin, settings.session_ttl_seconds, store)
+    broker = build_broker(settings.gemini_mode)
+    adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin)
+    tools = ToolService(store, adapter)
+    app = FastAPI(title="Hermes Voice Control", version="0.1.0")
+    app.state.settings = settings
+    app.state.store = store
+    app.add_middleware(CORSMiddleware, allow_origins=list(settings.frontend_origins), allow_credentials=True, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "X-Request-ID"])
+    def session_dep(request: Request) -> str:
+        if not settings.require_pin:
+            client_host = request.client.host if request.client else "local"
+            proxy_headers = ("forwarded", "x-forwarded-for", "x-real-ip", "tailscale-user-login", "tailscale-user-name")
+            proxied = any(request.headers.get(name) for name in proxy_headers)
+            if (client_host not in LOCAL_CLIENT_HOSTS or proxied or not host_header_is_local(request)) and not settings.allow_no_pin_remote:
+                raise HTTPException(status_code=401, detail="PIN auth is required for non-local clients")
+            return "tailscale-local"
+        return auth.validate(authorization=request.headers.get("authorization"), hvc_session=request.cookies.get("hvc_session"))
+    @app.exception_handler(Exception)
+    async def safe_exception_handler(request: Request, exc: Exception):
+        if isinstance(exc, HTTPException):
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        store.log("error.unhandled", "failed", {"path": request.url.path, "error": str(exc) if settings.debug_errors else "redacted"}, error_code="UNHANDLED")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error", "code": "INTERNAL_ERROR"})
+    @app.get("/healthz")
+    def healthz(): return {"ok": True}
+    @app.post("/auth/pin")
+    def auth_pin(payload: PinRequest, response: Response, request: Request):
+        if not settings.require_pin:
+            store.log("auth.pin", "disabled", {"reason": "pin_auth_disabled"})
+            raise HTTPException(status_code=404, detail="PIN auth is disabled")
+        client_key = request.client.host if request.client else "local"
+        if not auth.verify_pin(payload.pin, client_key=client_key):
+            store.log("auth.pin", "failed", {"pin": payload.pin}, error_code="INVALID_PIN")
+            raise HTTPException(status_code=401, detail="Invalid PIN")
+        session = auth.create_session(); auth.set_cookie(response, session.token, session.expires_at)
+        store.log("auth.pin", "success", {"session_id": session.token})
+        return {"ok": True, "session_id": session.token, "expires_at": session.expires_at.isoformat()}
+    @app.post("/auth/logout")
+    def logout(request: Request, session_hash: str = Depends(session_dep)):
+        token = request.cookies.get("hvc_session")
+        if token: auth.revoke(token)
+        store.log("auth.logout", "success", session_hash=session_hash)
+        return {"ok": True}
+    @app.get("/auth/session")
+    def auth_session(session_hash: str = Depends(session_dep)): return {"authenticated": True, "mode": "pin" if settings.require_pin else "tailscale"}
+    @app.post("/gemini/ephemeral-token")
+    def gemini_token(session_hash: str = Depends(session_dep)):
+        token = broker.create_token()
+        store.log("gemini.token", "created", {"mode": token.mode, "token_issued": True, "expires_at": token.expires_at.isoformat()}, session_hash=session_hash)
+        return {"token": token.token, "expires_at": token.expires_at.isoformat(), "mode": token.mode}
+    @app.get("/gemini/status")
+    def gemini_status(session_hash: str = Depends(session_dep)):
+        return {"mode": broker.mode, "api_key_configured": broker.api_key_configured}
+    @app.get("/tools")
+    def list_tools(session_hash: str = Depends(session_dep)): return {"tools": tools.list_tools()}
+    @app.post("/tools/call")
+    def call_tool(req: ToolCallRequest, session_hash: str = Depends(session_dep)): return tools.call(req, session_hash)
+    @app.post("/tools/cancel")
+    def cancel_tool(req: ToolCancelRequest, session_hash: str = Depends(session_dep)): return tools.cancel(req, session_hash)
+    @app.post("/chat/text")
+    def chat_text(payload: TextMessage, session_hash: str = Depends(session_dep)):
+        req = ToolCallRequest(request_id="text-chat", tool="ask_bob", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
+        return tools.call(req, session_hash)
+    @app.get("/confirmations")
+    def confirmations(session_hash: str = Depends(session_dep)): return {"items": tools.pending_confirmations(session_hash)}
+    @app.post("/confirmations/{confirmation_id}/approve")
+    def approve(confirmation_id: str, session_hash: str = Depends(session_dep)): return tools.approve(confirmation_id, session_hash)
+    @app.post("/confirmations/{confirmation_id}/reject")
+    def reject(confirmation_id: str, session_hash: str = Depends(session_dep)): return tools.reject(confirmation_id, session_hash)
+    @app.get("/logs")
+    def logs(limit: int = 50, session_hash: str = Depends(session_dep)): return {"items": store.recent_logs(limit)}
+    return app
+app = create_app()

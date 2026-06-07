@@ -1,0 +1,19 @@
+{
+  "name": "hermes-voice-control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private Gemini Live voice control surface for Bob/Hermes.",
+  "scripts": {
+    "test": "pnpm --filter @hvc/web test && cd apps/server && uv run pytest",
+    "build": "pnpm --filter @hvc/web build",
+    "dev:web": "pnpm --filter @hvc/web dev --host 127.0.0.1 --port 5173",
+    "dev:server": "cd apps/server && uv run uvicorn app.main:app --host 127.0.0.1 --port 8765"
+  },
+  "workspaces": [
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.26.0"
+}

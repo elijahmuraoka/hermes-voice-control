@@ -1,0 +1,12 @@
+version: 1
+staging:
+  paths: []
+discovery:
+  enabled: true
+  ignore:
+    - node_modules/**
+    - dist/**
+    - coverage/**
+    - apps/server/.venv/**
+    - apps/server/.pytest_cache/**
+    - .private/**

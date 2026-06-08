@@ -115,3 +115,5 @@ node scripts/e2e-real-gemini-live.mjs
   websocket, waited for `setupComplete`, streamed generated local speech audio,
   and observed audio output. Redacted evidence is stored in
   `evidence/gemini-live-smoke-latest.json`.
+- 2026-06-08: issue #13 provider-neutral frontend boundary added under
+  `apps/web/src/realtime/`; Gemini remains the only registered v1 provider.

@@ -104,3 +104,7 @@
   `evidence/gemini-live-smoke-latest.json` and confirms real mode, the
   `gemini-2.5-flash-native-audio-latest` model, the `setupComplete` handshake,
   and observed audio output.
+- Issue #13 provider-neutral frontend boundary added under
+  `apps/web/src/realtime/`. Gemini remains the only registered v1 provider, and
+  future providers must use backend-minted ephemeral credentials or signed
+  sessions rather than browser API keys.

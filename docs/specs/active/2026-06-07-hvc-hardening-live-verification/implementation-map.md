@@ -35,6 +35,8 @@
   and launch-budget access for browser smoke/provider bakeoff.
 - `apps/web/src/diagnosticsBudgets.json`: shared launch budgets for first audio,
   tool response, reconnect/resume, and smoke flake rate.
+- `apps/web/src/realtime/`: provider-neutral frontend voice contract and Gemini
+  adapter boundary for status/transcript normalization.
 - `apps/web/src/gemini-live/defaults.ts`: default tool schemas and tool caller
   cancellation hooks.
 - `apps/web/src/audio.ts` and worklets: capture/playback/resampling path.

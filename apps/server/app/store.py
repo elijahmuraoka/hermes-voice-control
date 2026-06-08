@@ -45,8 +45,9 @@ class Store:
             conn.execute("INSERT INTO audit_logs(timestamp, session_hash, event_type, tool, request_id, status, redacted_payload, error_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (now_iso(), session_hash, event_type, tool, request_id, status, json.dumps(safe_payload, sort_keys=True), error_code))
 
     def check_writeable(self) -> bool:
-        conn = self.connect()
+        conn: sqlite3.Connection | None = None
         try:
+            conn = self.connect()
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 "INSERT INTO readiness_checks(id, checked_at) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET checked_at=excluded.checked_at",
@@ -55,10 +56,15 @@ class Store:
             conn.rollback()
             return True
         except sqlite3.Error:
-            conn.rollback()
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
             return False
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
 
     def prune_audit_logs(self, retention_days: int, max_rows: int) -> dict[str, int]:
         deleted = {"age": 0, "rows": 0}

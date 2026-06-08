@@ -39,7 +39,7 @@ Not allowed by default:
 `/readyz` reports safe runtime posture, including database writeability, Gemini
 mode/model, adapter mode, PIN requirement, log-retention controls, and whether
 the logs endpoint is enabled. It returns `503` when real Gemini mode is selected
-without a configured API key.
+without a configured API key or without the `google-genai` client installed.
 
 ## Hermes agent bridge
 

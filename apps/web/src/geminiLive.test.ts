@@ -110,6 +110,40 @@ describe("GeminiLiveSession", () => {
     expect(statuses).toEqual(["connecting", "connected"]);
   });
 
+  it("uses the Gemini model returned with the constrained ephemeral token", async () => {
+    const ws = new MockWebSocket();
+    const onToken = vi.fn();
+    const session = new GeminiLiveSession(
+      {
+        model: "gemini-client-override",
+        callbacks: { onToken },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "ephemeral/token",
+          expires_at: "2026-01-01T00:00:00Z",
+          mode: "real",
+          model: "gemini-custom-live",
+        }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+
+    expect(onToken).toHaveBeenCalledWith({
+      expires_at: "2026-01-01T00:00:00Z",
+      mode: "real",
+      model: "gemini-custom-live",
+    });
+    expect(ws.sent[0]).toMatchObject({
+      setup: { model: "models/gemini-custom-live" },
+    });
+  });
+
   it("starts capture after setupComplete and streams pcm chunks as realtime input", async () => {
     const ws = new MockWebSocket();
     const audio = new MockAudio();

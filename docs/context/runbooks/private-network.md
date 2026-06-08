@@ -6,13 +6,13 @@ through Tailscale Serve.
 ## Required posture
 
 ```bash
-HVC_HOST=127.0.0.1
-HVC_REQUIRE_PIN=true
-HVC_PIN=<at-least-8-chars-not-common>
-HVC_SECURE_COOKIES=true
-HVC_ALLOW_LOGS_ENDPOINT=false
-HVC_AUDIT_LOG_RETENTION_DAYS=30
-HVC_AUDIT_LOG_MAX_ROWS=5000
+export HVC_HOST=127.0.0.1
+export HVC_REQUIRE_PIN=true
+export HVC_PIN=<at-least-8-chars-not-common>
+export HVC_SECURE_COOKIES=true
+export HVC_ALLOW_LOGS_ENDPOINT=false
+export HVC_AUDIT_LOG_RETENTION_DAYS=30
+export HVC_AUDIT_LOG_MAX_ROWS=5000
 ```
 
 Run the validator before starting the server:
@@ -32,8 +32,8 @@ Keep unsafe public exposure out of scope for v1:
 ## Mock mode
 
 ```bash
-HVC_GEMINI_MODE=mock
-HVC_HERMES_ADAPTER=mock
+export HVC_GEMINI_MODE=mock
+export HVC_HERMES_ADAPTER=mock
 pnpm env:check
 pnpm dev
 ```
@@ -44,9 +44,9 @@ quota or a local Hermes binary.
 ## Local Hermes mode
 
 ```bash
-HVC_GEMINI_MODE=mock
-HVC_HERMES_ADAPTER=local
-HVC_HERMES_BIN=hermes
+export HVC_GEMINI_MODE=mock
+export HVC_HERMES_ADAPTER=local
+export HVC_HERMES_BIN=hermes
 pnpm env:check
 pnpm dev
 ```
@@ -57,9 +57,9 @@ adapter invokes only `hermes chat -q <prompt> --toolsets safe`.
 ## Real Gemini mode
 
 ```bash
-HVC_GEMINI_MODE=real
-HVC_GEMINI_MODEL=gemini-2.5-flash-native-audio-latest
-GEMINI_API_KEY=<redacted>
+export HVC_GEMINI_MODE=real
+export HVC_GEMINI_MODEL=gemini-2.5-flash-native-audio-latest
+export GEMINI_API_KEY=<redacted>
 pnpm env:check
 cd apps/server && uv pip install -e '.[dev,real-gemini]'
 ```
@@ -70,7 +70,8 @@ Start the backend, then verify readiness:
 curl http://127.0.0.1:8765/readyz
 ```
 
-`/readyz` returns `503` when real mode is selected without a configured API key.
+`/readyz` returns `503` when real mode is selected without a configured API key
+or without the `google-genai` client installed.
 
 ## Tailscale Serve
 
@@ -92,5 +93,7 @@ frontend process on `127.0.0.1:5173`. Confirm the browser origin is listed in
   PIN before private-network exposure.
 - `HVC_GEMINI_MODE=real requires GEMINI_API_KEY or GOOGLE_API_KEY`: configure
   credentials on the backend only.
+- `gemini_client_available=false` in `/readyz`: install the real Gemini extra
+  with `cd apps/server && uv pip install -e '.[dev,real-gemini]'`.
 - `HVC_HERMES_ADAPTER=local requires HVC_HERMES_BIN`: install Hermes or point
   `HVC_HERMES_BIN` at the executable.

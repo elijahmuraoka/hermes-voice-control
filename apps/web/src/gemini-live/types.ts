@@ -14,6 +14,7 @@ export interface GeminiEphemeralToken {
   token: string;
   expires_at: string;
   mode: string;
+  model?: string | null;
 }
 
 export interface GeminiTranscriptEvent {

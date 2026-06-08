@@ -7,7 +7,7 @@ from pathlib import Path
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "localhost", "::1", "testclient"}
 DEFAULT_PIN = "000000"
-COMMON_WEAK_PINS = {"12345678", "87654321", "password", "password1", "aaaaaaaa", "11111111", "00000000", "qwertyui"}
+COMMON_WEAK_PINS = {"12345678", "87654321", "password", "password1", "aaaaaaaa", "11111111", "00000000", "qwertyui", "change-me", "changeme"}
 
 
 def _is_sequential(value: str) -> bool:

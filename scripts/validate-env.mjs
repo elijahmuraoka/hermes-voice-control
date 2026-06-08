@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { accessSync, constants } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -12,6 +12,8 @@ const weakPins = new Set([
   "password",
   "password1",
   "qwertyui",
+  "change-me",
+  "changeme",
 ]);
 
 function boolEnv(name, fallback = false) {
@@ -36,14 +38,44 @@ function isWeakPin(value) {
 }
 
 function commandExists(command) {
-  if (command.includes("/") && existsSync(command)) return true;
+  if (command.includes("/")) {
+    try {
+      accessSync(command, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const result = spawnSync("which", [command], { stdio: "ignore" });
   return result.status === 0;
+}
+
+function intEnv(name, fallback, { min, max } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = raw.trim();
+  if (!/^-?\d+$/.test(value)) {
+    errors.push(`${name} must be an integer.`);
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    errors.push(`${name} must be a safe integer.`);
+    return fallback;
+  }
+  if (min !== undefined && parsed < min) {
+    errors.push(`${name} must be at least ${min}.`);
+  }
+  if (max !== undefined && parsed > max) {
+    errors.push(`${name} must be at most ${max}.`);
+  }
+  return parsed;
 }
 
 const errors = [];
 const warnings = [];
 const host = process.env.HVC_HOST ?? "127.0.0.1";
+const port = intEnv("HVC_PORT", 8765, { min: 1, max: 65535 });
 const geminiMode = process.env.HVC_GEMINI_MODE ?? "mock";
 const hermesAdapter = process.env.HVC_HERMES_ADAPTER ?? "mock";
 const requirePin = boolEnv("HVC_REQUIRE_PIN", false);
@@ -51,6 +83,9 @@ const allowRemoteBind = boolEnv("HVC_ALLOW_REMOTE_BIND", false);
 const allowNoPinRemote = boolEnv("HVC_ALLOW_NO_PIN_REMOTE", false);
 const allowLogs = boolEnv("HVC_ALLOW_LOGS_ENDPOINT", false);
 const secureCookies = boolEnv("HVC_SECURE_COOKIES", false);
+const sessionTtlSeconds = intEnv("HVC_SESSION_TTL_SECONDS", 86_400, { min: 1 });
+const auditLogRetentionDays = intEnv("HVC_AUDIT_LOG_RETENTION_DAYS", 30, { min: 0 });
+const auditLogMaxRows = intEnv("HVC_AUDIT_LOG_MAX_ROWS", 5_000, { min: 0 });
 
 if (!["mock", "real"].includes(geminiMode)) {
   errors.push("HVC_GEMINI_MODE must be mock or real.");
@@ -69,7 +104,7 @@ if (!localHosts.has(host) && !requirePin && !allowNoPinRemote) {
 }
 
 if (requirePin && isWeakPin(process.env.HVC_PIN ?? "000000")) {
-  errors.push("HVC_REQUIRE_PIN=true requires a non-default PIN of at least 8 characters.");
+  errors.push("HVC_REQUIRE_PIN=true requires a non-default, non-placeholder PIN of at least 8 characters.");
 }
 
 if (requirePin && !secureCookies) {
@@ -90,7 +125,16 @@ if (hermesAdapter === "local" && !commandExists(process.env.HVC_HERMES_BIN ?? "h
 
 const result = {
   ok: errors.length === 0,
-  mode: { host, geminiMode, hermesAdapter, requirePin },
+  mode: {
+    host,
+    port,
+    geminiMode,
+    hermesAdapter,
+    requirePin,
+    sessionTtlSeconds,
+    auditLogRetentionDays,
+    auditLogMaxRows,
+  },
   warnings,
   errors,
 };

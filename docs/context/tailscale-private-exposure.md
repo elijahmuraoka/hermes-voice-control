@@ -64,6 +64,22 @@ Use exact frontend origins only:
 export HVC_FRONTEND_ORIGINS='http://127.0.0.1:5173,http://localhost:5173,https://FRONTEND_DEVICE.TAILNET.ts.net'
 ```
 
+When the frontend runs on a separate private origin, set its API base before
+starting Vite or building static assets so remote browsers call the backend
+device instead of their own loopback:
+
+```bash
+export VITE_API_BASE='https://BACKEND_DEVICE.TAILNET.ts.net'
+pnpm dev:web
+```
+
+For one-origin reverse-proxy hosting, route the backend endpoints through the
+same origin and build or start the frontend with a relative API base:
+
+```bash
+export VITE_API_BASE=''
+```
+
 Wildcard CORS is rejected by startup and `pnpm env:check`.
 
 ## Health Checks

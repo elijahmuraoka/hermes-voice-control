@@ -229,10 +229,22 @@ Expected results:
 - `/auth/session` returns HTTP 401 before PIN login.
 - `tailscale funnel status` shows no public Funnel exposure.
 
-For full UI rehearsal, serve the frontend from a private origin and include that
-exact origin in `HVC_FRONTEND_ORIGINS`. If one-origin hosting is required, put a
-local reverse proxy in front of the built frontend and backend, then expose only
-that local proxy through Tailscale Serve.
+For full UI rehearsal from a separate private frontend origin, include that exact
+origin in `HVC_FRONTEND_ORIGINS` and point the frontend at the backend's
+Tailscale Serve origin before starting Vite or building static assets:
+
+```bash
+export VITE_API_BASE='https://BACKEND_DEVICE.TAILNET.ts.net'
+pnpm dev:web
+```
+
+If one-origin hosting is required, put a local reverse proxy in front of the
+built frontend and backend, expose only that local proxy through Tailscale Serve,
+and build or start the frontend with a relative API base:
+
+```bash
+export VITE_API_BASE=''
+```
 
 ## Rollback
 

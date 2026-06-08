@@ -224,13 +224,13 @@ export default function App() {
       await session.connect();
       afterConnected?.();
     } catch (error) {
-      sessionRef.current = null;
-      appendSystem(
+      const errorMessage =
         error instanceof Error
           ? error.message
-          : "Could not connect to Gemini Live.",
-        "failed",
-      );
+          : "Could not connect to Gemini Live.";
+      diagnosticsRef.current?.mark("session_error", { message: errorMessage });
+      sessionRef.current = null;
+      appendSystem(errorMessage, "failed");
       dispatch({
         type: "ERROR",
         error:

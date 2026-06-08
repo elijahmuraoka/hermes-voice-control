@@ -9,12 +9,16 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
-const geminiMock = vi.hoisted(() => ({ instances: [] as any[] }));
+const geminiMock = vi.hoisted(() => ({
+  instances: [] as any[],
+  connectError: null as Error | null,
+}));
 
 vi.mock("./geminiLive", () => {
   class GeminiLiveSession {
     callbacks: any;
     connect = vi.fn(async () => {
+      if (geminiMock.connectError) throw geminiMock.connectError;
       this.callbacks.onToken?.({
         expires_at: "2026-01-01T00:00:00Z",
         mode: "test",
@@ -39,6 +43,7 @@ vi.mock("./geminiLive", () => {
 describe("App", () => {
   beforeEach(() => {
     geminiMock.instances.length = 0;
+    geminiMock.connectError = null;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -118,6 +123,32 @@ describe("App", () => {
       expect.stringContaining("/gemini/ephemeral-token"),
       expect.anything(),
     );
+  });
+
+  it("records redacted diagnostics when initial voice connection fails", async () => {
+    geminiMock.connectError = new Error("token=secret session_id=sess_123456");
+    render(<App />);
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Could not prepare/)).toBeInTheDocument(),
+    );
+    const snapshot = (window as any).__HVC_DIAGNOSTICS__.snapshot();
+
+    expect(snapshot.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "session_start" }),
+        expect.objectContaining({
+          name: "session_error",
+          detail: { message: "token=[redacted] session_id=[redacted]" },
+        }),
+      ]),
+    );
+    expect(JSON.stringify(snapshot)).not.toContain("token=secret");
+    expect(JSON.stringify(snapshot)).not.toContain("sess_123456");
   });
 
   it("second orb tap pauses and disables microphone capture", async () => {

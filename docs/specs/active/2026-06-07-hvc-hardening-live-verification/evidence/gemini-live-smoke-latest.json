@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "checkedAt": "2026-06-08T04:56:55Z",
+  "checkedAt": "2026-06-08T19:01:58Z",
   "mode": "real",
   "model": "gemini-2.5-flash-native-audio-latest",
   "command": "node scripts/e2e-real-gemini-live.mjs",

@@ -251,7 +251,11 @@ export default function App() {
   function handleTap() {
     const current = stateRef.current;
     if (current.inputMode === "text") return;
-    if (current.callState === "idle" || current.callState === "error") {
+    if (
+      current.callState === "idle" ||
+      current.callState === "error" ||
+      (current.callState === "muted" && !sessionRef.current)
+    ) {
       void startCall();
       return;
     }

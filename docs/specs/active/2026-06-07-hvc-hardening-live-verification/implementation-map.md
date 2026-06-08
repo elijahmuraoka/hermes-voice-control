@@ -30,6 +30,9 @@
 
 ## Verification Scripts
 
-- `scripts/browser-responsive.spec.ts`: Playwright responsive smoke plus real
-  backend token-flow check.
+- `scripts/browser-responsive.spec.ts`: Playwright responsive smoke, mocked
+  mobile browser/audio edge cases, and optional real backend token-flow check.
 - `scripts/e2e-real-gemini-live.mjs`: real Gemini Live websocket/audio smoke.
+- `docs/specs/active/2026-06-07-hvc-hardening-live-verification/mobile-browser-audio-qa.md`:
+  manual QA checklist for browser and OS audio scenarios automation cannot
+  cover honestly.

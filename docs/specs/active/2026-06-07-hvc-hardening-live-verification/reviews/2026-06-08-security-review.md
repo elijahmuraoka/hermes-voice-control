@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-08
 
-**Repo:** `/Users/bob/worktrees/hermes-voice-control/feat-security-threat-model-issue-15`
+**Repo:** `hermes-voice-control`
 
 **Files Reviewed:** 8 changed files
 

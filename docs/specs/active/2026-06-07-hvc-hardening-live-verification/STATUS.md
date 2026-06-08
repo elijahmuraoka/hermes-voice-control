@@ -52,5 +52,7 @@
   active spec bundle.
 - The 2026-06-08 local harness run resolved `/opt/homebrew/bin/hermes` and
   exercised `ask_agent`, `ask_bob`, and no-action probes through the read-only
-  safe command. The real runtime blocker is `HERMES_AGENT_FAILURE`: Hermes
-  returned CLI provider-failure output instead of agent answers.
+  safe command. The refreshed run passed with `blocker: null`.
+- The local adapter now invokes Hermes in quiet query mode so stdout contains
+  only the final speakable answer before returning it to the browser or harness
+  evidence, while CLI provider failures still surface as controlled errors.

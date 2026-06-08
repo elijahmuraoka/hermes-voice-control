@@ -12,8 +12,8 @@ pass.
 
 - The backend already supports `ask_agent`, `ask_bob` compatibility, tool-call
   cancellation, confirmation records, and read-only v1 approval semantics.
-- The local adapter launches `hermes chat -q <prompt> --toolsets safe` through a
-  direct argv.
+- The local adapter launches `hermes chat -Q -q <prompt> --toolsets safe`
+  through a direct argv so stdout contains only the final answer text.
 - The active spec bundle tracks HVC hardening and live verification.
 
 ## Proposed Changes

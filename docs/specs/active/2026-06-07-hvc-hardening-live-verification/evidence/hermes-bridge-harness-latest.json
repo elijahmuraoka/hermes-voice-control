@@ -1,59 +1,63 @@
 {
-  "blocker": "Local Hermes returned CLI failure output instead of agent answers.",
+  "blocker": null,
   "diagnostics": {
     "available": true,
     "command": [
       "/opt/homebrew/bin/hermes",
       "chat",
+      "-Q",
       "-q",
       "<read-only prompt>",
       "--toolsets",
       "safe"
     ],
-    "configured_bin": "hermes",
+    "configured_bin": "/opt/homebrew/bin/hermes",
     "kind": "local",
     "read_only": true,
     "resolved_bin": "/opt/homebrew/bin/hermes",
-    "timeout_seconds": 90,
+    "timeout_seconds": 60,
     "toolsets": [
       "safe"
     ]
   },
-  "ok": false,
+  "ok": true,
   "probes": [
     {
-      "error_code": "HERMES_AGENT_FAILURE",
-      "finished_at": "2026-06-08T01:47:34.946050+00:00",
+      "display": "Yes, the read-only Hermes voice bridge can answer questions but cannot perform actions without explicit confirmation in Hermes Voice Control.",
+      "finished_at": "2026-06-08T04:32:16.720020+00:00",
+      "mode": "quick",
       "mode_requested": "quick",
       "name": "ask_agent",
-      "ok": false,
-      "safe_message": "Local Hermes returned a CLI failure instead of an agent answer.",
-      "started_at": "2026-06-08T01:46:44.368822+00:00",
+      "ok": true,
+      "speakable": "Yes, the read-only Hermes voice bridge can answer questions but cannot perform actions without explicit confirmation in Hermes Voice Control.",
+      "started_at": "2026-06-08T04:32:07.465024+00:00",
       "used_ask_bob_alias": false
     },
     {
-      "error_code": "HERMES_AGENT_FAILURE",
-      "finished_at": "2026-06-08T01:48:22.962175+00:00",
+      "display": "Confirmed: this compatibility alias reaches the same read-only Hermes agent bridge.",
+      "finished_at": "2026-06-08T04:32:27.119671+00:00",
+      "mode": "quick",
       "mode_requested": "quick",
       "name": "ask_bob_alias",
-      "ok": false,
-      "safe_message": "Local Hermes returned a CLI failure instead of an agent answer.",
-      "started_at": "2026-06-08T01:47:34.946060+00:00",
+      "ok": true,
+      "speakable": "Confirmed: this compatibility alias reaches the same read-only Hermes agent bridge.",
+      "started_at": "2026-06-08T04:32:16.720034+00:00",
       "used_ask_bob_alias": true
     },
     {
-      "error_code": "HERMES_AGENT_FAILURE",
-      "finished_at": "2026-06-08T01:49:12.139049+00:00",
+      "display": "In v1 Hermes Voice Control, Slack sends are not performed from quick mode and require explicit confirmation first.",
+      "finished_at": "2026-06-08T04:32:35.486214+00:00",
+      "mode": "quick",
       "mode_requested": "quick",
       "name": "no_action_semantics",
-      "ok": false,
+      "ok": true,
       "possible_action_claim_detected": false,
       "requires_manual_review": true,
-      "safe_message": "Local Hermes returned a CLI failure instead of an agent answer.",
-      "started_at": "2026-06-08T01:48:22.962181+00:00",
+      "speakable": "In v1 Hermes Voice Control, Slack sends are not performed from quick mode and require explicit confirmation first.",
+      "started_at": "2026-06-08T04:32:27.119680+00:00",
       "used_ask_bob_alias": false
     }
   ],
-  "ran_at": "2026-06-08T01:46:44.368761+00:00",
+  "ran_at": "2026-06-08T04:32:07.464929+00:00",
   "read_only": true
 }

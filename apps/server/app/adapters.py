@@ -55,7 +55,7 @@ class LocalHermesAdapter(HermesAdapter):
             "available": resolved_bin is not None,
             "configured_bin": self.hermes_bin,
             "resolved_bin": resolved_bin,
-            "command": [resolved_bin or self.hermes_bin, "chat", "-q", "<read-only prompt>", "--toolsets", SAFE_TOOLSET],
+            "command": [resolved_bin or self.hermes_bin, "chat", "-Q", "-q", "<read-only prompt>", "--toolsets", SAFE_TOOLSET],
             "read_only": True,
             "toolsets": [SAFE_TOOLSET],
             "timeout_seconds": self.timeout_seconds,
@@ -79,7 +79,7 @@ class LocalHermesAdapter(HermesAdapter):
         prompt = self._build_prompt(message, mode)
         try:
             proc = subprocess.Popen(
-                [hermes_bin, "chat", "-q", prompt, "--toolsets", SAFE_TOOLSET],
+                [hermes_bin, "chat", "-Q", "-q", prompt, "--toolsets", SAFE_TOOLSET],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 shell=False,

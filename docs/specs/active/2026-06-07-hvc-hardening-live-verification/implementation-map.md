@@ -13,7 +13,9 @@
   cancellation checks.
 - `apps/server/app/adapters.py`: mock/local Hermes adapters, direct argv launch,
   safe toolset, readiness diagnostics, timeout/cancel/error handling, and
-  malformed empty-output handling.
+  malformed empty-output handling. Local Hermes uses quiet query mode so stdout
+  is already the speakable/display answer while CLI provider failures still fail
+  closed.
 - `apps/server/tests/test_backend.py`: auth, remote guard, confirmation, and
   cancellation coverage.
 

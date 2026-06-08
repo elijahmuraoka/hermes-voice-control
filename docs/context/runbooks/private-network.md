@@ -52,7 +52,7 @@ pnpm dev
 ```
 
 `pnpm env:check` fails if the Hermes binary cannot be resolved. The local
-adapter invokes only `hermes chat -q <prompt> --toolsets safe`.
+adapter invokes only `hermes chat -Q -q <prompt> --toolsets safe`.
 
 ## Real Gemini mode
 

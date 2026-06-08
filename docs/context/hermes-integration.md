@@ -30,12 +30,14 @@ array rather than through a shell. Its default binary path is the local Hermes
 agent binary path from configuration, and it invokes:
 
 ```bash
-hermes chat -q <prompt> --toolsets safe
+hermes chat -Q -q <prompt> --toolsets safe
 ```
 
 Timeouts, cancellation, process launch failures, empty output, and Hermes CLI
 failure transcripts are surfaced as controlled errors so the browser does not
-hang behind or misreport a failed local Hermes bridge.
+hang behind or misreport a failed local Hermes bridge. The `-Q` quiet flag keeps
+stdout to the final answer text so the browser does not speak terminal banners,
+prompt echoes, or session metadata.
 
 `/readyz` includes local-adapter diagnostics when `HVC_HERMES_ADAPTER=local`,
 including whether the configured binary resolves, the read-only command shape,

@@ -228,10 +228,10 @@ def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     result = LocalHermesAdapter(str(hermes)).ask_agent("hi", mode="quick")
     assert result.ok is True
-    assert calls[0][0][1:3] == ["chat", "-q"]
-    assert "Do not take external actions" in calls[0][0][3]
-    assert "mutate files" in calls[0][0][3]
-    assert "send messages" in calls[0][0][3]
+    assert calls[0][0][1:4] == ["chat", "-Q", "-q"]
+    assert "Do not take external actions" in calls[0][0][4]
+    assert "mutate files" in calls[0][0][4]
+    assert "send messages" in calls[0][0][4]
     assert calls[0][1]["shell"] is False
     assert calls[0][0][-2:] == ["--toolsets", "safe"]
 
@@ -249,6 +249,28 @@ def test_local_hermes_adapter_ask_bob_uses_same_safe_bridge(tmp_path, monkeypatc
     assert result.ok is True
     assert result.data["mode"] == "deep"
     assert calls[0][0][-2:] == ["--toolsets", "safe"]
+
+def test_local_hermes_adapter_preserves_quiet_stdout_answer(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    quiet_output = (
+        "| command | purpose |\n"
+        "| hermes chat -Q -q | return only the final answer on stdout |"
+    )
+
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return (quiet_output, "session_id: 20260608_001422_893075")
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+
+    assert result.ok is True
+    assert result.data["speakable"] == quiet_output
+    assert result.data["display"] == quiet_output
 
 def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"

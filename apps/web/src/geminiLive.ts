@@ -332,7 +332,6 @@ export class GeminiLiveSession {
         toolCallSeq,
         toolName: call.name,
       });
-      this.callbacks.onToolCall?.(call);
       return [{ call, toolCallSeq, toolName: call.name }];
     });
     const responseMetrics: Array<{
@@ -346,6 +345,7 @@ export class GeminiLiveSession {
         this.toolCallSequences.delete(call.id);
         continue;
       }
+      this.callbacks.onToolCall?.(call);
       const controller = new AbortController();
       this.toolAbortControllers.set(call.id, controller);
       let response: Record<string, unknown>;

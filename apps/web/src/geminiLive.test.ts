@@ -534,6 +534,7 @@ describe("GeminiLiveSession", () => {
       resolveFirst = resolve;
     });
     const diagnostics: HvcDiagnosticsEvent[] = [];
+    const onToolCall = vi.fn();
     const toolCaller = vi.fn((call) => {
       if (call.id === "call-1") return firstResponse;
       return Promise.resolve({
@@ -545,6 +546,7 @@ describe("GeminiLiveSession", () => {
     const session = new GeminiLiveSession(
       {
         callbacks: {
+          onToolCall,
           onDiagnosticsEvent: (event) => diagnostics.push(event),
         },
         audio: { startCapture: false },
@@ -571,6 +573,12 @@ describe("GeminiLiveSession", () => {
     await Promise.resolve();
 
     expect(toolCaller).toHaveBeenCalledTimes(1);
+    expect(onToolCall).toHaveBeenCalledTimes(1);
+    expect(onToolCall).toHaveBeenCalledWith({
+      id: "call-1",
+      name: "ask_agent",
+      args: { message: "one" },
+    });
     expect(diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -591,6 +599,7 @@ describe("GeminiLiveSession", () => {
 
     expect(toolCanceler).toHaveBeenCalledWith(["call-2"]);
     expect(toolCaller).toHaveBeenCalledTimes(1);
+    expect(onToolCall).toHaveBeenCalledTimes(1);
     expect(diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

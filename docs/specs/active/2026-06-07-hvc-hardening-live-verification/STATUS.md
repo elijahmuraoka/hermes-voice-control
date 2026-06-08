@@ -35,3 +35,12 @@
 - Follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+
+## 2026-06-08
+
+- Second-wave production launch plan added under
+  `plans/2026-06-08-end-to-end-production-plan.md`.
+- GitHub issues #12-#20 were created for provider bakeoff, provider adapter
+  design, private deployment rehearsal, security threat modeling, real Hermes
+  bridge verification, latency instrumentation, final review, open-source
+  release safety, and mobile/audio QA.

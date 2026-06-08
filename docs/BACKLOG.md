@@ -59,3 +59,24 @@ Open work not yet scoped into its own spec.
   own design and issue.
 - [ ] Revisit LiveKit/Pipecat only if HVC needs multi-device rooms, telephony,
   or provider-neutral media pipelines.
+
+## Launch Plan Issues
+
+- [#12](https://github.com/elijahmuraoka/hermes-voice-control/issues/12):
+  realtime voice provider bakeoff and v1 default decision.
+- [#13](https://github.com/elijahmuraoka/hermes-voice-control/issues/13):
+  provider-neutral realtime adapter boundary.
+- [#14](https://github.com/elijahmuraoka/hermes-voice-control/issues/14):
+  private Tailscale deployment and rollback rehearsal.
+- [#15](https://github.com/elijahmuraoka/hermes-voice-control/issues/15):
+  production security threat model and hardening gate.
+- [#16](https://github.com/elijahmuraoka/hermes-voice-control/issues/16):
+  safe real Hermes bridge integration harness.
+- [#17](https://github.com/elijahmuraoka/hermes-voice-control/issues/17):
+  realtime latency and reliability instrumentation.
+- [#18](https://github.com/elijahmuraoka/hermes-voice-control/issues/18):
+  final independent review gauntlet before launch.
+- [#19](https://github.com/elijahmuraoka/hermes-voice-control/issues/19):
+  open-source release safety and fresh-checkout gate.
+- [#20](https://github.com/elijahmuraoka/hermes-voice-control/issues/20):
+  mobile browser and audio QA matrix.

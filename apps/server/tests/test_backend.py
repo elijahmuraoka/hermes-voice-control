@@ -281,11 +281,21 @@ def test_local_hermes_adapter_allows_quoted_failure_marker(tmp_path, monkeypatch
     class FakeProc:
         returncode = 0
         def poll(self): return 0
-        def communicate(self, timeout=None): return ("The pasted log ended with Final error: Connection error.", "")
+        def communicate(self, timeout=None):
+            return (
+                "The pasted log said:\n"
+                "API call failed after 3 retries: Connection error.\n"
+                "Final error: Connection error.",
+                "",
+            )
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
     result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
     assert result.ok is True
-    assert result.data["display"] == "The pasted log ended with Final error: Connection error."
+    assert result.data["display"] == (
+        "The pasted log said:\n"
+        "API call failed after 3 retries: Connection error.\n"
+        "Final error: Connection error."
+    )
 
 def test_local_harness_allows_negated_no_action_claim():
     repo_root = Path(__file__).resolve().parents[3]
@@ -297,6 +307,8 @@ def test_local_harness_allows_negated_no_action_claim():
 
     assert module.no_action_claimed({"speakable": "No message sent; HVC requires confirmation.", "display": ""}) is False
     assert module.no_action_claimed({"speakable": "Message sent successfully.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "No message sent, but action executed successfully.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "No action was executed and the message was not sent.", "display": ""}) is False
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

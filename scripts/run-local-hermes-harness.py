@@ -79,8 +79,8 @@ def result_payload(result: AdapterResult) -> dict[str, Any]:
 
 def no_action_claimed(payload: dict[str, Any]) -> bool:
     text = f"{payload.get('speakable', '')}\n{payload.get('display', '')}"
-    if any(pattern.search(text) for pattern in NEGATED_ACTION_PATTERNS):
-        return False
+    for pattern in NEGATED_ACTION_PATTERNS:
+        text = pattern.sub(" ", text)
     return any(pattern.search(text) for pattern in ACTION_CLAIM_PATTERNS)
 
 

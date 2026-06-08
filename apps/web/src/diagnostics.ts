@@ -87,6 +87,8 @@ declare global {
 const MAX_EVENTS = 200;
 const SECRET_KEY_PATTERN =
   /\b((?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|token)\s*[=:]\s*)("[^"]*"|'[^']*'|[^&\s,;]+)/gi;
+const SECRET_DETAIL_KEY_PATTERN =
+  /(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|token)/i;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
 const SESSION_PATH_PATTERN =
   /\b(session(?:s)?\/)[A-Za-z0-9._~-]{8,}/gi;
@@ -184,9 +186,7 @@ export function summarizeDiagnostics(
     firstAudioPlaybackLatencyMs: latency(sessionStart, firstAudio),
     resumeLatencyMs: latency(firstResume, firstProviderAfterResume),
     sessionClosedAtMs: latency(sessionStart, sessionClose),
-    cancellationCount: events.filter(
-      (event) => event.name === "tool_call_cancellation",
-    ).length,
+    cancellationCount: cancellationCount(events),
     toolCalls,
   };
 }
@@ -196,27 +196,36 @@ function summarizeToolCalls(
 ): HvcToolCallMetric[] {
   const calls = new Map<number, HvcToolCallMetric>();
   for (const event of events) {
-    const seq = numericDetail(event, "toolCallSeq");
-    if (seq === undefined) continue;
-    const current = calls.get(seq) ?? { toolCallSeq: seq };
-    const toolName = stringDetail(event, "toolName");
-    if (toolName) current.toolName = toolName;
-    if (event.name === "tool_call_request") {
-      current.requestAtMs = event.monotonicMs;
+    const seqs = toolCallSeqs(event);
+    if (seqs.length === 0) continue;
+    for (const seq of seqs) {
+      const current = calls.get(seq) ?? { toolCallSeq: seq };
+      const toolName = stringDetail(event, "toolName");
+      if (toolName) current.toolName = toolName;
+      if (event.name === "tool_call_request") {
+        current.requestAtMs = event.monotonicMs;
+      }
+      if (event.name === "tool_call_response") {
+        current.responseAtMs = event.monotonicMs;
+        current.latencyMs =
+          current.requestAtMs === undefined
+            ? undefined
+            : roundMs(event.monotonicMs - current.requestAtMs);
+      }
+      if (event.name === "tool_call_cancellation") {
+        current.cancelledAtMs = event.monotonicMs;
+      }
+      calls.set(seq, current);
     }
-    if (event.name === "tool_call_response") {
-      current.responseAtMs = event.monotonicMs;
-      current.latencyMs =
-        current.requestAtMs === undefined
-          ? undefined
-          : roundMs(event.monotonicMs - current.requestAtMs);
-    }
-    if (event.name === "tool_call_cancellation") {
-      current.cancelledAtMs = event.monotonicMs;
-    }
-    calls.set(seq, current);
   }
   return [...calls.values()];
+}
+
+function cancellationCount(events: readonly HvcDiagnosticsEvent[]): number {
+  return events.reduce((total, event) => {
+    if (event.name !== "tool_call_cancellation") return total;
+    return total + (numericDetail(event, "count") ?? 1);
+  }, 0);
 }
 
 function sanitizeDiagnosticsEvent(
@@ -236,6 +245,10 @@ function sanitizeDiagnosticsDetail(
   const sanitized: HvcDiagnosticsDetail = {};
   for (const [key, value] of Object.entries(detail)) {
     if (value === undefined) continue;
+    if (isSensitiveDetailKey(key)) {
+      sanitized[key] = "[redacted]";
+      continue;
+    }
     if (typeof value === "string") {
       sanitized[key] = redactDiagnosticText(value).slice(0, 160);
     } else if (Array.isArray(value)) {
@@ -253,6 +266,10 @@ function sanitizeDiagnosticsDetail(
     }
   }
   return sanitized;
+}
+
+function isSensitiveDetailKey(key: string): boolean {
+  return SECRET_DETAIL_KEY_PATTERN.test(key);
 }
 
 function firstEvent(
@@ -296,6 +313,22 @@ function numericDetail(
 ): number | undefined {
   const value = event.detail?.[key];
   return typeof value === "number" ? value : undefined;
+}
+
+function numericArrayDetail(
+  event: HvcDiagnosticsEvent,
+  key: string,
+): number[] {
+  const value = event.detail?.[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is number => typeof item === "number");
+}
+
+function toolCallSeqs(event: HvcDiagnosticsEvent): number[] {
+  const single = numericDetail(event, "toolCallSeq");
+  const many = numericArrayDetail(event, "toolCallSeqs");
+  const seqs = single === undefined ? many : [single, ...many];
+  return [...new Set(seqs)];
 }
 
 function stringDetail(

@@ -144,6 +144,11 @@ export class GeminiLiveSession {
     this.applyCaptureGate();
   }
 
+  resume(): void {
+    this.hasFirstProviderResponse = false;
+    this.emitDiagnostics("session_resume");
+  }
+
   disconnect(): void {
     this.cancelActiveToolCalls();
     this.endAudioStream();
@@ -471,6 +476,7 @@ export class GeminiLiveSession {
         : {}),
       ...(toolCallSeqs.length > 1 ? { toolCallSeqs } : {}),
     });
+    for (const id of requestIds) this.toolCallSequences.delete(id);
   }
 }
 

@@ -202,7 +202,7 @@ export default function App() {
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
     if (sessionRef.current) {
-      diagnosticsRef.current?.mark("session_resume");
+      sessionRef.current.resume();
       sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
       dispatch({ type: "RESUME" });
       afterConnected?.();
@@ -248,6 +248,7 @@ export default function App() {
   }
 
   function resumeCall() {
+    sessionRef.current?.resume();
     sessionRef.current?.setMicrophoneEnabled(!stateRef.current.isMuted);
     dispatch({ type: "RESUME" });
   }

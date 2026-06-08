@@ -223,6 +223,43 @@ describe("GeminiLiveSession", () => {
     expect(JSON.stringify(diagnostics)).not.toContain("ephemeral-token-secret");
   });
 
+  it("records the first provider response after resume", async () => {
+    const ws = new MockWebSocket();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({ setupComplete: {} });
+    session.resume();
+    ws.receive({ serverContent: { turnComplete: true } });
+
+    expect(diagnostics.map((event) => event.name)).toEqual([
+      "provider_response_first",
+      "session_resume",
+      "provider_response_first",
+    ]);
+    expect(diagnostics[2]).toMatchObject({
+      detail: { providerEventType: "serverContent" },
+    });
+  });
+
   it("gates capture in hold-to-talk mode while keeping manual chunk sending testable", async () => {
     const ws = new MockWebSocket();
     const audio = new MockAudio();

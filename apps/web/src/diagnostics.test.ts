@@ -32,12 +32,18 @@ describe("diagnostics", () => {
         name: "tool_call_cancellation",
         epochMs: 1190,
         monotonicMs: 200,
-        detail: { toolCallSeq: 2, count: 1 },
+        detail: { toolCallSeqs: [2, 3], count: 2 },
       },
+      { name: "session_resume", epochMs: 1195, monotonicMs: 205 },
       {
         name: "audio_playback_first",
         epochMs: 1210,
         monotonicMs: 220,
+      },
+      {
+        name: "provider_response_first",
+        epochMs: 1220,
+        monotonicMs: 230,
       },
       { name: "session_close", epochMs: 1300, monotonicMs: 310 },
     ];
@@ -45,9 +51,9 @@ describe("diagnostics", () => {
     expect(summarizeDiagnostics(events)).toEqual({
       firstProviderResponseLatencyMs: 120,
       firstAudioPlaybackLatencyMs: 210,
-      resumeLatencyMs: undefined,
+      resumeLatencyMs: 25,
       sessionClosedAtMs: 300,
-      cancellationCount: 1,
+      cancellationCount: 2,
       toolCalls: [
         {
           toolCallSeq: 1,
@@ -57,6 +63,7 @@ describe("diagnostics", () => {
           latencyMs: 50,
         },
         { toolCallSeq: 2, cancelledAtMs: 200 },
+        { toolCallSeq: 3, cancelledAtMs: 200 },
       ],
     });
   });
@@ -81,6 +88,8 @@ describe("diagnostics", () => {
     recorder.startSession();
     recorder.mark("provider_response_first", {
       closeReason: "session_id=sess_123 token=secret",
+      token: "raw-secret",
+      session_id: "sess_456",
     });
 
     const bundle = recorder.copyText();
@@ -91,6 +100,8 @@ describe("diagnostics", () => {
     expect(snapshot.budgets.firstAudioLatencyMs).toBeGreaterThan(0);
     expect(bundle).toContain("[redacted]");
     expect(bundle).not.toContain("token=secret");
+    expect(bundle).not.toContain("raw-secret");
     expect(bundle).not.toContain("sess_123");
+    expect(bundle).not.toContain("sess_456");
   });
 });

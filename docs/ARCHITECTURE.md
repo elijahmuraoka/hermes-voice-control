@@ -17,7 +17,8 @@ Phone/laptop browser over localhost or Tailscale
 ## Components
 
 - `apps/web`: React voice UI, orb state machine, audio worklets, Gemini Live
-  protocol wrapper, transcript drawer, and text fallback.
+  protocol wrapper, local diagnostics recorder, transcript drawer, and text
+  fallback.
 - `apps/server`: FastAPI auth/session layer, Gemini token broker, tool allowlist,
   SQLite store, confirmation records, readiness/log controls, and Hermes adapter
   implementations.
@@ -61,6 +62,7 @@ pruned at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
 - [Tailscale private exposure](context/tailscale-private-exposure.md)
 - [Hermes integration](context/hermes-integration.md)
 - [UX state machine](context/ux-state-machine.md)
+- [Diagnostics](context/diagnostics.md)
 - [Implementation notes](context/implementation-notes.md)
 - [Open-source boundary](context/open-source-boundary.md)
 - [Open-source voice systems research](context/research/open-source-voice-systems.md)

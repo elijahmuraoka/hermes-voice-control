@@ -24,8 +24,12 @@
 ## Frontend
 
 - `apps/web/src/geminiLive.ts`: Gemini Live session orchestration, model resource
-  normalization, audio finalization, tool-call cancellation, and late-response
-  suppression.
+  normalization, audio finalization, local diagnostics events, tool-call
+  cancellation, and late-response suppression.
+- `apps/web/src/diagnostics.ts`: local redacted diagnostics recorder, summaries,
+  and launch-budget access for browser smoke/provider bakeoff.
+- `apps/web/src/diagnosticsBudgets.json`: shared launch budgets for first audio,
+  tool response, reconnect/resume, and smoke flake rate.
 - `apps/web/src/gemini-live/defaults.ts`: default tool schemas and tool caller
   cancellation hooks.
 - `apps/web/src/audio.ts` and worklets: capture/playback/resampling path.
@@ -36,7 +40,7 @@
 ## Verification Scripts
 
 - `scripts/browser-responsive.spec.ts`: Playwright responsive smoke plus real
-  backend token-flow check.
+  backend token-flow check and diagnostics privacy/budget assertions.
 - `scripts/e2e-real-gemini-live.mjs`: real Gemini Live websocket/audio smoke.
 - `scripts/validate-env.mjs`: fail-closed environment checks for private
   exposure, PIN strength, Gemini/local-Hermes prerequisites, and wildcard CORS.

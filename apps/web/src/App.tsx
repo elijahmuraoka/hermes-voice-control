@@ -19,6 +19,11 @@ import { VoiceOrb } from "./components/VoiceOrb";
 import { TranscriptDrawer } from "./components/TranscriptDrawer";
 import { FloatingChat } from "./components/FloatingChat";
 import { agentName, agentNounLower } from "./config";
+import {
+  createHvcDiagnosticsRecorder,
+  exposeHvcDiagnostics,
+  type HvcDiagnosticsRecorder,
+} from "./diagnostics";
 import "./styles.css";
 
 const uid = () => Math.random().toString(36).slice(2);
@@ -45,6 +50,8 @@ export default function App() {
   const stateRef = useRef(state);
   const entriesRef = useRef(entries);
   const sessionRef = useRef<GeminiLiveSession | null>(null);
+  const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
+  const sessionGenerationRef = useRef(0);
   const connectingRef = useRef(false);
   const endingRef = useRef(false);
   const transcriptDraftsRef = useRef<
@@ -52,6 +59,10 @@ export default function App() {
   >({});
   const initialPressState = useMemo(emptyPress, []);
   const pressRef = useRef<PressState>(initialPressState);
+
+  if (diagnosticsRef.current === null) {
+    diagnosticsRef.current = createHvcDiagnosticsRecorder();
+  }
 
   useEffect(() => {
     stateRef.current = state;
@@ -62,6 +73,7 @@ export default function App() {
   }, [entries]);
 
   useEffect(() => {
+    exposeHvcDiagnostics(diagnosticsRef.current);
     const cancel = () => cancelPress();
     const visibility = () => {
       if (document.visibilityState === "hidden") cancelPress();
@@ -77,6 +89,7 @@ export default function App() {
       currentEndingRef.current = true;
       currentSessionRef.current?.disconnect();
       currentSessionRef.current = null;
+      exposeHvcDiagnostics(null);
     };
   }, []);
 
@@ -137,10 +150,18 @@ export default function App() {
     if (event.final) delete transcriptDraftsRef.current[event.role];
   }
 
-  function buildSessionCallbacks(): GeminiLiveCallbacks {
+  function isCurrentSessionGeneration(sessionGeneration: number): boolean {
+    return sessionGeneration === sessionGenerationRef.current;
+  }
+
+  function buildSessionCallbacks(sessionGeneration: number): GeminiLiveCallbacks {
     return {
-      onToken: (token) => setTokenMode(token.mode),
+      onToken: (token) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        setTokenMode(token.mode);
+      },
       onStatus: (status) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
         if (
           status === "setup-complete" ||
           status === "connected" ||
@@ -166,12 +187,24 @@ export default function App() {
           dispatch({ type: "RECOVER" });
         }
       },
-      onTranscript: appendTranscript,
-      onToolCall: (call) =>
-        appendSystem(`${agentName} is using ${call.name}.`, "streaming"),
-      onToolResponse: (response) =>
-        appendSystem(`${response.name} finished.`, "complete"),
+      onTranscript: (event) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        appendTranscript(event);
+      },
+      onToolCall: (call) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        appendSystem(`${agentName} is using ${call.name}.`, "streaming");
+      },
+      onToolResponse: (response) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        appendSystem(`${response.name} finished.`, "complete");
+      },
+      onDiagnosticsEvent: (event) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        diagnosticsRef.current?.record(event);
+      },
       onError: (error) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
         appendSystem(
           error.message || "Gemini Live reported an error.",
           "failed",
@@ -179,6 +212,7 @@ export default function App() {
         dispatch({ type: "ERROR", error: "Voice session failed." });
       },
       onClose: () => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
         sessionRef.current = null;
         endingRef.current = false;
       },
@@ -189,6 +223,7 @@ export default function App() {
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
     if (sessionRef.current) {
+      sessionRef.current.resume();
       sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
       dispatch({ type: "RESUME" });
       afterConnected?.();
@@ -197,10 +232,13 @@ export default function App() {
 
     connectingRef.current = true;
     endingRef.current = false;
+    const sessionGeneration = sessionGenerationRef.current + 1;
+    sessionGenerationRef.current = sessionGeneration;
+    diagnosticsRef.current?.startSession();
     dispatch({ type: "CONNECT" });
 
     const session = new GeminiLiveSession({
-      callbacks: buildSessionCallbacks(),
+      callbacks: buildSessionCallbacks(sessionGeneration),
       audio: { startMuted: stateRef.current.isMuted },
     });
     sessionRef.current = session;
@@ -209,13 +247,15 @@ export default function App() {
       await session.connect();
       afterConnected?.();
     } catch (error) {
-      sessionRef.current = null;
-      appendSystem(
+      const errorMessage =
         error instanceof Error
           ? error.message
-          : "Could not connect to Gemini Live.",
-        "failed",
-      );
+          : "Could not connect to Gemini Live.";
+      if (isCurrentSessionGeneration(sessionGeneration)) {
+        diagnosticsRef.current?.mark("session_error", { message: errorMessage });
+      }
+      sessionRef.current = null;
+      appendSystem(errorMessage, "failed");
       dispatch({
         type: "ERROR",
         error:
@@ -233,6 +273,7 @@ export default function App() {
   }
 
   function resumeCall() {
+    sessionRef.current?.resume();
     sessionRef.current?.setMicrophoneEnabled(!stateRef.current.isMuted);
     dispatch({ type: "RESUME" });
   }

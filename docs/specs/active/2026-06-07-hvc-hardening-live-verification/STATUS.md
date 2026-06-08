@@ -44,3 +44,17 @@
   design, private deployment rehearsal, security threat modeling, real Hermes
   bridge verification, latency instrumentation, final review, open-source
   release safety, and mobile/audio QA.
+- Issue #15 security gate completed the production threat register in
+  `docs/context/security-model.md` and added a dated local security review
+  under this active spec.
+- Backend hardening removed the raw session token from successful PIN-login
+  JSON responses and made free-text tool audit logs metadata-only.
+- Security regression coverage now checks cookie-only PIN login, real Gemini
+  token constraints, raw prompt/transcript/result omission from audit logs,
+  validation-error input stripping, and confirmation-summary audit omission.
+- Verification passed `uv run --extra dev pytest`, `pnpm test`,
+  `pnpm env:check`, `pnpm docs:verify`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`,
+  `git diff --check`, and `pnpm verify`.
+- Strict independent external review remains blocked unless the user explicitly
+  approves exporting branch contents or local agent review tooling is repaired.

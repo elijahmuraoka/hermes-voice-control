@@ -97,9 +97,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not auth.verify_pin(payload.pin, client_key=client_key):
             store.log("auth.pin", "failed", {"pin_supplied": bool(payload.pin)}, error_code="INVALID_PIN")
             raise HTTPException(status_code=401, detail="Invalid PIN")
-        session = auth.create_session(); auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
+        session = auth.create_session()
+        auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
         store.log("auth.pin", "success", {"session_id": session.token})
-        return {"ok": True, "session_id": session.token, "expires_at": session.expires_at.isoformat()}
+        return {"ok": True, "expires_at": session.expires_at.isoformat()}
     @app.post("/auth/logout")
     def logout(request: Request, session_hash: str = Depends(session_dep)):
         token = request.cookies.get("hvc_session")

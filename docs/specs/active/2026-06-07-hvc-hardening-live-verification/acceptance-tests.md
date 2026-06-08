@@ -45,3 +45,22 @@ node scripts/e2e-real-gemini-live.mjs
 - 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+- 2026-06-08: #14/#19 verification passed `pnpm docs:verify`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`,
+  `pnpm env:check`, `pnpm verify`, `pnpm smoke:browser`, and
+  `git diff --check`. `pnpm verify` passed after applying the README server
+  setup step `uv pip install -e '.[dev]'`; the first attempt only failed
+  because `pytest` was not installed in the fresh worktree venv.
+- 2026-06-08: unsafe env probes failed as expected for wildcard
+  `HVC_FRONTEND_ORIGINS`, `HVC_ALLOW_NO_PIN_REMOTE=true`, non-local host
+  without PIN, weak PIN, and real Gemini mode without a key.
+- 2026-06-08: local private-deployment mock rehearsal passed with PIN required,
+  logs disabled, `/healthz` 200, `/readyz` 200, unauthenticated
+  `/auth/session` 401, and PIN login 200. Tailscale Serve live mutation remains
+  blocked until the local Tailscale CLI can load preferences and the operator
+  approves the exact Serve change.
+- 2026-06-08: open-source scan found no untracked non-ignored files, no tracked
+  private env/log/SQLite/transcript paths beyond `.env.example`, no historical
+  private artifact paths beyond `.env.example`, and no high-entropy token
+  history hits. Current scan hits were limited to documented placeholders,
+  environment variable names, cookie field names, and fake-secret tests.

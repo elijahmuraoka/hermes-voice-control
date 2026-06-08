@@ -33,3 +33,15 @@
 - `scripts/browser-responsive.spec.ts`: Playwright responsive smoke plus real
   backend token-flow check.
 - `scripts/e2e-real-gemini-live.mjs`: real Gemini Live websocket/audio smoke.
+- `scripts/validate-env.mjs`: fail-closed environment checks for private
+  exposure, PIN strength, Gemini/local-Hermes prerequisites, and wildcard CORS.
+
+## Release And Deployment Docs
+
+- `docs/context/runbooks/private-network.md`: localhost-first private deployment
+  rehearsal, Tailscale Serve approval path, health checks, rollback, and
+  evidence redaction.
+- `docs/context/tailscale-private-exposure.md`: concise Tailscale Serve posture
+  and PIN-required exposure constraints.
+- `docs/context/open-source-boundary.md`: fresh-checkout mock gate,
+  secret/history scan checklist, redaction rules, and v1.0 release checklist.

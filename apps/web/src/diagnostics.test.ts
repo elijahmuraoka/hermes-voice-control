@@ -70,18 +70,26 @@ describe("diagnostics", () => {
 
   it("redacts tokens, secrets, and session identifiers from diagnostic text", () => {
     const text =
-      'Authorization=Bearer abc.def.ghi token=raw-secret session_id=sess_123456789 sessions/sess_path_123456789 api_key=key {"token":"json-secret","session_id":"sess_json_123456789"}';
+      'Authorization=Bearer abc.def.ghi token=raw-secret access_token=access-secret refresh_token=refresh-secret id-token=id-secret session_id=sess_123456789 sessions/sess_path_123456789 api_key=key {"token":"json-secret","access_token":"json-access","refreshToken":"json-refresh","session_id":"sess_json_123456789"}';
 
     const redacted = redactDiagnosticText(text);
 
     expect(redacted).toContain("Authorization=[redacted]");
     expect(redacted).toContain("token=[redacted]");
+    expect(redacted).toContain("access_token=[redacted]");
+    expect(redacted).toContain("refresh_token=[redacted]");
+    expect(redacted).toContain("id-token=[redacted]");
     expect(redacted).toContain("session_id=[redacted]");
     expect(redacted).toContain("sessions/[redacted]");
     expect(redacted).toContain("api_key=[redacted]");
     expect(redacted).not.toContain("raw-secret");
+    expect(redacted).not.toContain("access-secret");
+    expect(redacted).not.toContain("refresh-secret");
+    expect(redacted).not.toContain("id-secret");
     expect(redacted).not.toContain("sess_123456789");
     expect(redacted).not.toContain("json-secret");
+    expect(redacted).not.toContain("json-access");
+    expect(redacted).not.toContain("json-refresh");
     expect(redacted).not.toContain("sess_json_123456789");
   });
 

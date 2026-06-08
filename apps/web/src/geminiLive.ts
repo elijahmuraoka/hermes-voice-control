@@ -74,6 +74,7 @@ export class GeminiLiveSession {
   private hasFirstProviderResponse = false;
   private hasFirstAudioPlayback = false;
   private sessionClosed = false;
+  private clientInitiatedClose = false;
   private toolCallSequence = 0;
   private readonly canceledToolCallIds = new Set<string>();
   private readonly toolAbortControllers = new Map<string, AbortController>();
@@ -100,6 +101,7 @@ export class GeminiLiveSession {
 
   async connect(): Promise<void> {
     this.emitStatus("connecting");
+    this.clientInitiatedClose = false;
     const token = await this.tokenProvider();
     this.callbacks.onToken?.({
       expires_at: token.expires_at,
@@ -119,8 +121,12 @@ export class GeminiLiveSession {
       this.emitError(new Error("Gemini Live websocket error"));
     socket.onclose = (event) => {
       this.audio?.close();
+      const reason = this.clientInitiatedClose
+        ? "client_disconnect"
+        : "provider_close";
+      this.clientInitiatedClose = false;
       this.emitSessionClose({
-        reason: "provider_close",
+        reason,
         closeCode: event.code,
         closeReason: event.reason,
       });
@@ -152,11 +158,14 @@ export class GeminiLiveSession {
   disconnect(): void {
     this.cancelActiveToolCalls();
     this.endAudioStream();
-    this.socket?.close(1000, "client disconnect");
-    if (!this.socket) {
+    const socket = this.socket;
+    this.socket = undefined;
+    if (socket) {
+      this.clientInitiatedClose = true;
+      socket.close(1000, "client disconnect");
+    } else {
       this.emitSessionClose({ reason: "client_disconnect" });
     }
-    this.socket = undefined;
     this.audio?.close();
   }
 

@@ -30,9 +30,9 @@ class MockWebSocket {
     this.sent.push(JSON.parse(data) as unknown);
   }
 
-  close() {
+  close(code = 1000, reason = "") {
     this.readyState = 3;
-    this.onclose?.(new CloseEvent("close"));
+    this.onclose?.(new CloseEvent("close", { code, reason }));
   }
 }
 
@@ -220,7 +220,51 @@ describe("GeminiLiveSession", () => {
     expect(diagnostics[0]).toMatchObject({
       detail: { providerEventType: "setupComplete" },
     });
+    expect(diagnostics[3]).toMatchObject({
+      detail: {
+        reason: "client_disconnect",
+        closeCode: 1000,
+        closeReason: "client disconnect",
+      },
+    });
     expect(JSON.stringify(diagnostics)).not.toContain("ephemeral-token-secret");
+  });
+
+  it("records provider closes separately from client disconnects", async () => {
+    const ws = new MockWebSocket();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.close(1011, "upstream unavailable");
+
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        name: "session_close",
+        detail: {
+          reason: "provider_close",
+          closeCode: 1011,
+          closeReason: "upstream unavailable",
+        },
+      }),
+    );
   });
 
   it("records the first provider response after resume", async () => {

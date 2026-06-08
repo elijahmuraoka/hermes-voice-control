@@ -76,11 +76,14 @@ describe("diagnostics", () => {
 
   it("redacts tokens, secrets, and session identifiers from diagnostic text", () => {
     const text =
-      'Authorization=Bearer abc.def.ghi token=raw-secret access_token=access-secret refresh_token=refresh-secret id-token=id-secret client_secret=client-secret-value oauth_client_secret=oauth-secret-value clientSecret=camel-secret-value refreshToken=camel-refresh-value session_id=sess_123456789 sessions/sess_path_123456789 bare=sess_bare_123456789 api_key=key Authorization: Basic dXNlcjpwYXNz\nCookie: foo=bar; other=baz\ncookie=client=secret; theme=blue {"token":"json-secret","access_token":"json-access","refreshToken":"json-refresh","client_secret":"json-client-secret","clientSecret":"json-camel-secret","session_id":"sess_json_123456789"}';
+      'Authorization=Bearer abc.def.ghi Authorization=Basic dXNlcjpwYXNz hvc_session=abc123456789 foo_session=sess_prefixed_123456789 x-session-key=keyed-session-token token=raw-secret access_token=access-secret refresh_token=refresh-secret id-token=id-secret client_secret=client-secret-value oauth_client_secret=oauth-secret-value clientSecret=camel-secret-value refreshToken=camel-refresh-value session_id=sess_123456789 sessions/sess_path_123456789 bare=sess_bare_123456789 api_key=key Authorization: Basic dXNlcjpwYXNz\nCookie: foo=bar; other=baz\ncookie=client=secret; theme=blue {"token":"json-secret","access_token":"json-access","refreshToken":"json-refresh","client_secret":"json-client-secret","clientSecret":"json-camel-secret","session_id":"sess_json_123456789"}';
 
     const redacted = redactDiagnosticText(text);
 
     expect(redacted).toContain("Authorization=[redacted]");
+    expect(redacted).toContain("hvc_session=[redacted]");
+    expect(redacted).toContain("foo_session=[redacted]");
+    expect(redacted).toContain("x-session-key=[redacted]");
     expect(redacted).toContain("token=[redacted]");
     expect(redacted).toContain("access_token=[redacted]");
     expect(redacted).toContain("refresh_token=[redacted]");
@@ -97,6 +100,9 @@ describe("diagnostics", () => {
     expect(redacted).toContain("Cookie: [redacted]");
     expect(redacted).toContain("cookie=[redacted]");
     expect(redacted).not.toContain("raw-secret");
+    expect(redacted).not.toContain("abc123456789");
+    expect(redacted).not.toContain("sess_prefixed_123456789");
+    expect(redacted).not.toContain("keyed-session-token");
     expect(redacted).not.toContain("access-secret");
     expect(redacted).not.toContain("refresh-secret");
     expect(redacted).not.toContain("id-secret");

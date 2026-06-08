@@ -86,9 +86,11 @@ declare global {
 
 const MAX_EVENTS = 200;
 const SENSITIVE_KEY_PATTERN =
-  "(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|token|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-])+(?:token|secret|password|pin)|[a-z0-9]+(?:token|secret|password|pin))";
+  "(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|token|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-])+(?:session[_-]?(?:id|key)?|sid|token|secret|password|pin)|[a-z0-9]+(?:token|secret|password|pin))";
 const SECRET_HEADER_PATTERN =
   /\b((?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi;
+const AUTH_ASSIGNMENT_PATTERN =
+  /\b((?:authorization|proxy-authorization)\s*=\s*)(?:(?:Basic|Bearer)\s+)?[A-Za-z0-9._~+/-]+=*/gi;
 const COOKIE_ASSIGNMENT_PATTERN =
   /\b((?:cookie|set-cookie)\s*=\s*)[^\r\n]+/gi;
 const SECRET_KEY_PATTERN = new RegExp(
@@ -121,6 +123,7 @@ export function createHvcDiagnosticsEvent(
 export function redactDiagnosticText(value: string): string {
   return value
     .replace(SECRET_HEADER_PATTERN, "$1[redacted]")
+    .replace(AUTH_ASSIGNMENT_PATTERN, "$1[redacted]")
     .replace(COOKIE_ASSIGNMENT_PATTERN, "$1[redacted]")
     .replace(BEARER_PATTERN, "Bearer [redacted]")
     .replace(JSON_SECRET_KEY_PATTERN, "$1[redacted]")

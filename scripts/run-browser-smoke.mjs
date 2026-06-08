@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { join } from "node:path";
 
 const repoRoot = new URL("..", import.meta.url).pathname;
 const webRoot = join(repoRoot, "apps/web");
-const appUrl = process.env.HVC_E2E_APP_URL ?? "http://127.0.0.1:5173";
+const defaultAppUrl = "http://127.0.0.1:5173";
+const configuredAppUrl = process.env.HVC_E2E_APP_URL ?? defaultAppUrl;
 
 function spawnCommand(command, args, options = {}) {
   return spawn(command, args, {
@@ -28,6 +30,38 @@ function describeExit({ code, signal }) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function canListen(host, port) {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => {
+      probe.close(() => resolve(true));
+    });
+    probe.listen(port, host);
+  });
+}
+
+async function resolveSmokeTarget() {
+  const configured = new URL(configuredAppUrl);
+  const host = configured.hostname;
+  const firstPort = Number(configured.port || 5173);
+  if (process.env.HVC_E2E_APP_URL) {
+    return {
+      appUrl: configured.origin,
+      host,
+      port: firstPort,
+    };
+  }
+  for (let port = firstPort; port < firstPort + 20; port += 1) {
+    if (await canListen(host, port)) {
+      const url = new URL(configured.origin);
+      url.port = String(port);
+      return { appUrl: url.origin, host, port };
+    }
+  }
+  throw new Error(`No available localhost port from ${firstPort} to ${firstPort + 19}`);
 }
 
 async function assertServerStillRunning(server, url) {
@@ -69,9 +103,17 @@ function waitForExit(child) {
 }
 
 async function main() {
+  const target = await resolveSmokeTarget();
   const server = spawnCommand(
     "node",
-    ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5173", "--strictPort"],
+    [
+      "node_modules/vite/bin/vite.js",
+      "--host",
+      target.host,
+      "--port",
+      String(target.port),
+      "--strictPort",
+    ],
     { cwd: webRoot, stdio: "pipe" },
   );
   server.stdout.on("data", (chunk) => process.stdout.write(chunk));
@@ -79,7 +121,7 @@ async function main() {
 
   let exitCode = 0;
   try {
-    await waitForApp(appUrl, server);
+    await waitForApp(target.appUrl, server);
     const smoke = spawnCommand(
       "pnpm",
       [
@@ -89,7 +131,7 @@ async function main() {
         "scripts/browser-responsive.spec.ts",
         "--reporter=list",
       ],
-      { env: { HVC_E2E_APP_URL: appUrl } },
+      { env: { HVC_E2E_APP_URL: target.appUrl } },
     );
     const result = await waitForExit(smoke);
     if (result.code !== 0) exitCode = result.code ?? 1;

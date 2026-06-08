@@ -6,6 +6,11 @@ import {
   type PcmChunk,
 } from "./audio";
 import {
+  createHvcDiagnosticsEvent,
+  type HvcDiagnosticsDetail,
+  type HvcDiagnosticsEventName,
+} from "./diagnostics";
+import {
   defaultTokenProvider,
   defaultToolCaller,
   defaultToolCanceler,
@@ -66,8 +71,13 @@ export class GeminiLiveSession {
   private captureEnabled = true;
   private audioStreamOpen = false;
   private audioGateOpen = false;
+  private hasFirstProviderResponse = false;
+  private hasFirstAudioPlayback = false;
+  private sessionClosed = false;
+  private toolCallSequence = 0;
   private readonly canceledToolCallIds = new Set<string>();
   private readonly toolAbortControllers = new Map<string, AbortController>();
+  private readonly toolCallSequences = new Map<string, number>();
 
   constructor(
     options: GeminiLiveSessionOptions = {},
@@ -109,6 +119,11 @@ export class GeminiLiveSession {
       this.emitError(new Error("Gemini Live websocket error"));
     socket.onclose = (event) => {
       this.audio?.close();
+      this.emitSessionClose({
+        reason: "provider_close",
+        closeCode: event.code,
+        closeReason: event.reason,
+      });
       this.emitStatus("closed");
       this.callbacks.onClose?.(event);
     };
@@ -133,6 +148,9 @@ export class GeminiLiveSession {
     this.cancelActiveToolCalls();
     this.endAudioStream();
     this.socket?.close(1000, "client disconnect");
+    if (!this.socket) {
+      this.emitSessionClose({ reason: "client_disconnect" });
+    }
     this.socket = undefined;
     this.audio?.close();
   }
@@ -172,6 +190,7 @@ export class GeminiLiveSession {
   private async handleMessage(event: MessageEvent): Promise<void> {
     const message = parseServerMessage(event.data);
     if (!message) return;
+    this.recordFirstProviderResponse(message);
 
     if (message.setupComplete || message.setup_complete) {
       this.emitStatus("setup-complete");
@@ -209,6 +228,7 @@ export class GeminiLiveSession {
       this.toolAbortControllers.get(id)?.abort();
     }
     if (requestIds.length > 0) {
+      this.emitToolCancellation(requestIds, "provider");
       void this.toolCanceler(requestIds).catch((error) => this.emitError(error));
     }
   }
@@ -220,6 +240,7 @@ export class GeminiLiveSession {
       this.canceledToolCallIds.add(id);
       this.toolAbortControllers.get(id)?.abort();
     }
+    this.emitToolCancellation(requestIds, "client_disconnect");
     void this.toolCanceler(requestIds).catch((error) => this.emitError(error));
   }
 
@@ -249,6 +270,12 @@ export class GeminiLiveSession {
           inlineData.data,
           GEMINI_OUTPUT_SAMPLE_RATE,
         );
+        if (this.audio && !this.hasFirstAudioPlayback) {
+          this.hasFirstAudioPlayback = true;
+          this.emitDiagnostics("audio_playback_first", {
+            sourceSampleRate: GEMINI_OUTPUT_SAMPLE_RATE,
+          });
+        }
       }
       if (typeof part.text === "string" && part.text.trim()) {
         this.callbacks.onTranscript?.({
@@ -283,12 +310,21 @@ export class GeminiLiveSession {
   private async handleToolCalls(
     calls: Array<Record<string, unknown>>,
   ): Promise<void> {
-    const functionResponses: GeminiFunctionResponse[] = [];
+    const responseMetrics: Array<{
+      response: GeminiFunctionResponse;
+      toolCallSeq: number;
+      toolName: string;
+    }> = [];
 
     for (const rawCall of calls) {
       const call = normalizeFunctionCall(rawCall);
       if (!call) continue;
       if (this.canceledToolCallIds.has(call.id)) continue;
+      const toolCallSeq = this.sequenceToolCall(call.id);
+      this.emitDiagnostics("tool_call_request", {
+        toolCallSeq,
+        toolName: call.name,
+      });
       this.callbacks.onToolCall?.(call);
 
       const controller = new AbortController();
@@ -306,21 +342,40 @@ export class GeminiLiveSession {
         this.toolAbortControllers.delete(call.id);
       }
 
-      if (this.canceledToolCallIds.delete(call.id)) continue;
+      if (this.canceledToolCallIds.delete(call.id)) {
+        this.toolCallSequences.delete(call.id);
+        continue;
+      }
 
       const functionResponse = { id: call.id, name: call.name, response };
-      functionResponses.push(functionResponse);
+      responseMetrics.push({
+        response: functionResponse,
+        toolCallSeq,
+        toolName: call.name,
+      });
     }
 
-    const activeResponses = functionResponses.filter((response) => {
-      if (this.canceledToolCallIds.delete(response.id)) return false;
+    const activeResponses = responseMetrics.filter(({ response }) => {
+      if (this.canceledToolCallIds.delete(response.id)) {
+        this.toolCallSequences.delete(response.id);
+        return false;
+      }
       return true;
     });
-    for (const response of activeResponses) {
+    for (const { response, toolCallSeq, toolName } of activeResponses) {
+      this.emitDiagnostics("tool_call_response", {
+        toolCallSeq,
+        toolName,
+      });
       this.callbacks.onToolResponse?.(response);
+      this.toolCallSequences.delete(response.id);
     }
     if (activeResponses.length > 0) {
-      this.sendJson({ toolResponse: { functionResponses: activeResponses } });
+      this.sendJson({
+        toolResponse: {
+          functionResponses: activeResponses.map(({ response }) => response),
+        },
+      });
     }
   }
 
@@ -329,6 +384,7 @@ export class GeminiLiveSession {
     this.captureStarted = true;
     this.applyCaptureGate();
     await this.audio.startCapture((chunk) => this.sendAudioChunk(chunk));
+    this.emitDiagnostics("mic_start");
     this.emitStatus("listening");
   }
 
@@ -365,9 +421,66 @@ export class GeminiLiveSession {
   }
 
   private emitError(error: Error): void {
+    this.emitDiagnostics("session_error", { message: error.message });
     this.emitStatus("error");
     this.callbacks.onError?.(error);
   }
+
+  private emitDiagnostics(
+    name: HvcDiagnosticsEventName,
+    detail?: HvcDiagnosticsDetail,
+  ): void {
+    this.callbacks.onDiagnosticsEvent?.(
+      createHvcDiagnosticsEvent(name, detail),
+    );
+  }
+
+  private emitSessionClose(detail: HvcDiagnosticsDetail): void {
+    if (this.sessionClosed) return;
+    this.sessionClosed = true;
+    this.emitDiagnostics("session_close", detail);
+  }
+
+  private recordFirstProviderResponse(
+    message: Record<string, unknown>,
+  ): void {
+    if (this.hasFirstProviderResponse) return;
+    this.hasFirstProviderResponse = true;
+    this.emitDiagnostics("provider_response_first", {
+      providerEventType: providerEventType(message),
+    });
+  }
+
+  private sequenceToolCall(id: string): number {
+    const existing = this.toolCallSequences.get(id);
+    if (existing !== undefined) return existing;
+    this.toolCallSequence += 1;
+    this.toolCallSequences.set(id, this.toolCallSequence);
+    return this.toolCallSequence;
+  }
+
+  private emitToolCancellation(requestIds: string[], reason: string): void {
+    const toolCallSeqs = requestIds
+      .map((id) => this.toolCallSequences.get(id))
+      .filter((seq): seq is number => seq !== undefined);
+    this.emitDiagnostics("tool_call_cancellation", {
+      reason,
+      count: requestIds.length,
+      ...(toolCallSeqs.length === 1
+        ? { toolCallSeq: toolCallSeqs[0] }
+        : {}),
+      ...(toolCallSeqs.length > 1 ? { toolCallSeqs } : {}),
+    });
+  }
+}
+
+function providerEventType(message: Record<string, unknown>): string {
+  if (message.setupComplete || message.setup_complete) return "setupComplete";
+  if (message.serverContent || message.server_content) return "serverContent";
+  if (message.toolCall || message.tool_call) return "toolCall";
+  if (message.toolCallCancellation || message.tool_call_cancellation)
+    return "toolCallCancellation";
+  return "message";
 }
 
 export { GEMINI_INPUT_MIME_TYPE };

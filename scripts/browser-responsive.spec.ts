@@ -17,6 +17,25 @@ const viewports = [
   { name: "desktop-1280", width: 1280, height: 900 },
 ];
 
+interface BrowserDiagnostics {
+  snapshot(): {
+    privacy: { localOnly: boolean; redacted: boolean };
+    budgets: {
+      firstAudioLatencyMs: number;
+      toolResponseLatencyMs: number;
+      reconnectResumeLatencyMs: number;
+      smokeFlakeRate: number;
+    };
+    events: unknown[];
+  };
+  copyText(): string;
+  redactText(value: string): string;
+}
+
+interface BrowserWindowWithDiagnostics {
+  __HVC_DIAGNOSTICS__?: BrowserDiagnostics;
+}
+
 test.use({
   permissions: ["microphone"],
   launchOptions: {
@@ -95,6 +114,45 @@ for (const viewport of viewports) {
     expect(consoleErrors).toEqual([]);
   });
 }
+
+test("exposes local redacted diagnostics with launch budgets", async ({ page }) => {
+  await page.goto(APP_URL, { waitUntil: "networkidle" });
+
+  const diagnostics = await page.evaluate(() => {
+    const api = (window as BrowserWindowWithDiagnostics).__HVC_DIAGNOSTICS__;
+    if (!api) return null;
+    const snapshot = api.snapshot();
+    return {
+      privacy: snapshot.privacy,
+      budgets: snapshot.budgets,
+      eventsLength: snapshot.events.length,
+      copyText: api.copyText(),
+      redacted: api.redactText(
+        "Authorization=Bearer abc.def.ghi session_id=sess_123 token=secret",
+      ),
+    };
+  });
+
+  expect(diagnostics).not.toBeNull();
+  expect(diagnostics?.privacy).toMatchObject({
+    localOnly: true,
+    redacted: true,
+  });
+  expect(diagnostics?.eventsLength).toBe(0);
+  expect(diagnostics?.budgets.firstAudioLatencyMs).toBeLessThanOrEqual(3000);
+  expect(diagnostics?.budgets.toolResponseLatencyMs).toBeLessThanOrEqual(5000);
+  expect(diagnostics?.budgets.reconnectResumeLatencyMs).toBeLessThanOrEqual(
+    diagnostics?.budgets.firstAudioLatencyMs ?? 0,
+  );
+  expect(diagnostics?.budgets.smokeFlakeRate).toBeLessThanOrEqual(0.02);
+  expect(diagnostics?.copyText).toContain('"localOnly": true');
+  expect(diagnostics?.redacted).toContain("Authorization=[redacted]");
+  expect(diagnostics?.redacted).toContain("session_id=[redacted]");
+  expect(diagnostics?.redacted).toContain("token=[redacted]");
+  expect(diagnostics?.redacted).not.toContain("abc.def.ghi");
+  expect(diagnostics?.redacted).not.toContain("sess_123");
+  expect(diagnostics?.redacted).not.toContain("secret");
+});
 
 test("honors reduced motion preference", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });

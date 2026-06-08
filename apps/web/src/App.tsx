@@ -19,6 +19,11 @@ import { VoiceOrb } from "./components/VoiceOrb";
 import { TranscriptDrawer } from "./components/TranscriptDrawer";
 import { FloatingChat } from "./components/FloatingChat";
 import { agentName, agentNounLower } from "./config";
+import {
+  createHvcDiagnosticsRecorder,
+  exposeHvcDiagnostics,
+  type HvcDiagnosticsRecorder,
+} from "./diagnostics";
 import "./styles.css";
 
 const uid = () => Math.random().toString(36).slice(2);
@@ -45,6 +50,7 @@ export default function App() {
   const stateRef = useRef(state);
   const entriesRef = useRef(entries);
   const sessionRef = useRef<GeminiLiveSession | null>(null);
+  const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
   const connectingRef = useRef(false);
   const endingRef = useRef(false);
   const transcriptDraftsRef = useRef<
@@ -52,6 +58,10 @@ export default function App() {
   >({});
   const initialPressState = useMemo(emptyPress, []);
   const pressRef = useRef<PressState>(initialPressState);
+
+  if (diagnosticsRef.current === null) {
+    diagnosticsRef.current = createHvcDiagnosticsRecorder();
+  }
 
   useEffect(() => {
     stateRef.current = state;
@@ -62,6 +72,7 @@ export default function App() {
   }, [entries]);
 
   useEffect(() => {
+    exposeHvcDiagnostics(diagnosticsRef.current);
     const cancel = () => cancelPress();
     const visibility = () => {
       if (document.visibilityState === "hidden") cancelPress();
@@ -77,6 +88,7 @@ export default function App() {
       currentEndingRef.current = true;
       currentSessionRef.current?.disconnect();
       currentSessionRef.current = null;
+      exposeHvcDiagnostics(null);
     };
   }, []);
 
@@ -171,6 +183,7 @@ export default function App() {
         appendSystem(`${agentName} is using ${call.name}.`, "streaming"),
       onToolResponse: (response) =>
         appendSystem(`${response.name} finished.`, "complete"),
+      onDiagnosticsEvent: (event) => diagnosticsRef.current?.record(event),
       onError: (error) => {
         appendSystem(
           error.message || "Gemini Live reported an error.",
@@ -189,6 +202,7 @@ export default function App() {
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
     if (sessionRef.current) {
+      diagnosticsRef.current?.mark("session_resume");
       sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
       dispatch({ type: "RESUME" });
       afterConnected?.();
@@ -197,6 +211,7 @@ export default function App() {
 
     connectingRef.current = true;
     endingRef.current = false;
+    diagnosticsRef.current?.startSession();
     dispatch({ type: "CONNECT" });
 
     const session = new GeminiLiveSession({

@@ -24,6 +24,8 @@
   Gemini/Google API keys.
 - Browser audio worklets capture PCM, resample to Gemini input requirements, and
   play Gemini PCM output.
+- Browser diagnostics stay in local memory and expose a redacted devtools bundle
+  at `window.__HVC_DIAGNOSTICS__`.
 - Gemini Live protocol support is split across a public `geminiLive.ts` facade
   plus focused `gemini-live/` modules for types, defaults, protocol helpers,
   and tool-call normalization.
@@ -56,6 +58,8 @@
   handling, cancellation handling, and launch-error handling.
 - Root operator scripts now include `pnpm dev`, `pnpm env:check`,
   `pnpm smoke:browser`, `pnpm screenshots:update`, and `pnpm perf:budget`.
+- `pnpm perf:budget` validates bundle size plus launch latency/reliability
+  budgets for first audio, tool response, reconnect/resume, and smoke flakes.
 
 ## Tradeoffs
 

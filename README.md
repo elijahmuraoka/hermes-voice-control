@@ -137,6 +137,20 @@ GEMINI_API_KEY=...
 
 Then start the backend and web app as above.
 
+## Local Diagnostics
+
+Realtime latency diagnostics stay in browser memory by default. Open devtools on
+the HVC page and run `window.__HVC_DIAGNOSTICS__.snapshot()` for the current
+redacted bundle, or `window.__HVC_DIAGNOSTICS__.copyText()` for copyable JSON.
+
+The bundle includes local timestamps for microphone start, first provider
+response, first audio playback, tool-call request/response, cancellation, and
+session close. It omits tokens, session IDs, tool arguments, response bodies,
+cookies, PINs, and authorization headers.
+
+See [Diagnostics](docs/context/diagnostics.md) for launch budgets and provider
+bakeoff reuse.
+
 ## Optional Local Hermes Agent Adapter
 
 The default Hermes agent adapter is mock. To connect a local Hermes-compatible

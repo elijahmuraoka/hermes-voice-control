@@ -5,6 +5,7 @@ import {
   type PcmChunk,
 } from "./audio";
 import { buildGeminiLiveUrl, GeminiLiveSession } from "./geminiLive";
+import type { HvcDiagnosticsEvent } from "./diagnostics";
 
 class MockWebSocket {
   readyState = 0;
@@ -151,7 +152,7 @@ describe("GeminiLiveSession", () => {
       {},
       {
         tokenProvider: async () => ({
-          token: "t",
+          token: "ephemeral-token-secret",
           expires_at: "x",
           mode: "mock",
         }),
@@ -171,6 +172,55 @@ describe("GeminiLiveSession", () => {
         mediaChunks: [{ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" }],
       },
     });
+  });
+
+  it("emits diagnostics for provider response, mic start, first audio playback, and close", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        audio,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({ setupComplete: {} });
+    await Promise.resolve();
+    ws.receive({
+      serverContent: {
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "audio" } },
+          ],
+        },
+      },
+    });
+    await Promise.resolve();
+    session.disconnect();
+
+    expect(diagnostics.map((event) => event.name)).toEqual([
+      "provider_response_first",
+      "mic_start",
+      "audio_playback_first",
+      "session_close",
+    ]);
+    expect(diagnostics[0]).toMatchObject({
+      detail: { providerEventType: "setupComplete" },
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain("ephemeral-token-secret");
   });
 
   it("gates capture in hold-to-talk mode while keeping manual chunk sending testable", async () => {
@@ -290,13 +340,20 @@ describe("GeminiLiveSession", () => {
     });
     let observedSignal: AbortSignal | undefined;
     const onToolResponse = vi.fn();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
     const toolCaller = vi.fn((_call, context: { signal: AbortSignal }) => {
       observedSignal = context.signal;
       return toolResponse;
     });
     const toolCanceler = vi.fn(async () => ({ status: "cancelled" }));
     const session = new GeminiLiveSession(
-      { callbacks: { onToolResponse }, audio: { startCapture: false } },
+      {
+        callbacks: {
+          onToolResponse,
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+      },
       {
         tokenProvider: async () => ({
           token: "t",
@@ -336,6 +393,19 @@ describe("GeminiLiveSession", () => {
     expect(observedSignal?.aborted).toBe(true);
     expect(toolCanceler).toHaveBeenCalledWith(["call-canceled"]);
     expect(onToolResponse).not.toHaveBeenCalled();
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tool_call_request",
+          detail: { toolCallSeq: 1, toolName: "ask_agent" },
+        }),
+        expect.objectContaining({
+          name: "tool_call_cancellation",
+          detail: { count: 1, reason: "provider", toolCallSeq: 1 },
+        }),
+      ]),
+    );
+    expect(JSON.stringify(diagnostics)).not.toContain("call-canceled");
     expect(ws.sent).toHaveLength(1);
     expect(ws.sent[0]).toHaveProperty("setup");
   });
@@ -349,8 +419,14 @@ describe("GeminiLiveSession", () => {
       return never;
     });
     const toolCanceler = vi.fn(async () => ({ status: "cancelled" }));
+    const diagnostics: HvcDiagnosticsEvent[] = [];
     const session = new GeminiLiveSession(
-      { audio: { startCapture: false } },
+      {
+        callbacks: {
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+      },
       {
         tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
         webSocketFactory: () => ws,
@@ -423,12 +499,18 @@ describe("GeminiLiveSession", () => {
 
   it("calls backend tools and returns matching Gemini tool responses", async () => {
     const ws = new MockWebSocket();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
     const toolCaller = vi.fn(async () => ({
       status: "completed",
       result: { display: "ok" },
     }));
     const session = new GeminiLiveSession(
-      { audio: { startCapture: false } },
+      {
+        callbacks: {
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+      },
       {
         tokenProvider: async () => ({
           token: "t",
@@ -460,6 +542,19 @@ describe("GeminiLiveSession", () => {
       },
       { signal: expect.any(AbortSignal) },
     );
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tool_call_request",
+          detail: { toolCallSeq: 1, toolName: "ask_agent" },
+        }),
+        expect.objectContaining({
+          name: "tool_call_response",
+          detail: { toolCallSeq: 1, toolName: "ask_agent" },
+        }),
+      ]),
+    );
+    expect(JSON.stringify(diagnostics)).not.toContain("call-1");
     expect(ws.sent.at(-1)).toEqual({
       toolResponse: {
         functionResponses: [

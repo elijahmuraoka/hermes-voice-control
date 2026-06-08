@@ -45,13 +45,19 @@ describe("diagnostics", () => {
         epochMs: 1220,
         monotonicMs: 230,
       },
+      { name: "session_resume", epochMs: 1230, monotonicMs: 240 },
+      {
+        name: "provider_response_first",
+        epochMs: 1270,
+        monotonicMs: 280,
+      },
       { name: "session_close", epochMs: 1300, monotonicMs: 310 },
     ];
 
     expect(summarizeDiagnostics(events)).toEqual({
       firstProviderResponseLatencyMs: 120,
       firstAudioPlaybackLatencyMs: 210,
-      resumeLatencyMs: 25,
+      resumeLatencyMs: 40,
       sessionClosedAtMs: 300,
       cancellationCount: 2,
       toolCalls: [

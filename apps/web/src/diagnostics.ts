@@ -179,9 +179,9 @@ export function summarizeDiagnostics(
   const sessionStart = firstEvent(events, "session_start");
   const firstProvider = firstEvent(events, "provider_response_first");
   const firstAudio = firstEvent(events, "audio_playback_first");
-  const firstResume = firstEvent(events, "session_resume");
-  const firstProviderAfterResume = firstResume
-    ? firstEventAfter(events, "provider_response_first", firstResume.monotonicMs)
+  const latestResume = lastEvent(events, "session_resume");
+  const firstProviderAfterResume = latestResume
+    ? firstEventAfter(events, "provider_response_first", latestResume.monotonicMs)
     : undefined;
   const sessionClose = lastEvent(events, "session_close");
   const toolCalls = summarizeToolCalls(events);
@@ -189,7 +189,7 @@ export function summarizeDiagnostics(
   return {
     firstProviderResponseLatencyMs: latency(sessionStart, firstProvider),
     firstAudioPlaybackLatencyMs: latency(sessionStart, firstAudio),
-    resumeLatencyMs: latency(firstResume, firstProviderAfterResume),
+    resumeLatencyMs: latency(latestResume, firstProviderAfterResume),
     sessionClosedAtMs: latency(sessionStart, sessionClose),
     cancellationCount: cancellationCount(events),
     toolCalls,

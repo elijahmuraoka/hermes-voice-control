@@ -83,11 +83,14 @@ Allowed hits:
 
 - `.env.example` placeholder names.
 - README/setup docs that name environment variables without values.
+- Source-code references to environment variable names, cookie names, or header
+  names without real values.
 - Tests that assert redaction behavior using fake values.
 - This boundary document's scan patterns.
 
-Everything else needs removal, rotation of the exposed credential if real, and
-a history-rewrite decision before tagging.
+Everything else needs classification. Real credential values, private hostnames,
+private IPs, cookies, or session ids need removal, rotation if exposed, and a
+history-rewrite decision before tagging.
 
 ## Evidence Redaction
 

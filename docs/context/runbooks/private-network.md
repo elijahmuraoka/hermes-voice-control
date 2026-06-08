@@ -57,8 +57,9 @@ cd ../..
 Set a rehearsal-only PIN and keep the database under ignored local state:
 
 ```bash
-mkdir -p .private/rehearsal
-export HVC_PIN_FILE=.private/rehearsal/hvc-pin
+export HVC_REHEARSAL_DIR="$PWD/.private/rehearsal"
+mkdir -p "$HVC_REHEARSAL_DIR"
+export HVC_PIN_FILE="$HVC_REHEARSAL_DIR/hvc-pin"
 openssl rand -hex 12 > "$HVC_PIN_FILE"
 chmod 600 "$HVC_PIN_FILE"
 
@@ -70,7 +71,7 @@ export HVC_REQUIRE_PIN=true
 export HVC_PIN="$(cat "$HVC_PIN_FILE")"
 export HVC_SECURE_COOKIES=false
 export HVC_ALLOW_LOGS_ENDPOINT=false
-export HVC_DB_PATH=.private/rehearsal/hvc.sqlite3
+export HVC_DB_PATH="$HVC_REHEARSAL_DIR/hvc.sqlite3"
 
 pnpm env:check
 pnpm --filter @hvc/web build
@@ -90,7 +91,8 @@ Run health and auth checks from another terminal. Reload the same
 rehearsal-only PIN from ignored local state before the positive login check:
 
 ```bash
-export HVC_PIN="$(cat .private/rehearsal/hvc-pin)"
+export HVC_REHEARSAL_DIR="$PWD/.private/rehearsal"
+export HVC_PIN="$(cat "$HVC_REHEARSAL_DIR/hvc-pin")"
 curl -fsS http://127.0.0.1:8765/healthz
 curl -fsS http://127.0.0.1:8765/readyz
 curl -i http://127.0.0.1:8765/auth/session
@@ -234,7 +236,8 @@ tailscale serve status --json
 Then stop the local backend and clean rehearsal-only state:
 
 ```bash
-rm -f .private/rehearsal/hvc.sqlite3 .private/rehearsal/hvc.sqlite3-*
+export HVC_REHEARSAL_DIR="$PWD/.private/rehearsal"
+rm -f "$HVC_REHEARSAL_DIR"/hvc.sqlite3 "$HVC_REHEARSAL_DIR"/hvc.sqlite3-*
 ```
 
 Rollback is complete only when:

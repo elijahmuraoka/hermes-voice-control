@@ -168,6 +168,8 @@ Preflight:
 ```bash
 tailscale status
 tailscale serve status --json
+mkdir -p .private/rehearsal
+tailscale serve get-config .private/rehearsal/tailscale-serve-before.json --all
 ```
 
 Keep FastAPI bound to localhost. For HTTPS private-network exposure, use
@@ -214,20 +216,17 @@ that local proxy through Tailscale Serve.
 
 ## Rollback
 
-Use the matching `off` command for the Serve listener you created. The target is
-optional in `off` mode, so prefer disabling the exact listener flag without
-repeating the backend URL:
+Restore the Serve configuration captured during preflight:
 
 ```bash
-tailscale serve --https=443 off
+tailscale serve set-config .private/rehearsal/tailscale-serve-before.json --all
 tailscale serve status --json
 ```
 
-If this node is dedicated to HVC and no other Serve config is expected, clear
-Serve state completely:
+If no saved preflight config exists, use reset only when this node is dedicated
+to HVC and the operator confirms no other Serve config needs to be preserved:
 
 ```bash
-tailscale serve get-config --all
 tailscale serve reset
 tailscale serve status --json
 ```

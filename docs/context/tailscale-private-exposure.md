@@ -14,6 +14,8 @@ export HVC_SECURE_COOKIES=true
 export HVC_ALLOW_LOGS_ENDPOINT=false
 
 pnpm env:check
+mkdir -p .private/rehearsal
+tailscale serve get-config .private/rehearsal/tailscale-serve-before.json --all
 tailscale serve --bg --https=443 http://127.0.0.1:8765
 ```
 
@@ -68,16 +70,16 @@ Expected: readiness is HTTP 200 with `pin_required: true` and
 
 ## Rollback
 
-Disable the exact Serve listener:
+Restore the Serve configuration captured before the rehearsal:
 
 ```bash
-tailscale serve --https=443 off
+tailscale serve set-config .private/rehearsal/tailscale-serve-before.json --all
 tailscale serve status --json
 ```
 
-Use `tailscale serve reset` only when this node has no other Serve
-configuration to preserve. Check `tailscale serve get-config --all` first if
-there is any chance the node serves other private services.
+Use `tailscale serve reset` only when the node is dedicated to HVC, no saved
+preflight config exists, and the operator confirms there is no other Serve
+configuration to preserve.
 
 ## Remote Header Guard
 

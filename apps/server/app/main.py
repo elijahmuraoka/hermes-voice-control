@@ -36,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.assert_safe_bind()
     settings.assert_safe_cors()
     settings.assert_safe_auth()
+    settings.assert_safe_hermes()
     store = Store(settings.db_path)
     store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
     auth = AuthManager(settings.pin, settings.session_ttl_seconds, store)

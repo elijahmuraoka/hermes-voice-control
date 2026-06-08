@@ -151,6 +151,26 @@ def test_pin_mode_requires_non_default_strong_pin(tmp_path):
             create_app(Settings(pin=weak_pin, require_pin=True, db_path=tmp_path / f"weak-{weak_pin}.sqlite3"))
 
 
+@pytest.mark.parametrize("timeout_seconds", [0, -1, 601])
+def test_hermes_timeout_bounds_enforced(tmp_path, timeout_seconds):
+    with pytest.raises(RuntimeError, match="HVC_HERMES_TIMEOUT_SECONDS"):
+        create_app(
+            Settings(
+                pin=TEST_PIN,
+                db_path=tmp_path / f"timeout-{timeout_seconds}.sqlite3",
+                hermes_timeout_seconds=timeout_seconds,
+            )
+        )
+
+
+def test_env_hermes_timeout_bounds_enforced(tmp_path, monkeypatch):
+    monkeypatch.setenv("HVC_DB_PATH", str(tmp_path / "env-timeout.sqlite3"))
+    monkeypatch.setenv("HVC_HERMES_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(RuntimeError, match="HVC_HERMES_TIMEOUT_SECONDS"):
+        create_app()
+
+
 def test_mock_gemini_token_not_logged_raw(tmp_path):
     client = make_client(tmp_path)
     res = client.post("/gemini/ephemeral-token"); assert res.status_code == 200
@@ -345,6 +365,16 @@ def test_local_harness_refuses_before_parsing_bad_timeout_env(monkeypatch, capsy
     captured = capsys.readouterr()
     assert "Set HVC_REAL_HERMES_HARNESS=1" in captured.out
     assert "ValueError" not in captured.err
+
+def test_local_harness_accepts_pnpm_forwarded_separator(monkeypatch, capsys):
+    module = load_harness_module()
+    monkeypatch.delenv("HVC_REAL_HERMES_HARNESS", raising=False)
+    monkeypatch.setattr(module.sys, "argv", ["run-local-hermes-harness.py", "--", "--timeout-seconds", "5"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "Set HVC_REAL_HERMES_HARNESS=1" in captured.out
+    assert "unrecognized arguments" not in captured.err
 
 def test_local_harness_reports_bad_timeout_after_opt_in(monkeypatch, capsys):
     module = load_harness_module()

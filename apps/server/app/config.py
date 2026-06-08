@@ -8,6 +8,8 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "localhost", "::1", "testclient"}
 DEFAULT_PIN = "000000"
 COMMON_WEAK_PINS = {"12345678", "87654321", "password", "password1", "aaaaaaaa", "11111111", "00000000", "qwertyui", "change-me", "changeme"}
+HERMES_TIMEOUT_SECONDS_MIN = 1
+HERMES_TIMEOUT_SECONDS_MAX = 600
 
 
 def _is_sequential(value: str) -> bool:
@@ -101,3 +103,7 @@ class Settings:
     def assert_safe_auth(self) -> None:
         if self.require_pin and is_weak_pin(self.pin):
             raise RuntimeError("HVC_REQUIRE_PIN=true requires HVC_PIN to be non-default, at least 8 characters, and not common/repeated/sequential")
+
+    def assert_safe_hermes(self) -> None:
+        if not HERMES_TIMEOUT_SECONDS_MIN <= self.hermes_timeout_seconds <= HERMES_TIMEOUT_SECONDS_MAX:
+            raise RuntimeError("HVC_HERMES_TIMEOUT_SECONDS must be between 1 and 600 seconds")

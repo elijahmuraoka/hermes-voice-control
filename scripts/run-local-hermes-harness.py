@@ -128,7 +128,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hermes-bin", default=os.getenv("HVC_HERMES_BIN", "hermes"))
     parser.add_argument("--timeout-seconds", type=int, default=None)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    return parser.parse_args()
+    argv = sys.argv[1:]
+    if argv[:1] == ["--"]:
+        argv = argv[1:]
+    return parser.parse_args(argv)
 
 
 def resolve_timeout_seconds(cli_value: int | None) -> int:

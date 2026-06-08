@@ -173,6 +173,53 @@ describe("GeminiLiveSession", () => {
     });
   });
 
+  it("reports microphone capture failures during setup and closes the broken session", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    audio.startCapture = vi.fn(async () => {
+      throw new Error("Microphone permission denied");
+    });
+    const onClose = vi.fn();
+    const onError = vi.fn();
+    const statuses: string[] = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onClose,
+          onError,
+          onStatus: (status) => statuses.push(status),
+        },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        audio,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({ setupComplete: {} });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(statuses).toEqual([
+      "connecting",
+      "connected",
+      "setup-complete",
+      "error",
+    ]);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Microphone permission denied" }),
+    );
+    expect(audio.closed).toBe(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("gates capture in hold-to-talk mode while keeping manual chunk sending testable", async () => {
     const ws = new MockWebSocket();
     const audio = new MockAudio();

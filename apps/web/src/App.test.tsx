@@ -13,6 +13,7 @@ const geminiMock = vi.hoisted(() => ({ instances: [] as any[] }));
 
 vi.mock("./geminiLive", () => {
   class GeminiLiveSession {
+    options: any;
     callbacks: any;
     connect = vi.fn(async () => {
       this.callbacks.onToken?.({
@@ -28,6 +29,7 @@ vi.mock("./geminiLive", () => {
     interrupt = vi.fn(() => this.callbacks.onStatus?.("interrupted"));
 
     constructor(options: any) {
+      this.options = options;
       this.callbacks = options.callbacks;
       geminiMock.instances.push(this);
     }
@@ -160,6 +162,27 @@ describe("App", () => {
     expect(
       geminiMock.instances[0].setMicrophoneEnabled,
     ).toHaveBeenLastCalledWith(true);
+  });
+
+  it("can start a voice session after muting before the first connection", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^Mute$/ }));
+    expect(screen.getByText("Mic paused")).toBeInTheDocument();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(screen.getByText("test voice")).toBeInTheDocument(),
+    );
+    expect(geminiMock.instances).toHaveLength(1);
+    expect(geminiMock.instances[0].options.audio.startMuted).toBe(true);
+    expect(
+      screen.getByRole("button", { name: /^Unmute$/ }),
+    ).toBeInTheDocument();
   });
 
   it("text focus disables active voice capture", async () => {

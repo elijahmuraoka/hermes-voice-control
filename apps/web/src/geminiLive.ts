@@ -175,8 +175,14 @@ export class GeminiLiveSession {
 
     if (message.setupComplete || message.setup_complete) {
       this.emitStatus("setup-complete");
-      if (this.sessionOptions.audio?.startCapture !== false)
-        await this.startCapture();
+      if (this.sessionOptions.audio?.startCapture !== false) {
+        try {
+          await this.startCapture();
+        } catch (error) {
+          this.failSession(error);
+          return;
+        }
+      }
     }
 
     const serverContent = message.serverContent ?? message.server_content;
@@ -360,6 +366,25 @@ export class GeminiLiveSession {
     this.socket.send(JSON.stringify(payload));
   }
 
+  private failSession(error: unknown): void {
+    this.emitError(toError(error, "Gemini Live session failed"));
+    this.cancelActiveToolCalls();
+    this.endAudioStream();
+    const socket = this.socket;
+    this.socket = undefined;
+    this.audio?.close();
+    if (socket) {
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onerror = null;
+      socket.onclose = null;
+      try {
+        socket.close(1011, "client session error");
+      } catch {}
+    }
+    this.callbacks.onClose?.();
+  }
+
   private emitStatus(status: GeminiLiveStatus): void {
     this.callbacks.onStatus?.(status);
   }
@@ -368,6 +393,12 @@ export class GeminiLiveSession {
     this.emitStatus("error");
     this.callbacks.onError?.(error);
   }
+}
+
+function toError(error: unknown, fallback: string): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === "string" && error.trim()) return new Error(error);
+  return new Error(fallback);
 }
 
 export { GEMINI_INPUT_MIME_TYPE };

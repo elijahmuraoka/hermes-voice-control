@@ -9,6 +9,8 @@
 - `tomoji docs index --verify`
 - `tomoji docs audit`
 - `pnpm smoke:browser`
+- Manual mobile/browser audio QA checklist:
+  `docs/specs/active/2026-06-07-hvc-hardening-live-verification/mobile-browser-audio-qa.md`
 
 - With real Gemini credentials configured on the backend, run:
 
@@ -45,3 +47,13 @@ node scripts/e2e-real-gemini-live.mjs
 - 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+- 2026-06-08: Issue #20 browser smoke coverage expanded for constrained mobile
+  viewport, deterministic keyboard focus through the transcript toggle,
+  microphone permission denial/retry, muted-start retry, slow token fetch, and
+  barge-in reachability. Real device Safari/phone audio-output checks are
+  tracked in the manual QA checklist.
+- 2026-06-08: Issue #20 verification passed `pnpm smoke:browser` with 10
+  browser checks passing and the opt-in real backend token flow skipped,
+  `pnpm verify` with web/backend tests, build, perf budget, and docs verify,
+  plus `pnpm docs:verify`, `tomoji docs index --verify --json`,
+  `tomoji docs audit --json`, and `git diff --check`.

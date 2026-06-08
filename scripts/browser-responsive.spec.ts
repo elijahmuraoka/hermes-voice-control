@@ -128,7 +128,7 @@ test("exposes local redacted diagnostics with launch budgets", async ({ page }) 
       eventsLength: snapshot.events.length,
       copyText: api.copyText(),
       redacted: api.redactText(
-        "Authorization=Bearer abc.def.ghi session_id=sess_123 token=secret",
+        "Authorization=Bearer abc.def.ghi session_id=sess_123 token=secret\nAuthorization: Basic dXNlcjpwYXNz\nCookie: foo=bar; other=baz",
       ),
     };
   });
@@ -147,9 +147,14 @@ test("exposes local redacted diagnostics with launch budgets", async ({ page }) 
   expect(diagnostics?.budgets.smokeFlakeRate).toBeLessThanOrEqual(0.02);
   expect(diagnostics?.copyText).toContain('"localOnly": true');
   expect(diagnostics?.redacted).toContain("Authorization=[redacted]");
+  expect(diagnostics?.redacted).toContain("Authorization: [redacted]");
+  expect(diagnostics?.redacted).toContain("Cookie: [redacted]");
   expect(diagnostics?.redacted).toContain("session_id=[redacted]");
   expect(diagnostics?.redacted).toContain("token=[redacted]");
   expect(diagnostics?.redacted).not.toContain("abc.def.ghi");
+  expect(diagnostics?.redacted).not.toContain("dXNlcjpwYXNz");
+  expect(diagnostics?.redacted).not.toContain("foo=bar");
+  expect(diagnostics?.redacted).not.toContain("other=baz");
   expect(diagnostics?.redacted).not.toContain("sess_123");
   expect(diagnostics?.redacted).not.toContain("secret");
 });

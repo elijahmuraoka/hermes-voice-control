@@ -85,6 +85,10 @@ declare global {
 }
 
 const MAX_EVENTS = 200;
+const SECRET_HEADER_PATTERN =
+  /\b((?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi;
+const COOKIE_ASSIGNMENT_PATTERN =
+  /\b((?:cookie|set-cookie)\s*=\s*)[^\r\n]+/gi;
 const SECRET_KEY_PATTERN =
   /\b((?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-]?)?token)\s*[=:]\s*)("[^"]*"|'[^']*'|[^&\s,;]+)/gi;
 const JSON_SECRET_KEY_PATTERN =
@@ -111,6 +115,8 @@ export function createHvcDiagnosticsEvent(
 
 export function redactDiagnosticText(value: string): string {
   return value
+    .replace(SECRET_HEADER_PATTERN, "$1[redacted]")
+    .replace(COOKIE_ASSIGNMENT_PATTERN, "$1[redacted]")
     .replace(BEARER_PATTERN, "Bearer [redacted]")
     .replace(JSON_SECRET_KEY_PATTERN, "$1[redacted]")
     .replace(SECRET_KEY_PATTERN, "$1[redacted]")

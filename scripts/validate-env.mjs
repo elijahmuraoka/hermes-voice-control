@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -40,6 +40,7 @@ function isWeakPin(value) {
 function commandExists(command) {
   if (command.includes("/")) {
     try {
+      if (!statSync(command).isFile()) return false;
       accessSync(command, constants.X_OK);
       return true;
     } catch {

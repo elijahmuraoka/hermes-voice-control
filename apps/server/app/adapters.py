@@ -45,7 +45,7 @@ class LocalHermesAdapter(HermesAdapter):
 
     def _resolve_hermes_bin(self) -> str | None:
         if os.path.sep in self.hermes_bin or (os.path.altsep and os.path.altsep in self.hermes_bin):
-            return self.hermes_bin if os.path.exists(self.hermes_bin) and os.access(self.hermes_bin, os.X_OK) else None
+            return self.hermes_bin if os.path.isfile(self.hermes_bin) and os.access(self.hermes_bin, os.X_OK) else None
         return shutil.which(self.hermes_bin)
 
     def diagnostics(self) -> dict:

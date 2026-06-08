@@ -48,6 +48,17 @@ def test_readyz_reports_missing_local_hermes_binary(tmp_path):
     assert body["checks"]["hermes"]["read_only"] is True
     assert body["checks"]["hermes"]["command"][-2:] == ["--toolsets", "safe"]
 
+def test_readyz_rejects_directory_local_hermes_binary(tmp_path):
+    hermes_dir = tmp_path / "hermes-dir"
+    hermes_dir.mkdir()
+    hermes_dir.chmod(0o755)
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes_dir))
+    res = client.get("/readyz")
+    assert res.status_code == 503
+    body = res.json()
+    assert body["ok"] is False
+    assert body["checks"]["hermes"]["available"] is False
+
 def test_readyz_reports_resolved_local_hermes_binary(tmp_path):
     hermes = tmp_path / "hermes"
     hermes.write_text("#!/bin/sh\nexit 0\n")

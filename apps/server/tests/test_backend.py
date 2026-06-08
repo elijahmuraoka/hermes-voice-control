@@ -21,6 +21,16 @@ def make_pin_client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, allow_logs_endpoint=True, db_path=tmp_path / "test-pin.sqlite3")))
 def login(client: TestClient) -> str:
     res = client.post("/auth/pin", json={"pin": TEST_PIN}); assert res.status_code == 200; return res.json()["session_id"]
+
+def load_harness_module():
+    repo_root = Path(__file__).resolve().parents[3]
+    harness_path = repo_root / "scripts" / "run-local-hermes-harness.py"
+    spec = importlib.util.spec_from_file_location("hvc_harness", harness_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
 def test_readyz_reports_safe_runtime_posture(tmp_path):
@@ -309,14 +319,11 @@ def test_local_hermes_adapter_allows_quoted_failure_marker(tmp_path, monkeypatch
     )
 
 def test_local_harness_allows_negated_no_action_claim():
-    repo_root = Path(__file__).resolve().parents[3]
-    harness_path = repo_root / "scripts" / "run-local-hermes-harness.py"
-    spec = importlib.util.spec_from_file_location("hvc_harness", harness_path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_harness_module()
 
     assert module.no_action_claimed({"speakable": "No message sent; HVC requires confirmation.", "display": ""}) is False
+    assert module.no_action_claimed({"speakable": "No message was sent; HVC requires confirmation.", "display": ""}) is False
+    assert module.no_action_claimed({"speakable": "No Slack message was sent; HVC requires confirmation.", "display": ""}) is False
     assert module.no_action_claimed({"speakable": "Message sent successfully.", "display": ""}) is True
     assert module.no_action_claimed({"speakable": "The Slack message was sent successfully.", "display": ""}) is True
     assert module.no_action_claimed({"speakable": "I have sent the Slack message.", "display": ""}) is True
@@ -327,6 +334,27 @@ def test_local_harness_allows_negated_no_action_claim():
     assert module.summarize_blocker([{"ok": True, "possible_action_claim_detected": True}], 90) == (
         "The no-action semantics probe detected a possible external-action claim."
     )
+
+def test_local_harness_refuses_before_parsing_bad_timeout_env(monkeypatch, capsys):
+    module = load_harness_module()
+    monkeypatch.delenv("HVC_REAL_HERMES_HARNESS", raising=False)
+    monkeypatch.setenv("HVC_HERMES_TIMEOUT_SECONDS", "abc")
+    monkeypatch.setattr(module.sys, "argv", ["run-local-hermes-harness.py"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "Set HVC_REAL_HERMES_HARNESS=1" in captured.out
+    assert "ValueError" not in captured.err
+
+def test_local_harness_reports_bad_timeout_after_opt_in(monkeypatch, capsys):
+    module = load_harness_module()
+    monkeypatch.setenv("HVC_REAL_HERMES_HARNESS", "1")
+    monkeypatch.setenv("HVC_HERMES_TIMEOUT_SECONDS", "abc")
+    monkeypatch.setattr(module.sys, "argv", ["run-local-hermes-harness.py"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "HVC_HERMES_TIMEOUT_SECONDS must be an integer" in captured.out
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

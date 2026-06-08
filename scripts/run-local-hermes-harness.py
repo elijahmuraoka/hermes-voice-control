@@ -30,7 +30,7 @@ ACTION_CLAIM_PATTERNS = [
     re.compile(r"\baction (?:was )?executed\b", re.IGNORECASE),
 ]
 NEGATED_ACTION_PATTERNS = [
-    re.compile(r"\bno message sent\b", re.IGNORECASE),
+    re.compile(r"\bno (?:slack )?message (?:was )?sent\b", re.IGNORECASE),
     re.compile(r"\bmessage (?:was )?not sent\b", re.IGNORECASE),
     re.compile(r"\bdid not send\b", re.IGNORECASE),
     re.compile(r"\bdidn't send\b", re.IGNORECASE),
@@ -126,9 +126,23 @@ def run_probe(adapter: LocalHermesAdapter, name: str, message: str, mode: str, u
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run opt-in, read-only real Hermes bridge probes and write redacted evidence.")
     parser.add_argument("--hermes-bin", default=os.getenv("HVC_HERMES_BIN", "hermes"))
-    parser.add_argument("--timeout-seconds", type=int, default=int(os.getenv("HVC_HERMES_TIMEOUT_SECONDS", "90")))
+    parser.add_argument("--timeout-seconds", type=int, default=None)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     return parser.parse_args()
+
+
+def resolve_timeout_seconds(cli_value: int | None) -> int:
+    if cli_value is not None:
+        value = cli_value
+    else:
+        raw = os.getenv("HVC_HERMES_TIMEOUT_SECONDS", "90").strip()
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError("HVC_HERMES_TIMEOUT_SECONDS must be an integer.") from exc
+    if value < 1 or value > 600:
+        raise ValueError("HVC_HERMES_TIMEOUT_SECONDS must be between 1 and 600.")
+    return value
 
 
 def main() -> int:
@@ -146,7 +160,13 @@ def main() -> int:
         )
         return 2
 
-    adapter = LocalHermesAdapter(args.hermes_bin, timeout_seconds=args.timeout_seconds)
+    try:
+        timeout_seconds = resolve_timeout_seconds(args.timeout_seconds)
+    except ValueError as error:
+        print(json.dumps({"ok": False, "error": str(error)}, indent=2))
+        return 2
+
+    adapter = LocalHermesAdapter(args.hermes_bin, timeout_seconds=timeout_seconds)
     diagnostics = adapter.diagnostics()
     evidence: dict[str, Any] = {
         "ok": False,
@@ -182,7 +202,7 @@ def main() -> int:
         evidence["ok"] = all(probe["ok"] for probe in evidence["probes"]) and not any(
             probe.get("possible_action_claim_detected") for probe in evidence["probes"]
         )
-        evidence["blocker"] = summarize_blocker(evidence["probes"], args.timeout_seconds)
+        evidence["blocker"] = summarize_blocker(evidence["probes"], timeout_seconds)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")

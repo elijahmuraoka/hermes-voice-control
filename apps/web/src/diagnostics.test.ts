@@ -76,7 +76,7 @@ describe("diagnostics", () => {
 
   it("redacts tokens, secrets, and session identifiers from diagnostic text", () => {
     const text =
-      'Authorization=Bearer abc.def.ghi Authorization=Basic dXNlcjpwYXNz hvc_session=abc123456789 foo_session=sess_prefixed_123456789 x-session-key=keyed-session-token token=raw-secret access_token=access-secret refresh_token=refresh-secret id-token=id-secret client_secret=client-secret-value oauth_client_secret=oauth-secret-value clientSecret=camel-secret-value refreshToken=camel-refresh-value session_id=sess_123456789 sessions/sess_path_123456789 bare=sess_bare_123456789 api_key=key Authorization: Basic dXNlcjpwYXNz\nCookie: foo=bar; other=baz\ncookie=client=secret; theme=blue {"token":"json-secret","access_token":"json-access","refreshToken":"json-refresh","client_secret":"json-client-secret","clientSecret":"json-camel-secret","session_id":"sess_json_123456789"}';
+      'Authorization=Bearer abc.def.ghi Authorization=Basic dXNlcjpwYXNz hvc_session=abc123456789 foo_session=sess_prefixed_123456789 x-session-key=keyed-session-token token=raw-secret access_token=access-secret refresh_token=refresh-secret id-token=id-secret client_secret=client-secret-value oauth_client_secret=oauth-secret-value clientSecret=camel-secret-value refreshToken=camel-refresh-value session_id=sess_123456789 sessions/sess_path_123456789 bare=sess_bare_123456789 api_key=key GOOGLE_API_KEY=google-secret GEMINI_API_KEY: gemini-secret OPENAI_API_KEY = "openai-secret" googleApiKey=camel-api-secret Authorization: Basic dXNlcjpwYXNz\nCookie: foo=bar; other=baz\ncookie=client=secret; theme=blue {"token":"json-secret","access_token":"json-access","refreshToken":"json-refresh","client_secret":"json-client-secret","clientSecret":"json-camel-secret","session_id":"sess_json_123456789","GOOGLE_API_KEY":"json-google-secret","gemini_api_key":"json-gemini-secret","openaiApiKey":"json-openai-secret"}';
 
     const redacted = redactDiagnosticText(text);
 
@@ -96,6 +96,10 @@ describe("diagnostics", () => {
     expect(redacted).toContain("sessions/[redacted]");
     expect(redacted).toContain("bare=[redacted-session]");
     expect(redacted).toContain("api_key=[redacted]");
+    expect(redacted).toContain("GOOGLE_API_KEY=[redacted]");
+    expect(redacted).toContain("GEMINI_API_KEY: [redacted]");
+    expect(redacted).toContain("OPENAI_API_KEY = [redacted]");
+    expect(redacted).toContain("googleApiKey=[redacted]");
     expect(redacted).toContain("Authorization: [redacted]");
     expect(redacted).toContain("Cookie: [redacted]");
     expect(redacted).toContain("cookie=[redacted]");
@@ -117,12 +121,19 @@ describe("diagnostics", () => {
     expect(redacted).not.toContain("theme=blue");
     expect(redacted).not.toContain("sess_123456789");
     expect(redacted).not.toContain("sess_bare_123456789");
+    expect(redacted).not.toContain("google-secret");
+    expect(redacted).not.toContain("gemini-secret");
+    expect(redacted).not.toContain("openai-secret");
+    expect(redacted).not.toContain("camel-api-secret");
     expect(redacted).not.toContain("json-secret");
     expect(redacted).not.toContain("json-access");
     expect(redacted).not.toContain("json-refresh");
     expect(redacted).not.toContain("json-client-secret");
     expect(redacted).not.toContain("json-camel-secret");
     expect(redacted).not.toContain("sess_json_123456789");
+    expect(redacted).not.toContain("json-google-secret");
+    expect(redacted).not.toContain("json-gemini-secret");
+    expect(redacted).not.toContain("json-openai-secret");
   });
 
   it("keeps the copyable diagnostics bundle local and redacted", () => {

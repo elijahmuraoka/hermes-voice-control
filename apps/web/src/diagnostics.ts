@@ -86,7 +86,7 @@ declare global {
 
 const MAX_EVENTS = 200;
 const SENSITIVE_KEY_PATTERN =
-  "(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|token|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-])+(?:session[_-]?(?:id|key)?|sid|token|secret|password|pin)|[a-z0-9]+(?:token|secret|password|pin))";
+  "(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|token|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-])+(?:api[_-]?key|session[_-]?(?:id|key)?|sid|token|secret|password|pin)|[a-z0-9]+(?:api[_-]?key|token|secret|password|pin))";
 const SECRET_HEADER_PATTERN =
   /\b((?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi;
 const AUTH_ASSIGNMENT_PATTERN =

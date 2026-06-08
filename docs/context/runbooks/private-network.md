@@ -58,13 +58,16 @@ Set a rehearsal-only PIN and keep the database under ignored local state:
 
 ```bash
 mkdir -p .private/rehearsal
+export HVC_PIN_FILE=.private/rehearsal/hvc-pin
+openssl rand -hex 12 > "$HVC_PIN_FILE"
+chmod 600 "$HVC_PIN_FILE"
 
 export HVC_GEMINI_MODE=mock
 export HVC_HERMES_ADAPTER=mock
 export HVC_HOST=127.0.0.1
 export HVC_PORT=8765
 export HVC_REQUIRE_PIN=true
-export HVC_PIN="$(openssl rand -hex 12)"
+export HVC_PIN="$(cat "$HVC_PIN_FILE")"
 export HVC_SECURE_COOKIES=false
 export HVC_ALLOW_LOGS_ENDPOINT=false
 export HVC_DB_PATH=.private/rehearsal/hvc.sqlite3
@@ -83,9 +86,11 @@ cd apps/server
 uv run uvicorn app.main:app --host "$HVC_HOST" --port "$HVC_PORT"
 ```
 
-Run health and auth checks from another terminal:
+Run health and auth checks from another terminal. Reload the same
+rehearsal-only PIN from ignored local state before the positive login check:
 
 ```bash
+export HVC_PIN="$(cat .private/rehearsal/hvc-pin)"
 curl -fsS http://127.0.0.1:8765/healthz
 curl -fsS http://127.0.0.1:8765/readyz
 curl -i http://127.0.0.1:8765/auth/session
@@ -176,7 +181,7 @@ export HVC_REQUIRE_PIN=true
 read -rsp "HVC PIN: " HVC_PIN; export HVC_PIN; echo
 export HVC_SECURE_COOKIES=true
 export HVC_ALLOW_LOGS_ENDPOINT=false
-export HVC_FRONTEND_ORIGINS=https://<frontend-device>.<tailnet>.ts.net
+export HVC_FRONTEND_ORIGINS='https://FRONTEND_DEVICE.TAILNET.ts.net'
 
 pnpm env:check
 ```
@@ -191,8 +196,8 @@ tailscale serve status --json
 Then check from another tailnet device:
 
 ```bash
-curl -fsS https://<backend-device>.<tailnet>.ts.net/readyz
-curl -i https://<backend-device>.<tailnet>.ts.net/auth/session
+curl -fsS 'https://BACKEND_DEVICE.TAILNET.ts.net/readyz'
+curl -i 'https://BACKEND_DEVICE.TAILNET.ts.net/auth/session'
 ```
 
 Expected results:

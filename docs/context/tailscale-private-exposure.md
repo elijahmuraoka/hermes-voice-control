@@ -9,6 +9,7 @@ Required shape:
 # FastAPI remains bound to localhost.
 export HVC_HOST=127.0.0.1
 export HVC_REQUIRE_PIN=true
+read -rsp "HVC PIN: " HVC_PIN; export HVC_PIN; echo
 export HVC_SECURE_COOKIES=true
 export HVC_ALLOW_LOGS_ENDPOINT=false
 
@@ -28,7 +29,7 @@ Current v1 default: no-PIN mode is for direct localhost development only. For Ta
 
 ```bash
 HVC_REQUIRE_PIN=true
-HVC_PIN=<at-least-8-chars-not-000000>
+read -rsp "HVC PIN: " HVC_PIN; export HVC_PIN; echo
 ```
 
 Keep the server bound to `127.0.0.1`. Do not set
@@ -40,7 +41,7 @@ exists for explicit local diagnostics, not for an HVC release candidate.
 Use exact frontend origins only:
 
 ```bash
-HVC_FRONTEND_ORIGINS=http://127.0.0.1:5173,http://localhost:5173,https://<frontend-device>.<tailnet>.ts.net
+export HVC_FRONTEND_ORIGINS='http://127.0.0.1:5173,http://localhost:5173,https://FRONTEND_DEVICE.TAILNET.ts.net'
 ```
 
 Wildcard CORS is rejected by startup and `pnpm env:check`.
@@ -58,8 +59,8 @@ curl -i http://127.0.0.1:8765/auth/session
 After Serve, from another tailnet device:
 
 ```bash
-curl -fsS https://<backend-device>.<tailnet>.ts.net/readyz
-curl -i https://<backend-device>.<tailnet>.ts.net/auth/session
+curl -fsS 'https://BACKEND_DEVICE.TAILNET.ts.net/readyz'
+curl -i 'https://BACKEND_DEVICE.TAILNET.ts.net/auth/session'
 ```
 
 Expected: readiness is HTTP 200 with `pin_required: true` and

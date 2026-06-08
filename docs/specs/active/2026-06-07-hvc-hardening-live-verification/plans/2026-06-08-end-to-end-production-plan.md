@@ -8,13 +8,19 @@
 
 - PR #11 is open, mergeable, and CI `verify` is passing.
 - Issues #1, #2, and #4-#10 are closed.
-- Issue #3 remains open for credentialed real Gemini Live setup and smoke verification.
-- The repo has doc-maintenance structure, public README/screenshots, CI, browser smoke, env validation, `/readyz`, log retention, secure-cookie controls, generic agent labels, read-only Hermes v1 action semantics, and a clean independent branch review.
-- The known live gap is not ordinary code coverage; it is provider-credentialed runtime proof.
+- Issue #3 now has credentialed real Gemini Live smoke evidence recorded in the
+  active spec; the GitHub issue can close once the evidence-bearing PR merges.
+- The repo has doc-maintenance structure, public README/screenshots, CI,
+  browser smoke, env validation, `/readyz`, log retention, secure-cookie
+  controls, generic agent labels, read-only Hermes v1 action semantics, real
+  Gemini smoke evidence, and real safe-Hermes harness evidence.
+- Remaining live gaps are integrated post-merge review, private Tailscale Serve
+  rehearsal, and physical/mobile audio QA.
 
 ## Provider Assessment
 
-Default recommendation: keep Gemini Live as the v1 default until real-smoke data disproves it.
+Default recommendation: keep Gemini Live as the v1 default after the
+credentialed smoke passed, while still benchmarking alternatives for v1.1.
 
 Why:
 
@@ -30,7 +36,8 @@ Close alternatives:
 
 Decision rule:
 
-- Ship v1 on Gemini if credentialed smoke, latency, barge-in/cancel, and tool-call behavior are good.
+- Ship v1 on Gemini if latency, barge-in/cancel, and tool-call behavior remain
+  good during integrated post-merge verification.
 - Add provider abstraction only after the benchmark harness proves at least one alternate provider materially improves latency, reliability, price, or deployment simplicity.
 - Do not add telephony or hosted agent workflows unless the product explicitly expands beyond private browser-to-Hermes use.
 
@@ -70,7 +77,8 @@ Create:
 ## Implementation Order
 
 1. Merge or keep PR #11 as the explicit baseline.
-2. Finish #3 credentialed Gemini Live verification.
+2. Finish #3 credentialed Gemini Live verification. Done; redacted evidence is
+   in the active spec.
 3. Run provider bakeoff with the same prompts, audio path, tool-call scenarios, and latency metrics.
 4. Decide whether provider abstraction is warranted for v1 or deferred to v1.1.
 5. Rehearse private deployment and rollback.
@@ -82,7 +90,8 @@ Create:
 ## Confidence
 
 - High: current repo baseline, issue inventory, and security defaults.
-- Medium: Gemini as v1 default until credentialed smoke completes.
+- Medium-high: Gemini as v1 default after credentialed smoke passed; final
+  confidence still depends on integrated latency and mobile/audio checks.
 - Medium: xAI/OpenAI alternate value until live benchmark data exists.
 - Low: exact production latency/cost winner before live tests with the user's real audio/network conditions.
 
@@ -92,5 +101,5 @@ Create:
 - [x] Research current official provider capabilities.
 - [x] Draft second-wave production plan.
 - [x] Create/update GitHub issues from the plan.
-- [ ] Spawn isolated worktree/session lanes after issue creation.
+- [x] Spawn isolated worktree/session lanes after issue creation.
 - [ ] Run integrated verification and independent review after implementation.

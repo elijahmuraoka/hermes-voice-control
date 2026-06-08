@@ -9,7 +9,8 @@
 - `tomoji docs index --verify --json` passed.
 - `tomoji docs audit --json` passed with zero findings.
 - `pnpm test` and `pnpm build` passed in the current working tree.
-- Real Gemini Live smoke remains pending until credentials are available.
+- Real Gemini Live smoke had not yet run on 2026-06-07; the 2026-06-08
+  evidence below supersedes that gap.
 - Public repo target selected:
   `https://github.com/elijahmuraoka/hermes-voice-control`.
 - Public README and visible app copy were generalized from a named local
@@ -56,3 +57,8 @@
 - The local adapter now invokes Hermes in quiet query mode so stdout contains
   only the final speakable answer before returning it to the browser or harness
   evidence, while CLI provider failures still surface as controlled errors.
+- Real Gemini Live smoke passed against a loopback backend started with the
+  `real-gemini` optional dependency. The redacted evidence is in
+  `evidence/gemini-live-smoke-latest.json` and confirms real mode, the
+  `gemini-2.5-flash-native-audio-latest` model, the `setupComplete` handshake,
+  and observed audio output.

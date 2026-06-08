@@ -64,7 +64,16 @@ pnpm env:check
 cd apps/server && uv pip install -e '.[dev,real-gemini]'
 ```
 
-Start the backend, then verify readiness:
+Start the backend in one terminal:
+
+```bash
+cd apps/server
+export HVC_GEMINI_MODE=real
+export GEMINI_API_KEY=<redacted>
+uv run --extra dev --extra real-gemini uvicorn app.main:app --host 127.0.0.1 --port 8765
+```
+
+Verify readiness from another terminal:
 
 ```bash
 curl http://127.0.0.1:8765/readyz

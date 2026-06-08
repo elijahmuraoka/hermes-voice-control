@@ -64,8 +64,8 @@
   auditable.
 - PIN auth is intentionally simple for a one-user private app, with server-side
   sessions and rate limits when enabled.
-- The real Gemini websocket/audio path is unit-tested and browser-wired, but
-  still needs a credentialed live smoke test.
+- The real Gemini websocket/audio path is unit-tested, browser-wired, and has a
+  credentialed live smoke test in the active spec evidence.
 
 ## Fresh verification notes
 
@@ -106,11 +106,13 @@
 - 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+- 2026-06-08: real Gemini Live smoke passed against a loopback backend started
+  with `HVC_GEMINI_MODE=real` and the `real-gemini` optional dependency. The
+  script waited for the Live `setupComplete` handshake, observed real audio
+  output, and stored redacted evidence in the active spec.
 
 ## Remaining gaps
 
-- Run one credentialed Gemini Live smoke test with real backend
-  `HVC_GEMINI_MODE=real` and microphone permission.
 - Decide the default Gemini voice/personality guidance for Hermes agents once
   real audio is enabled.
 - Do a final independent review after credentialed real Gemini Live smoke.

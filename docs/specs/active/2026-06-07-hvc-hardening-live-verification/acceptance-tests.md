@@ -15,6 +15,13 @@
 - With real Gemini credentials configured on the backend, run:
 
 ```bash
+# Terminal 1
+cd apps/server
+export HVC_GEMINI_MODE=real
+export GEMINI_API_KEY=<redacted>
+uv run --extra dev --extra real-gemini uvicorn app.main:app --host 127.0.0.1 --port 8765
+
+# Terminal 2, from the repo root
 node scripts/e2e-real-gemini-live.mjs
 ```
 
@@ -63,3 +70,9 @@ node scripts/e2e-real-gemini-live.mjs
   (web: 4 files / 27 tests; backend: 46 tests with one Starlette/httpx
   deprecation warning), `tomoji docs index --verify --json`,
   `tomoji docs audit --json`, and `git diff --check`.
+- 2026-06-08: real Gemini Live smoke passed against a loopback backend started
+  with `HVC_GEMINI_MODE=real` and `uv run --extra dev --extra real-gemini`.
+  The smoke obtained a backend-issued ephemeral token, opened the Gemini Live
+  websocket, waited for `setupComplete`, streamed generated local speech audio,
+  and observed audio output. Redacted evidence is stored in
+  `evidence/gemini-live-smoke-latest.json`.

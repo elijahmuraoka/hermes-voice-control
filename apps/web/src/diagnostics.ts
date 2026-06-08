@@ -94,6 +94,7 @@ const SECRET_DETAIL_KEY_PATTERN =
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
 const SESSION_PATH_PATTERN =
   /\b(session(?:s)?\/)[A-Za-z0-9._~-]{8,}/gi;
+const BARE_SESSION_ID_PATTERN = /\bsess(?:ion)?[_-][A-Za-z0-9._~-]{6,}\b/gi;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
 
 export function createHvcDiagnosticsEvent(
@@ -114,6 +115,7 @@ export function redactDiagnosticText(value: string): string {
     .replace(JSON_SECRET_KEY_PATTERN, "$1[redacted]")
     .replace(SECRET_KEY_PATTERN, "$1[redacted]")
     .replace(SESSION_PATH_PATTERN, "$1[redacted]")
+    .replace(BARE_SESSION_ID_PATTERN, "[redacted-session]")
     .replace(JWT_PATTERN, "[redacted-jwt]");
 }
 

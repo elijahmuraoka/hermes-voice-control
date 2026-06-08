@@ -151,6 +151,48 @@ describe("App", () => {
     expect(JSON.stringify(snapshot)).not.toContain("sess_123456");
   });
 
+  it("ignores stale session diagnostics and close callbacks after a new call starts", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    const first = geminiMock.instances[0];
+
+    await user.click(screen.getByRole("button", { name: /End/ }));
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    await waitFor(() => expect(geminiMock.instances).toHaveLength(2));
+    const second = geminiMock.instances[1];
+
+    act(() => {
+      first.callbacks.onDiagnosticsEvent?.({
+        name: "session_close",
+        epochMs: 1,
+        monotonicMs: 1,
+        detail: { closeReason: "stale session" },
+      });
+      first.callbacks.onClose?.({});
+      second.callbacks.onDiagnosticsEvent?.({
+        name: "session_close",
+        epochMs: 2,
+        monotonicMs: 2,
+        detail: { closeReason: "current session" },
+      });
+    });
+
+    const snapshot = (window as any).__HVC_DIAGNOSTICS__.snapshot();
+    expect(JSON.stringify(snapshot)).not.toContain("stale session");
+    expect(JSON.stringify(snapshot)).toContain("current session");
+
+    await user.click(screen.getByRole("button", { name: /End/ }));
+    expect(second.disconnect).toHaveBeenCalledTimes(1);
+  });
+
   it("second orb tap pauses and disables microphone capture", async () => {
     render(<App />);
     const orb = screen.getByLabelText(/Voice orb/);

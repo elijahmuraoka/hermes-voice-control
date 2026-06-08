@@ -9,7 +9,16 @@ Required shape:
 # FastAPI remains bound to localhost.
 export HVC_HOST=127.0.0.1
 export HVC_REQUIRE_PIN=true
-read -rsp "HVC PIN: " HVC_PIN; export HVC_PIN; echo
+if [ -t 0 ]; then
+  printf "HVC PIN: "
+  stty -echo
+  IFS= read -r HVC_PIN
+  stty echo
+  printf "\n"
+else
+  IFS= read -r HVC_PIN
+fi
+export HVC_PIN
 export HVC_SECURE_COOKIES=true
 export HVC_ALLOW_LOGS_ENDPOINT=false
 
@@ -31,7 +40,16 @@ Current v1 default: no-PIN mode is for direct localhost development only. For Ta
 
 ```bash
 HVC_REQUIRE_PIN=true
-read -rsp "HVC PIN: " HVC_PIN; export HVC_PIN; echo
+if [ -t 0 ]; then
+  printf "HVC PIN: "
+  stty -echo
+  IFS= read -r HVC_PIN
+  stty echo
+  printf "\n"
+else
+  IFS= read -r HVC_PIN
+fi
+export HVC_PIN
 ```
 
 Keep the server bound to `127.0.0.1`. Do not set

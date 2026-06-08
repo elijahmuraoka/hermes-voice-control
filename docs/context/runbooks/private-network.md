@@ -12,7 +12,16 @@ tailnet exposure step, not a reason to bind FastAPI to a public interface.
 export HVC_HOST=127.0.0.1
 export HVC_PORT=8765
 export HVC_REQUIRE_PIN=true
-read -rsp "HVC PIN: " HVC_PIN; export HVC_PIN; echo
+if [ -t 0 ]; then
+  printf "HVC PIN: "
+  stty -echo
+  IFS= read -r HVC_PIN
+  stty echo
+  printf "\n"
+else
+  IFS= read -r HVC_PIN
+fi
+export HVC_PIN
 export HVC_SECURE_COOKIES=true
 export HVC_ALLOW_LOGS_ENDPOINT=false
 export HVC_AUDIT_LOG_RETENTION_DAYS=30
@@ -182,7 +191,16 @@ is part of the rehearsal:
 export HVC_HOST=127.0.0.1
 export HVC_PORT=8765
 export HVC_REQUIRE_PIN=true
-read -rsp "HVC PIN: " HVC_PIN; export HVC_PIN; echo
+if [ -t 0 ]; then
+  printf "HVC PIN: "
+  stty -echo
+  IFS= read -r HVC_PIN
+  stty echo
+  printf "\n"
+else
+  IFS= read -r HVC_PIN
+fi
+export HVC_PIN
 export HVC_SECURE_COOKIES=true
 export HVC_ALLOW_LOGS_ENDPOINT=false
 export HVC_FRONTEND_ORIGINS='https://FRONTEND_DEVICE.TAILNET.ts.net'

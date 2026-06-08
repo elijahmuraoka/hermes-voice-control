@@ -68,3 +68,19 @@ node scripts/e2e-real-gemini-live.mjs
   private artifact paths beyond `.env.example`, and no high-entropy token
   history hits. Current scan hits were limited to documented placeholders,
   environment variable names, cookie field names, and fake-secret tests.
+- 2026-06-08: issue #15 security gate added the production threat register,
+  local security review artifact, cookie-only PIN login response, metadata-only
+  free-text tool audit logging, real Gemini token-constraint coverage, and
+  audit-leak regression tests.
+- 2026-06-08: targeted backend gate passed with `uv run --extra dev pytest`
+  before the root dependencies were restored: 34 tests, with the existing
+  Starlette/httpx deprecation warning.
+- 2026-06-08: `pnpm test`, `pnpm env:check`, `pnpm docs:verify`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`,
+  `git diff --check`, and `pnpm verify` passed. `pnpm verify` covered web 27
+  tests, backend 34 tests, web build, performance budget, and docs verify.
+- 2026-06-08: independent external review attempts were blocked by local
+  `agent-comms`/OpenClaw configuration and by rejected external Claude export
+  approval. Treat strict independent review as a remaining pre-merge blocker
+  unless the user explicitly approves external review or local review tooling is
+  repaired.

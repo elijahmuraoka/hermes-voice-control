@@ -1,6 +1,8 @@
 from pathlib import Path
+import sys
 import sqlite3
 import subprocess
+import types
 import pytest
 from fastapi.testclient import TestClient
 from app import gemini as gemini_module
@@ -19,7 +21,13 @@ def make_real_gemini_client(tmp_path: Path) -> TestClient:
 def make_pin_client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, allow_logs_endpoint=True, db_path=tmp_path / "test-pin.sqlite3")))
 def login(client: TestClient) -> str:
-    res = client.post("/auth/pin", json={"pin": TEST_PIN}); assert res.status_code == 200; return res.json()["session_id"]
+    res = client.post("/auth/pin", json={"pin": TEST_PIN})
+    assert res.status_code == 200
+    assert "session_id" not in res.json()
+    token = client.cookies.get("hvc_session")
+    assert token
+    assert token not in res.text
+    return token
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
 def test_readyz_reports_safe_runtime_posture(tmp_path):
@@ -61,6 +69,20 @@ def test_readyz_reports_database_connection_failure(tmp_path, monkeypatch):
 def test_pin_auth_and_session(tmp_path):
     client = make_pin_client(tmp_path); assert client.post("/auth/pin", json={"pin": "wrong"}).status_code == 401
     token = login(client); assert client.get("/auth/session", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+def test_pin_login_uses_httponly_cookie_without_body_token(tmp_path):
+    client = make_pin_client(tmp_path)
+    res = client.post("/auth/pin", json={"pin": TEST_PIN})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert set(body) == {"ok", "expires_at"}
+    assert "hvc_session=" in res.headers["set-cookie"]
+    assert "httponly" in res.headers["set-cookie"].lower()
+    assert "samesite=lax" in res.headers["set-cookie"].lower()
+    assert "session_id" not in res.text
+    assert client.cookies.get("hvc_session") not in res.text
+    assert client.get("/auth/session").status_code == 200
 
 def test_pin_cookie_can_be_marked_secure(tmp_path):
     client = TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, secure_cookies=True, db_path=tmp_path / "secure-cookie.sqlite3")))
@@ -134,6 +156,39 @@ def test_real_gemini_status_only_reports_key_presence(tmp_path, monkeypatch):
     assert res.status_code == 200
     assert res.json() == {"mode": "real", "api_key_configured": True}
     assert "super-secret-gemini-key" not in res.text
+
+def test_real_gemini_token_is_single_use_and_constrained(monkeypatch):
+    created = {}
+    class FakeToken:
+        name = "ephemeral-token-name"
+    class FakeAuthTokens:
+        def create(self, config):
+            created["config"] = config
+            return FakeToken()
+    class FakeClient:
+        def __init__(self, api_key, http_options):
+            created["api_key"] = api_key
+            created["http_options"] = http_options
+            self.auth_tokens = FakeAuthTokens()
+    fake_genai = types.SimpleNamespace(Client=FakeClient)
+    fake_google = types.ModuleType("google")
+    fake_google.genai = fake_genai
+    monkeypatch.setitem(sys.modules, "google", fake_google)
+    monkeypatch.setenv("GEMINI_API_KEY", "super-secret-gemini-key")
+    monkeypatch.setenv("HVC_GEMINI_MODEL", "gemini-test-model")
+    token = gemini_module.RealGeminiTokenBroker().create_token()
+    assert token.token == "ephemeral-token-name"
+    assert token.mode == "real"
+    assert token.model == "gemini-test-model"
+    assert created["api_key"] == "super-secret-gemini-key"
+    assert created["http_options"] == {"api_version": "v1alpha"}
+    assert created["config"]["uses"] == 1
+    assert created["config"]["live_connect_constraints"] == {
+        "model": "gemini-test-model",
+        "config": {"response_modalities": ["AUDIO"]},
+    }
+    assert "super-secret-gemini-key" not in str(created["config"])
+
 def test_tool_allowlist_and_mock_agent(tmp_path):
     client = make_client(tmp_path)
     denied = client.post("/tools/call", json={"request_id": "r1", "tool": "shell", "arguments": {}}); assert denied.status_code == 403
@@ -145,6 +200,39 @@ def test_ask_agent_denies_action_mode(tmp_path):
     client = make_client(tmp_path)
     res = client.post("/tools/call", json={"request_id": "r-action", "tool": "ask_agent", "arguments": {"message": "send it", "mode": "action"}})
     assert res.status_code == 422
+
+def test_ask_agent_audit_log_omits_free_text_inputs_and_outputs(tmp_path):
+    client = make_client(tmp_path)
+    spoken_secret = "spoken-secret-do-not-store"
+    res = client.post("/tools/call", json={
+        "request_id": "r-secret",
+        "tool": "ask_agent",
+        "arguments": {
+            "message": f"my token is {spoken_secret}",
+            "mode": "quick",
+            "transcript_window": [{"role": "user", "text": spoken_secret}],
+        },
+    })
+    assert res.status_code == 200
+    assert spoken_secret in res.text
+    logs = client.get("/logs").text
+    assert spoken_secret not in logs
+    assert "Mock Hermes agent heard" not in logs
+    assert "message_chars" in logs
+    assert "transcript_items" in logs
+
+def test_invalid_tool_argument_log_omits_pydantic_input(tmp_path):
+    client = make_client(tmp_path)
+    secret_prefix = "summary-secret-do-not-log"
+    res = client.post("/tools/call", json={
+        "request_id": "r-invalid-secret",
+        "tool": "propose_action",
+        "arguments": {"summary": secret_prefix + ("x" * 1100)},
+    })
+    assert res.status_code == 422
+    logs = client.get("/logs").text
+    assert secret_prefix not in logs
+    assert "validation_error" in logs
 
 def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
@@ -195,6 +283,16 @@ def test_confirmation_queue_exactly_once(tmp_path):
     assert client.post(f"/confirmations/{cid}/approve").status_code == 409
     logs = client.get("/logs").text
     assert "secret" not in logs
+
+def test_confirmation_created_audit_log_omits_summary_text(tmp_path):
+    client = make_client(tmp_path)
+    secret_summary = "approve transfer secret phrase"
+    res = client.post("/tools/call", json={"request_id": "r-summary", "tool": "propose_action", "arguments": {"summary": secret_summary}})
+    assert res.status_code == 200
+    assert secret_summary in res.text
+    logs = client.get("/logs").text
+    assert secret_summary not in logs
+    assert "summary_chars" in logs
 
 def test_tool_cancel_rejects_pending_confirmation_and_blocks_late_call(tmp_path):
     client = make_client(tmp_path)

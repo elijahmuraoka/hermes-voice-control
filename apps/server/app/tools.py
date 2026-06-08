@@ -39,6 +39,26 @@ TOOLS = {
     "propose_action": ToolDef("propose_action", "Record a proposed action for review. Approval records intent only and does not execute external actions.", "high", True),
 }
 
+def safe_validation_errors(exc: ValidationError) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": error.get("type"),
+            "loc": error.get("loc", ()),
+            "msg": error.get("msg"),
+        }
+        for error in exc.errors()
+    ]
+
+def ask_agent_audit_payload(tool: str, args: AskAgentArgs, result_ok: bool, error_code: str | None) -> dict[str, Any]:
+    return {
+        "tool": tool,
+        "mode": args.mode,
+        "message_chars": len(args.message),
+        "transcript_items": len(args.transcript_window),
+        "result_present": result_ok,
+        "error": error_code,
+    }
+
 class ToolService:
     def __init__(self, store: Store, adapter: HermesAdapter):
         self.store = store
@@ -61,13 +81,13 @@ class ToolService:
             try:
                 args = AskAgentArgs.model_validate(req.arguments)
             except ValidationError as exc:
-                self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": exc.errors()}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
+                self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": safe_validation_errors(exc)}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
                 raise HTTPException(status_code=422, detail="Invalid tool arguments") from exc
             result = self.adapter.ask_agent(args.message, mode=args.mode, transcript_window=args.transcript_window, should_cancel=lambda: self._is_cancelled(req.request_id, session_hash))
             if self._is_cancelled(req.request_id, session_hash):
                 self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id, "suppressed_after_adapter": True}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
                 raise HTTPException(status_code=409, detail="Tool call was cancelled")
-            self.store.log("tool.call", "completed" if result.ok else "failed", {"tool": req.tool, "arguments": req.arguments, "result": result.data, "error": result.error_code}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code=result.error_code)
+            self.store.log("tool.call", "completed" if result.ok else "failed", ask_agent_audit_payload(req.tool, args, result.ok, result.error_code), session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code=result.error_code)
             if not result.ok:
                 raise HTTPException(status_code=502, detail=result.safe_message or "Tool failed")
             return {"status": "completed", "result": result.data, "request_id": req.request_id}
@@ -75,7 +95,7 @@ class ToolService:
             try:
                 args = ProposedActionArgs.model_validate(req.arguments)
             except ValidationError as exc:
-                self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": exc.errors()}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
+                self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": safe_validation_errors(exc)}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
                 raise HTTPException(status_code=422, detail="Invalid tool arguments") from exc
             confirmation_id = secrets.token_urlsafe(18)
             expires_at = datetime.now(UTC) + timedelta(minutes=5)
@@ -89,7 +109,7 @@ class ToolService:
             if cancelled:
                 self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
                 raise HTTPException(status_code=409, detail="Tool call was cancelled")
-            self.store.log("confirmation.created", "pending", {"confirmation_id": confirmation_id, "summary": args.summary}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
+            self.store.log("confirmation.created", "pending", {"confirmation_id": confirmation_id, "summary_chars": len(args.summary)}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
             return {"status": "pending_confirmation", "confirmation_id": confirmation_id, "risk": tool.risk, "summary": args.summary, "request_id": req.request_id}
         raise HTTPException(status_code=403, detail="Tool not allowed")
     def cancel(self, req: ToolCancelRequest, session_hash: str) -> dict[str, Any]:

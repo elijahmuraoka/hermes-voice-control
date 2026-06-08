@@ -99,6 +99,10 @@ pnpm env:check
 pnpm verify
 ```
 
+This mock-mode path is the public fresh-checkout gate. It should not require a
+Gemini key, local Hermes binary, Tailscale account, `.env` file, or private
+machine context.
+
 ## Local Development
 
 Start the backend and web app together:
@@ -137,6 +141,20 @@ GEMINI_API_KEY=...
 
 Then start the backend and web app as above.
 
+## Local Diagnostics
+
+Realtime latency diagnostics stay in browser memory by default. Open devtools on
+the HVC page and run `window.__HVC_DIAGNOSTICS__.snapshot()` for the current
+redacted bundle, or `window.__HVC_DIAGNOSTICS__.copyText()` for copyable JSON.
+
+The bundle includes local timestamps for microphone start, first provider
+response, first audio playback, tool-call request/response, cancellation, and
+session close. It omits tokens, session IDs, tool arguments, response bodies,
+cookies, PINs, and authorization headers.
+
+See [Diagnostics](docs/context/diagnostics.md) for launch budgets and provider
+bakeoff reuse.
+
 ## Optional Local Hermes Agent Adapter
 
 The default Hermes agent adapter is mock. To connect a local Hermes-compatible
@@ -170,6 +188,8 @@ without a separate security review.
 
 See the [private-network runbook](docs/context/runbooks/private-network.md) for
 Tailscale Serve setup, mode-specific environment checks, and failure modes.
+Before tagging or publishing a public release, run the
+[open-source boundary checklist](docs/context/open-source-boundary.md).
 
 ## Verification Scripts
 
@@ -194,3 +214,4 @@ Start with:
 - [Architecture](docs/ARCHITECTURE.md)
 - [Implementation notes](docs/context/implementation-notes.md)
 - [Open-source voice systems research](docs/context/research/open-source-voice-systems.md)
+- [Realtime provider bakeoff](docs/context/research/realtime-provider-bakeoff.md)

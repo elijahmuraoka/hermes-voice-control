@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "checkedAt": "2026-06-08T19:01:58Z",
+  "mode": "real",
+  "model": "gemini-2.5-flash-native-audio-latest",
+  "command": "node scripts/e2e-real-gemini-live.mjs",
+  "backend": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "geminiMode": "real",
+    "hermesAdapter": "mock",
+    "pythonExtras": ["dev", "real-gemini"]
+  },
+  "result": {
+    "setupComplete": true,
+    "outputAudio": true,
+    "outputTextChars": 0,
+    "inputTextChars": 0,
+    "messages": 3
+  },
+  "redaction": {
+    "apiKeyIncluded": false,
+    "ephemeralTokenIncluded": false,
+    "audioPayloadIncluded": false
+  },
+  "notes": [
+    "The backend was started loopback-only with the real-gemini optional dependency installed.",
+    "The smoke generated local speech audio, obtained a backend-issued Gemini ephemeral token, opened the Gemini Live websocket, waited for setupComplete, streamed audio, and observed audio output.",
+    "The Google GenAI SDK emitted an ExperimentalWarning for token creation; the smoke still completed successfully."
+  ]
+}

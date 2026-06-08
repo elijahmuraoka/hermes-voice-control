@@ -1,4 +1,5 @@
 import type { GeminiLiveAudio } from "../audio";
+import type { HvcDiagnosticsEvent } from "../diagnostics";
 
 export type GeminiLiveStatus =
   | "connecting"
@@ -45,6 +46,7 @@ export interface GeminiLiveCallbacks {
   onTranscript?: (event: GeminiTranscriptEvent) => void;
   onToolCall?: (call: GeminiFunctionCall) => void;
   onToolResponse?: (response: GeminiFunctionResponse) => void;
+  onDiagnosticsEvent?: (event: HvcDiagnosticsEvent) => void;
   onError?: (error: Error) => void;
   onClose?: (event?: CloseEvent) => void;
 }

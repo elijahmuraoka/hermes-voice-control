@@ -1,0 +1,6 @@
+{
+  "firstAudioLatencyMs": 2500,
+  "toolResponseLatencyMs": 3000,
+  "reconnectResumeLatencyMs": 1500,
+  "smokeFlakeRate": 0.02
+}

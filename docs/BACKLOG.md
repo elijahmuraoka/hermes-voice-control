@@ -6,7 +6,7 @@ Open work not yet scoped into its own spec.
 
 - [x] Start the Vite app and run `pnpm smoke:browser` against
   `http://127.0.0.1:5173`.
-- [ ] Run `scripts/e2e-real-gemini-live.mjs` with real Gemini credentials and
+- [x] Run `scripts/e2e-real-gemini-live.mjs` with real Gemini credentials and
   record the redacted result in the active spec.
 - [ ] Do a fresh independent final review after the live Gemini/browser smoke,
   because the existing review reports predate some productionization fixes.
@@ -29,7 +29,9 @@ Open work not yet scoped into its own spec.
 - [#2](https://github.com/elijahmuraoka/hermes-voice-control/issues/2):
   Playwright responsive smoke from a fresh checkout.
 - [#3](https://github.com/elijahmuraoka/hermes-voice-control/issues/3):
-  real Gemini Live setup and credentialed smoke verification.
+  real Gemini Live setup and credentialed smoke verification. Redacted
+  evidence is recorded in the active spec; the GitHub issue can close once the
+  evidence-bearing PR merges.
 - [#4](https://github.com/elijahmuraoka/hermes-voice-control/issues/4):
   auth, cookies, and log access hardening.
 - [#5](https://github.com/elijahmuraoka/hermes-voice-control/issues/5):
@@ -63,7 +65,10 @@ Open work not yet scoped into its own spec.
 ## Launch Plan Issues
 
 - [#12](https://github.com/elijahmuraoka/hermes-voice-control/issues/12):
-  realtime voice provider bakeoff and v1 default decision.
+  realtime voice provider bakeoff and v1 default decision. The docs decision
+  artifact is in
+  [realtime-provider-bakeoff.md](context/research/realtime-provider-bakeoff.md);
+  credentialed Gemini plus alternate-provider smoke evidence is still pending.
 - [#13](https://github.com/elijahmuraoka/hermes-voice-control/issues/13):
   provider-neutral realtime adapter boundary.
 - [#14](https://github.com/elijahmuraoka/hermes-voice-control/issues/14):

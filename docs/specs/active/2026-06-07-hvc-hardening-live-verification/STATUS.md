@@ -9,7 +9,8 @@
 - `tomoji docs index --verify --json` passed.
 - `tomoji docs audit --json` passed with zero findings.
 - `pnpm test` and `pnpm build` passed in the current working tree.
-- Real Gemini Live smoke remains pending until credentials are available.
+- Real Gemini Live smoke had not yet run on 2026-06-07; the 2026-06-08
+  evidence below supersedes that gap.
 - Public repo target selected:
   `https://github.com/elijahmuraoka/hermes-voice-control`.
 - Public README and visible app copy were generalized from a named local
@@ -44,3 +45,66 @@
   design, private deployment rehearsal, security threat modeling, real Hermes
   bridge verification, latency instrumentation, final review, open-source
   release safety, and mobile/audio QA.
+- Issue #12 provider bakeoff decision artifact added under
+  `docs/context/research/realtime-provider-bakeoff.md`.
+- Decision: keep Gemini Live as the v1 default for this repo's private
+  browser-to-Hermes use case. OpenAI Realtime and xAI Grok Voice Agent are the
+  first alternates to benchmark; ElevenLabs Agents is deferred unless HVC needs
+  managed hosted agents, telephony, monitoring/evals, or deeper voice catalog
+  operations.
+- Blocker: no provider credentials were available in this docs lane, so
+  credentialed Gemini plus alternate-provider smoke and latency results remain
+  pending for #12.
+- Issues #14 and #19 release/deployment gate pass added copy-paste private
+  network rehearsal steps, rollback, health checks, evidence redaction, public
+  release checklist, fresh-checkout mock setup, and secret/history scan rules.
+- `scripts/validate-env.mjs` now rejects wildcard
+  `HVC_FRONTEND_ORIGINS='*'` and the `HVC_ALLOW_NO_PIN_REMOTE=true`
+  diagnostic override during release env checks.
+- Local private-deployment rehearsal passed in mock mode with backend bound to
+  `127.0.0.1:8765`, PIN required, logs disabled, `/healthz` 200, `/readyz`
+  200 with database `ok`, unauthenticated `/auth/session` 401, and PIN login
+  200. Rehearsal SQLite state was removed afterward.
+- Live Tailscale Serve was not mutated: read-only `tailscale status` and
+  `tailscale serve status --json` both returned `Failed to load preferences`,
+  so account/tailnet state could not be verified before a Serve change.
+- Open-source gate scan found no tracked `.env` files beyond `.env.example`, no
+  untracked non-ignored files, no private artifact paths in history beyond
+  `.env.example`, and no high-entropy token/history hits beyond the documented
+  scan pattern text itself. Broader env/cookie-name hits were limited to
+  placeholders, code paths, and redaction tests.
+- Issue #15 security gate completed the production threat register in
+  `docs/context/security-model.md` and added a dated local security review
+  under this active spec.
+- Backend hardening removed the raw session token from successful PIN-login
+  JSON responses and made free-text tool audit logs metadata-only.
+- Security regression coverage now checks cookie-only PIN login, real Gemini
+  token constraints, raw prompt/transcript/result omission from audit logs,
+  validation-error input stripping, and confirmation-summary audit omission.
+- Verification passed `uv run --extra dev pytest`, `pnpm test`,
+  `pnpm env:check`, `pnpm docs:verify`,
+  `tomoji docs index --verify --json`, `tomoji docs audit --json`,
+  `git diff --check`, and `pnpm verify`.
+- Strict independent external review remains blocked unless the user explicitly
+  approves exporting branch contents or local agent review tooling is repaired.
+- Issue #16 implementation adds local Hermes adapter readiness diagnostics,
+  malformed empty-output handling, configurable adapter timeout, fake-process
+  contract coverage, and an opt-in real local Hermes harness.
+- The real local Hermes harness refuses accidental execution unless
+  `HVC_REAL_HERMES_HARNESS=1` is set and records redacted evidence under the
+  active spec bundle.
+- The 2026-06-08 local harness run resolved `/opt/homebrew/bin/hermes` and
+  exercised `ask_agent`, `ask_bob`, and no-action probes through the read-only
+  safe command. The refreshed run passed with `blocker: null`.
+- The local adapter now invokes Hermes in quiet query mode so stdout contains
+  only the final speakable answer before returning it to the browser or harness
+  evidence, while CLI provider failures still surface as controlled errors.
+- Real Gemini Live smoke passed against a loopback backend started with the
+  `real-gemini` optional dependency. The redacted evidence is in
+  `evidence/gemini-live-smoke-latest.json` and confirms real mode, the
+  `gemini-2.5-flash-native-audio-latest` model, the `setupComplete` handshake,
+  and observed audio output.
+- Issue #13 provider-neutral frontend boundary added under
+  `apps/web/src/realtime/`. Gemini remains the only registered v1 provider, and
+  future providers must use backend-minted ephemeral credentials or signed
+  sessions rather than browser API keys.

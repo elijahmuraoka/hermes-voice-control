@@ -1,0 +1,63 @@
+{
+  "blocker": null,
+  "diagnostics": {
+    "available": true,
+    "command": [
+      "/opt/homebrew/bin/hermes",
+      "chat",
+      "-Q",
+      "-q",
+      "<read-only prompt>",
+      "--toolsets",
+      "safe"
+    ],
+    "configured_bin": "/opt/homebrew/bin/hermes",
+    "kind": "local",
+    "read_only": true,
+    "resolved_bin": "/opt/homebrew/bin/hermes",
+    "timeout_seconds": 60,
+    "toolsets": [
+      "safe"
+    ]
+  },
+  "ok": true,
+  "probes": [
+    {
+      "display": "Yes, the read-only Hermes voice bridge can answer questions, but actions need explicit confirmation in Hermes Voice Control.",
+      "finished_at": "2026-06-08T19:01:31.830694+00:00",
+      "mode": "quick",
+      "mode_requested": "quick",
+      "name": "ask_agent",
+      "ok": true,
+      "speakable": "Yes, the read-only Hermes voice bridge can answer questions, but actions need explicit confirmation in Hermes Voice Control.",
+      "started_at": "2026-06-08T19:01:13.235130+00:00",
+      "used_ask_bob_alias": false
+    },
+    {
+      "display": "Confirmed: this compatibility alias reaches the same read-only Hermes agent bridge.",
+      "finished_at": "2026-06-08T19:01:41.494151+00:00",
+      "mode": "quick",
+      "mode_requested": "quick",
+      "name": "ask_bob_alias",
+      "ok": true,
+      "speakable": "Confirmed: this compatibility alias reaches the same read-only Hermes agent bridge.",
+      "started_at": "2026-06-08T19:01:31.830713+00:00",
+      "used_ask_bob_alias": true
+    },
+    {
+      "display": "In v1, Hermes Voice Control drafts the Slack action but won\u2019t send it until you explicitly confirm.",
+      "finished_at": "2026-06-08T19:01:48.022241+00:00",
+      "mode": "quick",
+      "mode_requested": "quick",
+      "name": "no_action_semantics",
+      "ok": true,
+      "possible_action_claim_detected": false,
+      "requires_manual_review": true,
+      "speakable": "In v1, Hermes Voice Control drafts the Slack action but won\u2019t send it until you explicitly confirm.",
+      "started_at": "2026-06-08T19:01:41.494162+00:00",
+      "used_ask_bob_alias": false
+    }
+  ],
+  "ran_at": "2026-06-08T19:01:13.235024+00:00",
+  "read_only": true
+}

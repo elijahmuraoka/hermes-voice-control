@@ -11,10 +11,10 @@ async function jsonFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 export async function login(pin: string) {
-  return jsonFetch<{ ok: boolean; session_id: string; expires_at: string }>(
-    "/auth/pin",
-    { method: "POST", body: JSON.stringify({ pin }) },
-  );
+  return jsonFetch<{ ok: boolean; expires_at: string }>("/auth/pin", {
+    method: "POST",
+    body: JSON.stringify({ pin }),
+  });
 }
 export async function getGeminiToken() {
   return jsonFetch<{

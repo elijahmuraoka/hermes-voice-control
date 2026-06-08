@@ -19,14 +19,20 @@
 
 ## Current implementation
 
-- Browser UI is wired to `GeminiLiveSession`.
+- Browser UI is wired to a provider-neutral realtime factory in
+  `apps/web/src/realtime/`; Gemini remains the only registered v1 provider.
 - Browser receives only backend-issued Gemini ephemeral tokens, never long-lived
   Gemini/Google API keys.
 - Browser audio worklets capture PCM, resample to Gemini input requirements, and
   play Gemini PCM output.
+- Browser diagnostics stay in local memory and expose a redacted devtools bundle
+  at `window.__HVC_DIAGNOSTICS__`.
 - Gemini Live protocol support is split across a public `geminiLive.ts` facade
   plus focused `gemini-live/` modules for types, defaults, protocol helpers,
   and tool-call normalization.
+- The Gemini realtime provider adapter maps provider-specific `model` transcript
+  roles and `model-speaking` status into app-level `agent` terminology before
+  they reach React UI code.
 - Gemini Live setup normalizes model names to the `models/<model>` resource
   form.
 - Gemini Live client sends `audioStreamEnd` when finalizing captured audio.
@@ -56,6 +62,8 @@
   handling, cancellation handling, and launch-error handling.
 - Root operator scripts now include `pnpm dev`, `pnpm env:check`,
   `pnpm smoke:browser`, `pnpm screenshots:update`, and `pnpm perf:budget`.
+- `pnpm perf:budget` validates bundle size plus launch latency/reliability
+  budgets for first audio, tool response, reconnect/resume, and smoke flakes.
 
 ## Tradeoffs
 
@@ -64,8 +72,8 @@
   auditable.
 - PIN auth is intentionally simple for a one-user private app, with server-side
   sessions and rate limits when enabled.
-- The real Gemini websocket/audio path is unit-tested and browser-wired, but
-  still needs a credentialed live smoke test.
+- The real Gemini websocket/audio path is unit-tested, browser-wired, and has a
+  credentialed live smoke test in the active spec evidence.
 
 ## Fresh verification notes
 
@@ -106,11 +114,13 @@
 - 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+- 2026-06-08: real Gemini Live smoke passed against a loopback backend started
+  with `HVC_GEMINI_MODE=real` and the `real-gemini` optional dependency. The
+  script waited for the Live `setupComplete` handshake, observed real audio
+  output, and stored redacted evidence in the active spec.
 
 ## Remaining gaps
 
-- Run one credentialed Gemini Live smoke test with real backend
-  `HVC_GEMINI_MODE=real` and microphone permission.
 - Decide the default Gemini voice/personality guidance for Hermes agents once
   real audio is enabled.
 - Do a final independent review after credentialed real Gemini Live smoke.

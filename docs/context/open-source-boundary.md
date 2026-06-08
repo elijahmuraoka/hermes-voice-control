@@ -29,9 +29,13 @@ Do not add new local-only names to public docs or visible app copy.
 The public setup must work without private credentials or local machine state.
 
 ```bash
+export HVC_RELEASE_CANDIDATE_REF='refs/pull/NUMBER/head'
 tmpdir="$(mktemp -d)"
-git clone https://github.com/elijahmuraoka/hermes-voice-control.git "$tmpdir/hermes-voice-control"
+git clone --no-checkout https://github.com/elijahmuraoka/hermes-voice-control.git "$tmpdir/hermes-voice-control"
 cd "$tmpdir/hermes-voice-control"
+git fetch --depth=1 origin "$HVC_RELEASE_CANDIDATE_REF"
+git checkout --detach FETCH_HEAD
+git rev-parse HEAD
 
 pnpm install
 cd apps/server
@@ -45,6 +49,9 @@ pnpm verify
 
 Expected:
 
+- `HVC_RELEASE_CANDIDATE_REF` is set to the exact branch, tag, commit SHA, or
+  pull-request ref being reviewed. The gate must not accidentally test only the
+  repository default branch before the candidate is merged.
 - No `.env` file is required.
 - `HVC_GEMINI_MODE=mock` and `HVC_HERMES_ADAPTER=mock` are the defaults.
 - No Gemini quota, local Hermes binary, Tailscale account, or personal context

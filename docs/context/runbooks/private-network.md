@@ -208,7 +208,15 @@ export HVC_FRONTEND_ORIGINS='https://FRONTEND_DEVICE.TAILNET.ts.net'
 pnpm env:check
 ```
 
-Expose the already-running backend through Tailscale Serve:
+Start a fresh backend with the private-network environment above. Do not reuse
+the localhost HTTP rehearsal process after changing cookie or origin settings:
+
+```bash
+cd apps/server
+uv run uvicorn app.main:app --host "$HVC_HOST" --port "$HVC_PORT"
+```
+
+Then expose that backend through Tailscale Serve from another terminal:
 
 ```bash
 tailscale serve --bg --https=443 http://127.0.0.1:8765

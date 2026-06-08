@@ -23,6 +23,20 @@ export HVC_SECURE_COOKIES=true
 export HVC_ALLOW_LOGS_ENDPOINT=false
 
 pnpm env:check
+```
+
+Start or restart the backend with those private-network environment variables
+before configuring Serve:
+
+```bash
+cd apps/server
+uv run uvicorn app.main:app --host "$HVC_HOST" --port "${HVC_PORT:-8765}"
+```
+
+Then, from another terminal, capture existing Serve state and expose the running
+localhost backend:
+
+```bash
 mkdir -p .private/rehearsal
 tailscale serve get-config .private/rehearsal/tailscale-serve-before.json --all
 tailscale serve --bg --https=443 http://127.0.0.1:8765

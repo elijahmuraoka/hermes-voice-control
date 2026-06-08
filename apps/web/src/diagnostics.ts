@@ -85,16 +85,21 @@ declare global {
 }
 
 const MAX_EVENTS = 200;
+const SENSITIVE_KEY_PATTERN =
+  "(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|token|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-])+(?:token|secret|password|pin)|[a-z0-9]+(?:token|secret|password|pin))";
 const SECRET_HEADER_PATTERN =
   /\b((?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi;
 const COOKIE_ASSIGNMENT_PATTERN =
   /\b((?:cookie|set-cookie)\s*=\s*)[^\r\n]+/gi;
-const SECRET_KEY_PATTERN =
-  /\b((?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-]?)?token)\s*[=:]\s*)("[^"]*"|'[^']*'|[^&\s,;]+)/gi;
-const JSON_SECRET_KEY_PATTERN =
-  /("(?:(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-]?)?token))"\s*:\s*)("[^"]*"|'[^']*'|[^,\s}]+)/gi;
-const SECRET_DETAIL_KEY_PATTERN =
-  /(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|(?:[a-z0-9]+[_-]?)?token)/i;
+const SECRET_KEY_PATTERN = new RegExp(
+  String.raw`\b((${SENSITIVE_KEY_PATTERN})\s*[=:]\s*)("[^"]*"|'[^']*'|[^&\s,;]+)`,
+  "gi",
+);
+const JSON_SECRET_KEY_PATTERN = new RegExp(
+  String.raw`("(${SENSITIVE_KEY_PATTERN})"\s*:\s*)("[^"]*"|'[^']*'|[^,\s}]+)`,
+  "gi",
+);
+const SECRET_DETAIL_KEY_PATTERN = new RegExp(SENSITIVE_KEY_PATTERN, "i");
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
 const SESSION_PATH_PATTERN =
   /\b(session(?:s)?\/)[A-Za-z0-9._~-]{8,}/gi;

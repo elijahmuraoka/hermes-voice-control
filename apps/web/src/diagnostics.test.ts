@@ -76,7 +76,7 @@ describe("diagnostics", () => {
 
   it("redacts tokens, secrets, and session identifiers from diagnostic text", () => {
     const text =
-      'Authorization=Bearer abc.def.ghi token=raw-secret access_token=access-secret refresh_token=refresh-secret id-token=id-secret session_id=sess_123456789 sessions/sess_path_123456789 bare=sess_bare_123456789 api_key=key Authorization: Basic dXNlcjpwYXNz\nCookie: foo=bar; other=baz\ncookie=client=secret; theme=blue {"token":"json-secret","access_token":"json-access","refreshToken":"json-refresh","session_id":"sess_json_123456789"}';
+      'Authorization=Bearer abc.def.ghi token=raw-secret access_token=access-secret refresh_token=refresh-secret id-token=id-secret client_secret=client-secret-value oauth_client_secret=oauth-secret-value clientSecret=camel-secret-value refreshToken=camel-refresh-value session_id=sess_123456789 sessions/sess_path_123456789 bare=sess_bare_123456789 api_key=key Authorization: Basic dXNlcjpwYXNz\nCookie: foo=bar; other=baz\ncookie=client=secret; theme=blue {"token":"json-secret","access_token":"json-access","refreshToken":"json-refresh","client_secret":"json-client-secret","clientSecret":"json-camel-secret","session_id":"sess_json_123456789"}';
 
     const redacted = redactDiagnosticText(text);
 
@@ -85,6 +85,10 @@ describe("diagnostics", () => {
     expect(redacted).toContain("access_token=[redacted]");
     expect(redacted).toContain("refresh_token=[redacted]");
     expect(redacted).toContain("id-token=[redacted]");
+    expect(redacted).toContain("client_secret=[redacted]");
+    expect(redacted).toContain("oauth_client_secret=[redacted]");
+    expect(redacted).toContain("clientSecret=[redacted]");
+    expect(redacted).toContain("refreshToken=[redacted]");
     expect(redacted).toContain("session_id=[redacted]");
     expect(redacted).toContain("sessions/[redacted]");
     expect(redacted).toContain("bare=[redacted-session]");
@@ -96,6 +100,10 @@ describe("diagnostics", () => {
     expect(redacted).not.toContain("access-secret");
     expect(redacted).not.toContain("refresh-secret");
     expect(redacted).not.toContain("id-secret");
+    expect(redacted).not.toContain("client-secret-value");
+    expect(redacted).not.toContain("oauth-secret-value");
+    expect(redacted).not.toContain("camel-secret-value");
+    expect(redacted).not.toContain("camel-refresh-value");
     expect(redacted).not.toContain("dXNlcjpwYXNz");
     expect(redacted).not.toContain("foo=bar");
     expect(redacted).not.toContain("other=baz");
@@ -106,6 +114,8 @@ describe("diagnostics", () => {
     expect(redacted).not.toContain("json-secret");
     expect(redacted).not.toContain("json-access");
     expect(redacted).not.toContain("json-refresh");
+    expect(redacted).not.toContain("json-client-secret");
+    expect(redacted).not.toContain("json-camel-secret");
     expect(redacted).not.toContain("sess_json_123456789");
   });
 
@@ -113,8 +123,10 @@ describe("diagnostics", () => {
     const recorder = createHvcDiagnosticsRecorder();
     recorder.startSession();
     recorder.mark("provider_response_first", {
-      closeReason: "session_id=sess_123 token=secret",
+      closeReason: "session_id=sess_123 token=secret clientSecret=raw-client-secret",
       token: "raw-secret",
+      client_secret: "structured-client-secret",
+      clientSecret: "structured-camel-secret",
       session_id: "sess_456",
     });
 
@@ -126,7 +138,10 @@ describe("diagnostics", () => {
     expect(snapshot.budgets.firstAudioLatencyMs).toBeGreaterThan(0);
     expect(bundle).toContain("[redacted]");
     expect(bundle).not.toContain("token=secret");
+    expect(bundle).not.toContain("raw-client-secret");
     expect(bundle).not.toContain("raw-secret");
+    expect(bundle).not.toContain("structured-client-secret");
+    expect(bundle).not.toContain("structured-camel-secret");
     expect(bundle).not.toContain("sess_123");
     expect(bundle).not.toContain("sess_456");
   });

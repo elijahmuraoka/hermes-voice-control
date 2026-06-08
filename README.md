@@ -99,6 +99,10 @@ pnpm env:check
 pnpm verify
 ```
 
+This mock-mode path is the public fresh-checkout gate. It should not require a
+Gemini key, local Hermes binary, Tailscale account, `.env` file, or private
+machine context.
+
 ## Local Development
 
 Start the backend and web app together:
@@ -170,6 +174,8 @@ without a separate security review.
 
 See the [private-network runbook](docs/context/runbooks/private-network.md) for
 Tailscale Serve setup, mode-specific environment checks, and failure modes.
+Before tagging or publishing a public release, run the
+[open-source boundary checklist](docs/context/open-source-boundary.md).
 
 ## Verification Scripts
 

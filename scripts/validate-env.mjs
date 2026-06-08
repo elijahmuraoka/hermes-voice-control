@@ -86,6 +86,10 @@ const secureCookies = boolEnv("HVC_SECURE_COOKIES", false);
 const sessionTtlSeconds = intEnv("HVC_SESSION_TTL_SECONDS", 86_400, { min: 1 });
 const auditLogRetentionDays = intEnv("HVC_AUDIT_LOG_RETENTION_DAYS", 30, { min: 0 });
 const auditLogMaxRows = intEnv("HVC_AUDIT_LOG_MAX_ROWS", 5_000, { min: 0 });
+const frontendOrigins = (process.env.HVC_FRONTEND_ORIGINS ?? "http://127.0.0.1:5173,http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 if (!["mock", "real"].includes(geminiMode)) {
   errors.push("HVC_GEMINI_MODE must be mock or real.");
@@ -101,6 +105,14 @@ if (!localHosts.has(host) && !allowRemoteBind) {
 
 if (!localHosts.has(host) && !requirePin && !allowNoPinRemote) {
   errors.push("Remote/private-network access requires HVC_REQUIRE_PIN=true.");
+}
+
+if (allowNoPinRemote) {
+  errors.push("HVC_ALLOW_NO_PIN_REMOTE=true is a diagnostic override and is not allowed by pnpm env:check.");
+}
+
+if (frontendOrigins.includes("*")) {
+  errors.push("HVC_FRONTEND_ORIGINS must not include wildcard '*' while credentials are enabled.");
 }
 
 if (requirePin && isWeakPin(process.env.HVC_PIN ?? "000000")) {

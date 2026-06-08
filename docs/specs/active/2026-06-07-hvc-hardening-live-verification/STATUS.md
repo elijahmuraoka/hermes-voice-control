@@ -54,3 +54,21 @@
 - Blocker: no provider credentials were available in this docs lane, so
   credentialed Gemini plus alternate-provider smoke and latency results remain
   pending for #12.
+- Issues #14 and #19 release/deployment gate pass added copy-paste private
+  network rehearsal steps, rollback, health checks, evidence redaction, public
+  release checklist, fresh-checkout mock setup, and secret/history scan rules.
+- `scripts/validate-env.mjs` now rejects wildcard
+  `HVC_FRONTEND_ORIGINS='*'` and the `HVC_ALLOW_NO_PIN_REMOTE=true`
+  diagnostic override during release env checks.
+- Local private-deployment rehearsal passed in mock mode with backend bound to
+  `127.0.0.1:8765`, PIN required, logs disabled, `/healthz` 200, `/readyz`
+  200 with database `ok`, unauthenticated `/auth/session` 401, and PIN login
+  200. Rehearsal SQLite state was removed afterward.
+- Live Tailscale Serve was not mutated: read-only `tailscale status` and
+  `tailscale serve status --json` both returned `Failed to load preferences`,
+  so account/tailnet state could not be verified before a Serve change.
+- Open-source gate scan found no tracked `.env` files beyond `.env.example`, no
+  untracked non-ignored files, no private artifact paths in history beyond
+  `.env.example`, and no high-entropy token/history hits beyond the documented
+  scan pattern text itself. Broader env/cookie-name hits were limited to
+  placeholders, code paths, and redaction tests.

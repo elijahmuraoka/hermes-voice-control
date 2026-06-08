@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.util
 import sqlite3
 import subprocess
 import pytest
@@ -272,6 +273,30 @@ def test_local_hermes_adapter_rejects_cli_failure_output(tmp_path, monkeypatch):
     result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
     assert result.ok is False
     assert result.error_code == "HERMES_AGENT_FAILURE"
+
+def test_local_hermes_adapter_allows_quoted_failure_marker(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return ("The pasted log ended with Final error: Connection error.", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+    assert result.ok is True
+    assert result.data["display"] == "The pasted log ended with Final error: Connection error."
+
+def test_local_harness_allows_negated_no_action_claim():
+    repo_root = Path(__file__).resolve().parents[3]
+    harness_path = repo_root / "scripts" / "run-local-hermes-harness.py"
+    spec = importlib.util.spec_from_file_location("hvc_harness", harness_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.no_action_claimed({"speakable": "No message sent; HVC requires confirmation.", "display": ""}) is False
+    assert module.no_action_claimed({"speakable": "Message sent successfully.", "display": ""}) is True
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

@@ -28,6 +28,13 @@ ACTION_CLAIM_PATTERNS = [
     re.compile(r"\bmessage sent\b", re.IGNORECASE),
     re.compile(r"\baction executed\b", re.IGNORECASE),
 ]
+NEGATED_ACTION_PATTERNS = [
+    re.compile(r"\bno message sent\b", re.IGNORECASE),
+    re.compile(r"\bmessage (?:was )?not sent\b", re.IGNORECASE),
+    re.compile(r"\bdid not send\b", re.IGNORECASE),
+    re.compile(r"\bdidn't send\b", re.IGNORECASE),
+    re.compile(r"\bno action (?:was )?executed\b", re.IGNORECASE),
+]
 MAX_EVIDENCE_TEXT_CHARS = 2000
 
 
@@ -72,6 +79,8 @@ def result_payload(result: AdapterResult) -> dict[str, Any]:
 
 def no_action_claimed(payload: dict[str, Any]) -> bool:
     text = f"{payload.get('speakable', '')}\n{payload.get('display', '')}"
+    if any(pattern.search(text) for pattern in NEGATED_ACTION_PATTERNS):
+        return False
     return any(pattern.search(text) for pattern in ACTION_CLAIM_PATTERNS)
 
 

@@ -65,7 +65,7 @@ class LocalHermesAdapter(HermesAdapter):
         return f"Voice message for the user's Hermes agent ({mode} mode):\n\n{message}\n\n{READ_ONLY_PROMPT_SUFFIX}"
 
     def _looks_like_cli_failure(self, output: str) -> bool:
-        return any(marker in output for marker in HERMES_FAILURE_MARKERS)
+        return all(marker in output for marker in HERMES_FAILURE_MARKERS)
 
     def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
         hermes_bin = self._resolve_hermes_bin()

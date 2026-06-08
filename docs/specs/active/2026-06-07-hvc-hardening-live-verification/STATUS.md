@@ -44,3 +44,7 @@
   design, private deployment rehearsal, security threat modeling, real Hermes
   bridge verification, latency instrumentation, final review, open-source
   release safety, and mobile/audio QA.
+- Issue #13 provider-neutral frontend boundary added under
+  `apps/web/src/realtime/`. Gemini remains the only registered v1 provider, and
+  future providers must use backend-minted ephemeral credentials or signed
+  sessions rather than browser API keys.

@@ -7,6 +7,7 @@ Phone/laptop browser over localhost or Tailscale
   -> React voice UI
   -> FastAPI access check and optional PIN session
   -> Gemini ephemeral token broker
+  -> browser realtime provider adapter
   -> browser Gemini Live websocket session
   -> Gemini tool call normalization
   -> backend tool policy and cancellation checks
@@ -16,8 +17,9 @@ Phone/laptop browser over localhost or Tailscale
 
 ## Components
 
-- `apps/web`: React voice UI, orb state machine, audio worklets, Gemini Live
-  protocol wrapper, transcript drawer, and text fallback.
+- `apps/web`: React voice UI, orb state machine, audio worklets, realtime
+  provider boundary, Gemini Live protocol wrapper, transcript drawer, and text
+  fallback.
 - `apps/server`: FastAPI auth/session layer, Gemini token broker, tool allowlist,
   SQLite store, confirmation records, readiness/log controls, and Hermes adapter
   implementations.
@@ -60,6 +62,7 @@ pruned at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
 - [Private network runbook](context/runbooks/private-network.md)
 - [Tailscale private exposure](context/tailscale-private-exposure.md)
 - [Hermes integration](context/hermes-integration.md)
+- [Realtime provider boundary](context/realtime-provider-boundary.md)
 - [UX state machine](context/ux-state-machine.md)
 - [Implementation notes](context/implementation-notes.md)
 - [Open-source boundary](context/open-source-boundary.md)

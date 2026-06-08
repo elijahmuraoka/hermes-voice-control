@@ -19,7 +19,8 @@
 
 ## Current implementation
 
-- Browser UI is wired to `GeminiLiveSession`.
+- Browser UI is wired to a provider-neutral realtime factory in
+  `apps/web/src/realtime/`; Gemini remains the only registered v1 provider.
 - Browser receives only backend-issued Gemini ephemeral tokens, never long-lived
   Gemini/Google API keys.
 - Browser audio worklets capture PCM, resample to Gemini input requirements, and
@@ -27,6 +28,9 @@
 - Gemini Live protocol support is split across a public `geminiLive.ts` facade
   plus focused `gemini-live/` modules for types, defaults, protocol helpers,
   and tool-call normalization.
+- The Gemini realtime provider adapter maps provider-specific `model` transcript
+  roles and `model-speaking` status into app-level `agent` terminology before
+  they reach React UI code.
 - Gemini Live setup normalizes model names to the `models/<model>` resource
   form.
 - Gemini Live client sends `audioStreamEnd` when finalizing captured audio.

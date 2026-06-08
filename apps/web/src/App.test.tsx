@@ -9,15 +9,19 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
-const geminiMock = vi.hoisted(() => ({ instances: [] as any[] }));
+const realtimeMock = vi.hoisted(() => ({
+  instances: [] as any[],
+  createError: null as Error | null,
+}));
 
-vi.mock("./geminiLive", () => {
-  class GeminiLiveSession {
+vi.mock("./realtime", () => {
+  class MockRealtimeVoiceSession {
     callbacks: any;
     connect = vi.fn(async () => {
       this.callbacks.onToken?.({
         expires_at: "2026-01-01T00:00:00Z",
         mode: "test",
+        provider: "gemini",
       });
       this.callbacks.onStatus?.("setup-complete");
       this.callbacks.onStatus?.("listening");
@@ -29,16 +33,22 @@ vi.mock("./geminiLive", () => {
 
     constructor(options: any) {
       this.callbacks = options.callbacks;
-      geminiMock.instances.push(this);
+      realtimeMock.instances.push(this);
     }
   }
 
-  return { GeminiLiveSession };
+  return {
+    createDefaultRealtimeVoiceSession: (options: any) => {
+      if (realtimeMock.createError) throw realtimeMock.createError;
+      return new MockRealtimeVoiceSession(options);
+    },
+  };
 });
 
 describe("App", () => {
   beforeEach(() => {
-    geminiMock.instances.length = 0;
+    realtimeMock.instances.length = 0;
+    realtimeMock.createError = null;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -101,7 +111,7 @@ describe("App", () => {
     );
   });
 
-  it("first orb tap constructs and connects one Gemini session, then shows token mode and listening status", async () => {
+  it("first orb tap constructs and connects one realtime session, then shows token mode and listening status", async () => {
     render(<App />);
     const orb = screen.getByLabelText(/Voice orb/);
 
@@ -112,12 +122,33 @@ describe("App", () => {
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
     expect(screen.getByText("test voice")).toBeInTheDocument();
-    expect(geminiMock.instances).toHaveLength(1);
-    expect(geminiMock.instances[0].connect).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(realtimeMock.instances[0].connect).toHaveBeenCalledTimes(1);
     expect(fetch).not.toHaveBeenCalledWith(
       expect.stringContaining("/gemini/ephemeral-token"),
       expect.anything(),
     );
+  });
+
+  it("handles realtime provider factory failures as recoverable voice errors", async () => {
+    realtimeMock.createError = new Error("Unsupported realtime provider 'openai'.");
+    render(<App />);
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Could not prepare your Hermes agent voice. Confirm you are on the private network and try again.",
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("Unsupported realtime provider 'openai'."),
+    ).toBeInTheDocument();
+    expect(realtimeMock.instances).toHaveLength(0);
   });
 
   it("second orb tap pauses and disables microphone capture", async () => {
@@ -134,14 +165,14 @@ describe("App", () => {
 
     expect(screen.getByText("Paused")).toBeInTheDocument();
     expect(
-      geminiMock.instances[0].setMicrophoneEnabled,
+      realtimeMock.instances[0].setMicrophoneEnabled,
     ).toHaveBeenLastCalledWith(false);
-    expect(geminiMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
+    expect(realtimeMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
       false,
     );
   });
 
-  it("mute toggles the Gemini session microphone enabled state", async () => {
+  it("mute toggles the realtime session microphone enabled state", async () => {
     const user = userEvent.setup();
     render(<App />);
     const orb = screen.getByLabelText(/Voice orb/);
@@ -154,11 +185,11 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: /Mute/ }));
     expect(
-      geminiMock.instances[0].setMicrophoneEnabled,
+      realtimeMock.instances[0].setMicrophoneEnabled,
     ).toHaveBeenLastCalledWith(false);
     await user.click(screen.getByRole("button", { name: /Unmute/ }));
     expect(
-      geminiMock.instances[0].setMicrophoneEnabled,
+      realtimeMock.instances[0].setMicrophoneEnabled,
     ).toHaveBeenLastCalledWith(true);
   });
 
@@ -178,9 +209,9 @@ describe("App", () => {
     );
 
     expect(
-      geminiMock.instances[0].setMicrophoneEnabled,
+      realtimeMock.instances[0].setMicrophoneEnabled,
     ).toHaveBeenLastCalledWith(false);
-    expect(geminiMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
+    expect(realtimeMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
       false,
     );
   });
@@ -199,12 +230,12 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     expect(screen.getByText("Holding to talk")).toBeInTheDocument();
-    expect(geminiMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
+    expect(realtimeMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
       true,
     );
 
     fireEvent.pointerUp(orb, { pointerId: 2 });
-    expect(geminiMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
+    expect(realtimeMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
       false,
     );
     expect(screen.getByText("Hermes Agent is thinking...")).toBeInTheDocument();
@@ -220,7 +251,7 @@ describe("App", () => {
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
 
-    act(() => geminiMock.instances[0].callbacks.onStatus("model-speaking"));
+    act(() => realtimeMock.instances[0].callbacks.onStatus("agent-speaking"));
     await waitFor(() =>
       expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument(),
     );
@@ -229,13 +260,13 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
 
-    expect(geminiMock.instances[0].interrupt).toHaveBeenCalledTimes(1);
-    expect(geminiMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
+    expect(realtimeMock.instances[0].interrupt).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
       true,
     );
   });
 
-  it("End disconnects the Gemini session and returns to idle", async () => {
+  it("End disconnects the realtime session and returns to idle", async () => {
     const user = userEvent.setup();
     render(<App />);
     const orb = screen.getByLabelText(/Voice orb/);
@@ -248,7 +279,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: /End/ }));
 
-    expect(geminiMock.instances[0].disconnect).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances[0].disconnect).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
   });
 });

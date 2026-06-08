@@ -45,3 +45,5 @@ node scripts/e2e-real-gemini-live.mjs
 - 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+- 2026-06-08: issue #13 provider-neutral frontend boundary added under
+  `apps/web/src/realtime/`; Gemini remains the only registered v1 provider.

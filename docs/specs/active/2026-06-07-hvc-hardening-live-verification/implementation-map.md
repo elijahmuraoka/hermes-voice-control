@@ -21,6 +21,8 @@
 - `apps/web/src/geminiLive.ts`: Gemini Live session orchestration, model resource
   normalization, audio finalization, tool-call cancellation, and late-response
   suppression.
+- `apps/web/src/realtime/`: provider-neutral frontend voice contract and Gemini
+  adapter boundary for status/transcript normalization.
 - `apps/web/src/gemini-live/defaults.ts`: default tool schemas and tool caller
   cancellation hooks.
 - `apps/web/src/audio.ts` and worklets: capture/playback/resampling path.

@@ -9,10 +9,11 @@ import {
 import { Mic, MicOff, PhoneOff, Sparkles } from "lucide-react";
 import { sendText } from "./api";
 import {
-  GeminiLiveSession,
-  type GeminiLiveCallbacks,
-  type GeminiTranscriptEvent,
-} from "./geminiLive";
+  createDefaultRealtimeVoiceSession,
+  type RealtimeTranscriptEvent,
+  type RealtimeVoiceCallbacks,
+  type RealtimeVoiceSession,
+} from "./realtime";
 import { initialVoiceState, voiceReducer } from "./stateMachine";
 import type { TranscriptEntry } from "./types";
 import { VoiceOrb } from "./components/VoiceOrb";
@@ -44,11 +45,11 @@ export default function App() {
   const [tokenMode, setTokenMode] = useState("local");
   const stateRef = useRef(state);
   const entriesRef = useRef(entries);
-  const sessionRef = useRef<GeminiLiveSession | null>(null);
+  const sessionRef = useRef<RealtimeVoiceSession | null>(null);
   const connectingRef = useRef(false);
   const endingRef = useRef(false);
   const transcriptDraftsRef = useRef<
-    Partial<Record<GeminiTranscriptEvent["role"], string>>
+    Partial<Record<RealtimeTranscriptEvent["role"], string>>
   >({});
   const initialPressState = useMemo(emptyPress, []);
   const pressRef = useRef<PressState>(initialPressState);
@@ -97,9 +98,8 @@ export default function App() {
     ]);
   }
 
-  function appendTranscript(event: GeminiTranscriptEvent) {
-    const role: TranscriptEntry["role"] =
-      event.role === "model" ? "agent" : "user";
+  function appendTranscript(event: RealtimeTranscriptEvent) {
+    const role: TranscriptEntry["role"] = event.role;
     const status: TranscriptEntry["status"] = event.final
       ? "complete"
       : "streaming";
@@ -137,7 +137,7 @@ export default function App() {
     if (event.final) delete transcriptDraftsRef.current[event.role];
   }
 
-  function buildSessionCallbacks(): GeminiLiveCallbacks {
+  function buildSessionCallbacks(): RealtimeVoiceCallbacks {
     return {
       onToken: (token) => setTokenMode(token.mode),
       onStatus: (status) => {
@@ -149,7 +149,7 @@ export default function App() {
           dispatch({ type: "CONNECTED" });
           return;
         }
-        if (status === "model-speaking") {
+        if (status === "agent-speaking") {
           dispatch({ type: "SPEAK" });
           return;
         }
@@ -173,7 +173,7 @@ export default function App() {
         appendSystem(`${response.name} finished.`, "complete"),
       onError: (error) => {
         appendSystem(
-          error.message || "Gemini Live reported an error.",
+          error.message || "Realtime voice session reported an error.",
           "failed",
         );
         dispatch({ type: "ERROR", error: "Voice session failed." });
@@ -199,13 +199,12 @@ export default function App() {
     endingRef.current = false;
     dispatch({ type: "CONNECT" });
 
-    const session = new GeminiLiveSession({
-      callbacks: buildSessionCallbacks(),
-      audio: { startMuted: stateRef.current.isMuted },
-    });
-    sessionRef.current = session;
-
     try {
+      const session = createDefaultRealtimeVoiceSession({
+        callbacks: buildSessionCallbacks(),
+        audio: { startMuted: stateRef.current.isMuted },
+      });
+      sessionRef.current = session;
       await session.connect();
       afterConnected?.();
     } catch (error) {
@@ -213,7 +212,7 @@ export default function App() {
       appendSystem(
         error instanceof Error
           ? error.message
-          : "Could not connect to Gemini Live.",
+          : "Could not connect to realtime voice.",
         "failed",
       );
       dispatch({

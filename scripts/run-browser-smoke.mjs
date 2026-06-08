@@ -49,16 +49,15 @@ async function resolveSmokeTarget() {
   const firstPort = Number(configured.port || 5173);
   if (process.env.HVC_E2E_APP_URL) {
     return {
-      appUrl: configured.origin,
-      host,
-      port: firstPort,
+      appUrl: configured.toString(),
+      spawnServer: false,
     };
   }
   for (let port = firstPort; port < firstPort + 20; port += 1) {
     if (await canListen(host, port)) {
       const url = new URL(configured.origin);
       url.port = String(port);
-      return { appUrl: url.origin, host, port };
+      return { appUrl: url.origin, host, port, spawnServer: true };
     }
   }
   throw new Error(`No available localhost port from ${firstPort} to ${firstPort + 19}`);
@@ -78,14 +77,16 @@ async function assertServerStillRunning(server, url) {
 async function waitForApp(url, server, timeoutMs = 20_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const exit = currentExit(server);
-    if (exit) {
-      throw new Error(`Vite exited before ${url} was ready (${describeExit(exit)})`);
+    if (server) {
+      const exit = currentExit(server);
+      if (exit) {
+        throw new Error(`Vite exited before ${url} was ready (${describeExit(exit)})`);
+      }
     }
     try {
       const response = await fetch(url);
       if (response.ok) {
-        await assertServerStillRunning(server, url);
+        if (server) await assertServerStillRunning(server, url);
         return;
       }
     } catch {}
@@ -102,8 +103,30 @@ function waitForExit(child) {
   });
 }
 
+async function runPlaywright(appUrl) {
+  const smoke = spawnCommand(
+    "pnpm",
+    [
+      "exec",
+      "playwright",
+      "test",
+      "scripts/browser-responsive.spec.ts",
+      "--reporter=list",
+    ],
+    { env: { HVC_E2E_APP_URL: appUrl } },
+  );
+  return waitForExit(smoke);
+}
+
 async function main() {
   const target = await resolveSmokeTarget();
+  if (!target.spawnServer) {
+    await waitForApp(target.appUrl);
+    const result = await runPlaywright(target.appUrl);
+    if (result.code !== 0) process.exit(result.code ?? 1);
+    return;
+  }
+
   const server = spawnCommand(
     "node",
     [
@@ -122,18 +145,7 @@ async function main() {
   let exitCode = 0;
   try {
     await waitForApp(target.appUrl, server);
-    const smoke = spawnCommand(
-      "pnpm",
-      [
-        "exec",
-        "playwright",
-        "test",
-        "scripts/browser-responsive.spec.ts",
-        "--reporter=list",
-      ],
-      { env: { HVC_E2E_APP_URL: target.appUrl } },
-    );
-    const result = await waitForExit(smoke);
+    const result = await runPlaywright(target.appUrl);
     if (result.code !== 0) exitCode = result.code ?? 1;
   } finally {
     server.kill("SIGINT");

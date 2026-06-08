@@ -63,7 +63,10 @@ Open work not yet scoped into its own spec.
 ## Launch Plan Issues
 
 - [#12](https://github.com/elijahmuraoka/hermes-voice-control/issues/12):
-  realtime voice provider bakeoff and v1 default decision.
+  realtime voice provider bakeoff and v1 default decision. The docs decision
+  artifact is in
+  [realtime-provider-bakeoff.md](context/research/realtime-provider-bakeoff.md);
+  credentialed Gemini plus alternate-provider smoke evidence is still pending.
 - [#13](https://github.com/elijahmuraoka/hermes-voice-control/issues/13):
   provider-neutral realtime adapter boundary.
 - [#14](https://github.com/elijahmuraoka/hermes-voice-control/issues/14):

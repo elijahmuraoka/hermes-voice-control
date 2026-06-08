@@ -194,3 +194,4 @@ Start with:
 - [Architecture](docs/ARCHITECTURE.md)
 - [Implementation notes](docs/context/implementation-notes.md)
 - [Open-source voice systems research](docs/context/research/open-source-voice-systems.md)
+- [Realtime provider bakeoff](docs/context/research/realtime-provider-bakeoff.md)

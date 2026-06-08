@@ -44,3 +44,13 @@
   design, private deployment rehearsal, security threat modeling, real Hermes
   bridge verification, latency instrumentation, final review, open-source
   release safety, and mobile/audio QA.
+- Issue #12 provider bakeoff decision artifact added under
+  `docs/context/research/realtime-provider-bakeoff.md`.
+- Decision: keep Gemini Live as the v1 default for this repo's private
+  browser-to-Hermes use case. OpenAI Realtime and xAI Grok Voice Agent are the
+  first alternates to benchmark; ElevenLabs Agents is deferred unless HVC needs
+  managed hosted agents, telephony, monitoring/evals, or deeper voice catalog
+  operations.
+- Blocker: no provider credentials were available in this docs lane, so
+  credentialed Gemini plus alternate-provider smoke and latency results remain
+  pending for #12.

@@ -8,6 +8,8 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "localhost", "::1", "testclient"}
 DEFAULT_PIN = "000000"
 COMMON_WEAK_PINS = {"12345678", "87654321", "password", "password1", "aaaaaaaa", "11111111", "00000000", "qwertyui", "change-me", "changeme"}
+HERMES_TIMEOUT_SECONDS_MIN = 1
+HERMES_TIMEOUT_SECONDS_MAX = 600
 
 
 def _is_sequential(value: str) -> bool:
@@ -57,6 +59,7 @@ class Settings:
     gemini_mode: str = "mock"
     hermes_adapter: str = "mock"
     hermes_bin: str = "hermes"
+    hermes_timeout_seconds: int = 90
     allow_remote_bind: bool = False
     allow_no_pin_remote: bool = False
     allow_logs_endpoint: bool = False
@@ -79,6 +82,7 @@ class Settings:
             gemini_mode=os.getenv("HVC_GEMINI_MODE", "mock"),
             hermes_adapter=os.getenv("HVC_HERMES_ADAPTER", "mock"),
             hermes_bin=os.getenv("HVC_HERMES_BIN", "hermes"),
+            hermes_timeout_seconds=env_int("HVC_HERMES_TIMEOUT_SECONDS", 90),
             allow_remote_bind=env_bool("HVC_ALLOW_REMOTE_BIND", False),
             allow_no_pin_remote=env_bool("HVC_ALLOW_NO_PIN_REMOTE", False),
             allow_logs_endpoint=env_bool("HVC_ALLOW_LOGS_ENDPOINT", False),
@@ -99,3 +103,7 @@ class Settings:
     def assert_safe_auth(self) -> None:
         if self.require_pin and is_weak_pin(self.pin):
             raise RuntimeError("HVC_REQUIRE_PIN=true requires HVC_PIN to be non-default, at least 8 characters, and not common/repeated/sequential")
+
+    def assert_safe_hermes(self) -> None:
+        if not HERMES_TIMEOUT_SECONDS_MIN <= self.hermes_timeout_seconds <= HERMES_TIMEOUT_SECONDS_MAX:
+            raise RuntimeError("HVC_HERMES_TIMEOUT_SECONDS must be between 1 and 600 seconds")

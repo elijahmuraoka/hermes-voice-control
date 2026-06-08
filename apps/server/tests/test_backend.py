@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.util
 import sys
 import sqlite3
 import subprocess
@@ -28,6 +29,15 @@ def login(client: TestClient) -> str:
     assert token
     assert token not in res.text
     return token
+
+def load_harness_module():
+    repo_root = Path(__file__).resolve().parents[3]
+    harness_path = repo_root / "scripts" / "run-local-hermes-harness.py"
+    spec = importlib.util.spec_from_file_location("hvc_harness", harness_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
 def test_readyz_reports_safe_runtime_posture(tmp_path):
@@ -39,9 +49,45 @@ def test_readyz_reports_safe_runtime_posture(tmp_path):
     assert body["checks"]["gemini_mode"] == "mock"
     assert body["checks"]["gemini_api_key_configured"] is False
     assert body["checks"]["gemini_client_available"] is True
+    assert body["checks"]["hermes"] == {"kind": "mock", "available": True, "read_only": True}
     assert body["checks"]["audit_log_retention_days"] == 30
     assert body["checks"]["audit_log_max_rows"] == 5000
     assert TEST_PIN not in res.text
+
+def test_readyz_reports_missing_local_hermes_binary(tmp_path):
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(tmp_path / "missing-hermes"))
+    res = client.get("/readyz")
+    assert res.status_code == 503
+    body = res.json()
+    assert body["ok"] is False
+    assert body["checks"]["hermes"]["kind"] == "local"
+    assert body["checks"]["hermes"]["available"] is False
+    assert body["checks"]["hermes"]["read_only"] is True
+    assert body["checks"]["hermes"]["command"][-2:] == ["--toolsets", "safe"]
+
+def test_readyz_rejects_directory_local_hermes_binary(tmp_path):
+    hermes_dir = tmp_path / "hermes-dir"
+    hermes_dir.mkdir()
+    hermes_dir.chmod(0o755)
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes_dir))
+    res = client.get("/readyz")
+    assert res.status_code == 503
+    body = res.json()
+    assert body["ok"] is False
+    assert body["checks"]["hermes"]["available"] is False
+
+def test_readyz_reports_resolved_local_hermes_binary(tmp_path):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes))
+    res = client.get("/readyz")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["checks"]["hermes"]["available"] is True
+    assert body["checks"]["hermes"]["resolved_bin"] == str(hermes)
+
 def test_readyz_fails_real_gemini_without_key(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
@@ -124,6 +170,26 @@ def test_pin_mode_requires_non_default_strong_pin(tmp_path):
     for weak_pin in ("1234567", "12345678", "87654321", "aaaaaaaa", "password", "change-me", "changeme", "0000000 ", " 1234567"):
         with pytest.raises(RuntimeError):
             create_app(Settings(pin=weak_pin, require_pin=True, db_path=tmp_path / f"weak-{weak_pin}.sqlite3"))
+
+
+@pytest.mark.parametrize("timeout_seconds", [0, -1, 601])
+def test_hermes_timeout_bounds_enforced(tmp_path, timeout_seconds):
+    with pytest.raises(RuntimeError, match="HVC_HERMES_TIMEOUT_SECONDS"):
+        create_app(
+            Settings(
+                pin=TEST_PIN,
+                db_path=tmp_path / f"timeout-{timeout_seconds}.sqlite3",
+                hermes_timeout_seconds=timeout_seconds,
+            )
+        )
+
+
+def test_env_hermes_timeout_bounds_enforced(tmp_path, monkeypatch):
+    monkeypatch.setenv("HVC_DB_PATH", str(tmp_path / "env-timeout.sqlite3"))
+    monkeypatch.setenv("HVC_HERMES_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(RuntimeError, match="HVC_HERMES_TIMEOUT_SECONDS"):
+        create_app()
 
 
 def test_mock_gemini_token_not_logged_raw(tmp_path):
@@ -249,7 +315,49 @@ def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     result = LocalHermesAdapter(str(hermes)).ask_agent("hi", mode="quick")
     assert result.ok is True
+    assert calls[0][0][1:4] == ["chat", "-Q", "-q"]
+    assert "Do not take external actions" in calls[0][0][4]
+    assert "mutate files" in calls[0][0][4]
+    assert "send messages" in calls[0][0][4]
+    assert calls[0][1]["shell"] is False
     assert calls[0][0][-2:] == ["--toolsets", "safe"]
+
+def test_local_hermes_adapter_ask_bob_uses_same_safe_bridge(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    calls = []
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return ("alias answer", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: calls.append((cmd, kwargs)) or FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_bob("hi", mode="deep")
+    assert result.ok is True
+    assert result.data["mode"] == "deep"
+    assert calls[0][0][-2:] == ["--toolsets", "safe"]
+
+def test_local_hermes_adapter_preserves_quiet_stdout_answer(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    quiet_output = (
+        "| command | purpose |\n"
+        "| hermes chat -Q -q | return only the final answer on stdout |"
+    )
+
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return (quiet_output, "session_id: 20260608_001422_893075")
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+
+    assert result.ok is True
+    assert result.data["speakable"] == quiet_output
+    assert result.data["display"] == quiet_output
 
 def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
@@ -271,6 +379,121 @@ def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
     assert result.ok is False
     assert result.error_code == "HERMES_CANCELLED"
     assert events == ["terminate"]
+
+def test_local_hermes_adapter_times_out(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    events = []
+    class FakeProc:
+        returncode = None
+        def poll(self): return None
+        def kill(self):
+            events.append("kill")
+            self.returncode = -9
+        def communicate(self, timeout=None): return ("late answer", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes), timeout_seconds=0).ask_agent("hi")
+    assert result.ok is False
+    assert result.error_code == "HERMES_TIMEOUT"
+    assert events == ["kill"]
+
+def test_local_hermes_adapter_rejects_empty_output(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return (" \n", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+    assert result.ok is False
+    assert result.error_code == "HERMES_MALFORMED_OUTPUT"
+
+def test_local_hermes_adapter_rejects_cli_failure_output(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return ("API call failed after 3 retries: Connection error.\nFinal error: Connection error.", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+    assert result.ok is False
+    assert result.error_code == "HERMES_AGENT_FAILURE"
+
+def test_local_hermes_adapter_allows_quoted_failure_marker(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None):
+            return (
+                "The pasted log said:\n"
+                "API call failed after 3 retries: Connection error.\n"
+                "Final error: Connection error.",
+                "",
+            )
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+    assert result.ok is True
+    assert result.data["display"] == (
+        "The pasted log said:\n"
+        "API call failed after 3 retries: Connection error.\n"
+        "Final error: Connection error."
+    )
+
+def test_local_harness_allows_negated_no_action_claim():
+    module = load_harness_module()
+
+    assert module.no_action_claimed({"speakable": "No message sent; HVC requires confirmation.", "display": ""}) is False
+    assert module.no_action_claimed({"speakable": "No message was sent; HVC requires confirmation.", "display": ""}) is False
+    assert module.no_action_claimed({"speakable": "No Slack message was sent; HVC requires confirmation.", "display": ""}) is False
+    assert module.no_action_claimed({"speakable": "Message sent successfully.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "The Slack message was sent successfully.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "I have sent the Slack message.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "I've sent it.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "Sent the Slack message.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "No message sent, but action executed successfully.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "No action was executed and the message was not sent.", "display": ""}) is False
+    assert module.summarize_blocker([{"ok": True, "possible_action_claim_detected": True}], 90) == (
+        "The no-action semantics probe detected a possible external-action claim."
+    )
+
+def test_local_harness_refuses_before_parsing_bad_timeout_env(monkeypatch, capsys):
+    module = load_harness_module()
+    monkeypatch.delenv("HVC_REAL_HERMES_HARNESS", raising=False)
+    monkeypatch.setenv("HVC_HERMES_TIMEOUT_SECONDS", "abc")
+    monkeypatch.setattr(module.sys, "argv", ["run-local-hermes-harness.py"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "Set HVC_REAL_HERMES_HARNESS=1" in captured.out
+    assert "ValueError" not in captured.err
+
+def test_local_harness_accepts_pnpm_forwarded_separator(monkeypatch, capsys):
+    module = load_harness_module()
+    monkeypatch.delenv("HVC_REAL_HERMES_HARNESS", raising=False)
+    monkeypatch.setattr(module.sys, "argv", ["run-local-hermes-harness.py", "--", "--timeout-seconds", "5"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "Set HVC_REAL_HERMES_HARNESS=1" in captured.out
+    assert "unrecognized arguments" not in captured.err
+
+def test_local_harness_reports_bad_timeout_after_opt_in(monkeypatch, capsys):
+    module = load_harness_module()
+    monkeypatch.setenv("HVC_REAL_HERMES_HARNESS", "1")
+    monkeypatch.setenv("HVC_HERMES_TIMEOUT_SECONDS", "abc")
+    monkeypatch.setattr(module.sys, "argv", ["run-local-hermes-harness.py"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "HVC_HERMES_TIMEOUT_SECONDS must be an integer" in captured.out
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

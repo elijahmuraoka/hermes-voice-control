@@ -9,6 +9,7 @@
     "perf:budget": "node scripts/check-performance-budget.mjs",
     "docs:verify": "node scripts/verify-docs.mjs",
     "verify": "pnpm test && pnpm build && pnpm perf:budget && pnpm docs:verify",
+    "hermes:harness": "cd apps/server && uv run python ../../scripts/run-local-hermes-harness.py",
     "dev": "node scripts/run-local-dev.mjs",
     "smoke:browser": "node scripts/run-browser-smoke.mjs",
     "screenshots:update": "node scripts/update-screenshots.mjs",

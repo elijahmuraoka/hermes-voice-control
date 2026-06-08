@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -40,6 +40,7 @@ function isWeakPin(value) {
 function commandExists(command) {
   if (command.includes("/")) {
     try {
+      if (!statSync(command).isFile()) return false;
       accessSync(command, constants.X_OK);
       return true;
     } catch {
@@ -90,6 +91,7 @@ const frontendOrigins = (process.env.HVC_FRONTEND_ORIGINS ?? "http://127.0.0.1:5
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const hermesTimeoutSeconds = intEnv("HVC_HERMES_TIMEOUT_SECONDS", 90, { min: 1, max: 600 });
 
 if (!["mock", "real"].includes(geminiMode)) {
   errors.push("HVC_GEMINI_MODE must be mock or real.");
@@ -142,6 +144,7 @@ const result = {
     port,
     geminiMode,
     hermesAdapter,
+    hermesTimeoutSeconds,
     requirePin,
     sessionTtlSeconds,
     auditLogRetentionDays,

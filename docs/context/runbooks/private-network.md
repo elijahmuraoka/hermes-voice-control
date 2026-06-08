@@ -148,7 +148,7 @@ pnpm dev
 ```
 
 `pnpm env:check` fails if the Hermes binary cannot be resolved. The local
-adapter invokes only `hermes chat -q <prompt> --toolsets safe`.
+adapter invokes only `hermes chat -Q -q <prompt> --toolsets safe`.
 
 ## Real Gemini mode
 
@@ -160,7 +160,16 @@ pnpm env:check
 cd apps/server && uv pip install -e '.[dev,real-gemini]'
 ```
 
-Start the backend, then verify readiness:
+Start the backend in one terminal:
+
+```bash
+cd apps/server
+export HVC_GEMINI_MODE=real
+export GEMINI_API_KEY=<redacted>
+uv run --extra dev --extra real-gemini uvicorn app.main:app --host 127.0.0.1 --port 8765
+```
+
+Verify readiness from another terminal:
 
 ```bash
 curl http://127.0.0.1:8765/readyz

@@ -90,6 +90,55 @@ function waitForOpen(ws) {
   });
 }
 
+async function parseJsonMessage(event) {
+  const raw =
+    typeof event.data === "string" ? event.data : await event.data.text();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function waitForSetupComplete(ws) {
+  const seen = { messages: 0 };
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.removeEventListener("message", onMessage);
+      ws.removeEventListener("close", onClose);
+      ws.removeEventListener("error", onError);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Gemini Live setup timeout: ${JSON.stringify(seen)}`));
+    }, 15_000);
+    const onMessage = async (event) => {
+      seen.messages += 1;
+      const message = await parseJsonMessage(event);
+      if (message?.setupComplete || message?.setup_complete) {
+        cleanup();
+        resolve(seen);
+      }
+    };
+    const onClose = (event) => {
+      cleanup();
+      reject(
+        new Error(
+          `websocket closed before setup: code=${event.code} reason=${event.reason} seen=${JSON.stringify(seen)}`,
+        ),
+      );
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`websocket error before setup: ${JSON.stringify(seen)}`));
+    };
+    ws.addEventListener("message", onMessage);
+    ws.addEventListener("close", onClose);
+    ws.addEventListener("error", onError);
+  });
+}
+
 function waitForOutcome(ws) {
   const seen = {
     setupComplete: false,
@@ -105,14 +154,8 @@ function waitForOutcome(ws) {
     );
     ws.addEventListener("message", async (event) => {
       seen.messages += 1;
-      const raw =
-        typeof event.data === "string" ? event.data : await event.data.text();
-      let message;
-      try {
-        message = JSON.parse(raw);
-      } catch {
-        return;
-      }
+      const message = await parseJsonMessage(event);
+      if (!message) return;
       if (message.setupComplete || message.setup_complete)
         seen.setupComplete = true;
       const serverContent = message.serverContent ?? message.server_content;
@@ -185,6 +228,7 @@ async function main() {
         },
       }),
     );
+    const setup = await waitForSetupComplete(ws);
     const pcm = tmp.pcm;
     const chunkSize = 3200;
     for (let offset = 0; offset < pcm.length; offset += chunkSize) {
@@ -213,11 +257,11 @@ async function main() {
         ok: true,
         mode,
         model: setupModel,
-        setupComplete: outcome.setupComplete,
+        setupComplete: true,
         outputAudio: outcome.outputAudio,
         outputTextChars: outcome.outputText.length,
         inputTextChars: outcome.inputText.length,
-        messages: outcome.messages,
+        messages: setup.messages + outcome.messages,
       }),
     );
   } finally {

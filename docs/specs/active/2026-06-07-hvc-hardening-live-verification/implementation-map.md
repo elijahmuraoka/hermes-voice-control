@@ -5,8 +5,9 @@
 - `apps/server/app/config.py`: bind/auth settings, weak PIN checks, safe default
   Hermes binary, and no-PIN remote override controls.
 - `apps/server/app/main.py`: session/auth dependencies, remote/proxy guard, and
-  `/tools/cancel`. Successful PIN login sets the HttpOnly session cookie without
-  returning the raw session token in JSON.
+  `/tools/cancel`, and local Hermes readiness diagnostics. Successful PIN login
+  sets the HttpOnly session cookie without returning the raw session token in
+  JSON.
 - `apps/server/app/store.py`: confirmation request ids and tool-call
   cancellation persistence.
 - `apps/server/app/tools.py`: allowlisted tools, cancellable `ask_agent`
@@ -15,11 +16,15 @@
   rather than raw prompts, transcript windows, agent answers, or confirmation
   summaries.
 - `apps/server/app/adapters.py`: mock/local Hermes adapters, direct argv launch,
-  safe toolset, timeout/cancel/error handling.
+  safe toolset, readiness diagnostics, timeout/cancel/error handling, and
+  malformed empty-output handling. Local Hermes uses quiet query mode so stdout
+  is already the speakable/display answer while CLI provider failures still fail
+  closed.
 - `apps/server/app/gemini.py`: mock and real Gemini token brokerage, including
   one-use constrained real Live tokens.
 - `apps/server/tests/test_backend.py`: auth, remote guard, token brokerage,
-  audit-log leakage, confirmation, and cancellation coverage.
+  audit-log leakage, local Hermes adapter/harness contract, confirmation, and
+  cancellation coverage.
 
 ## Frontend
 
@@ -44,6 +49,8 @@
 - `scripts/e2e-real-gemini-live.mjs`: real Gemini Live websocket/audio smoke.
 - `scripts/validate-env.mjs`: fail-closed environment checks for private
   exposure, PIN strength, Gemini/local-Hermes prerequisites, and wildcard CORS.
+- `scripts/run-local-hermes-harness.py`: opt-in real local Hermes bridge harness
+  that records redacted read-only evidence when `HVC_REAL_HERMES_HARNESS=1`.
 
 ## Release And Deployment Docs
 

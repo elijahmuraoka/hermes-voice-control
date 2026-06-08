@@ -36,11 +36,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.assert_safe_bind()
     settings.assert_safe_cors()
     settings.assert_safe_auth()
+    settings.assert_safe_hermes()
     store = Store(settings.db_path)
     store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
     auth = AuthManager(settings.pin, settings.session_ttl_seconds, store)
     broker = build_broker(settings.gemini_mode)
-    adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin)
+    adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin, settings.hermes_timeout_seconds)
     tools = ToolService(store, adapter)
     app = FastAPI(title="Hermes Voice Control", version="0.1.0")
     app.state.settings = settings
@@ -73,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "gemini_api_key_configured": broker.api_key_configured,
             "gemini_client_available": gemini_client_available,
             "hermes_adapter": settings.hermes_adapter,
+            "hermes": adapter.diagnostics(),
             "pin_required": settings.require_pin,
             "logs_endpoint_enabled": settings.allow_logs_endpoint,
             "audit_log_retention_days": settings.audit_log_retention_days,
@@ -85,6 +87,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             checks["database"] = "failed"
             ok = False
         if broker.mode == "real" and (not broker.api_key_configured or not gemini_client_available):
+            ok = False
+        if settings.hermes_adapter == "local" and not checks["hermes"].get("available"):
             ok = False
         status_code = 200 if ok else 503
         return JSONResponse(status_code=status_code, content={"ok": ok, "checks": checks})

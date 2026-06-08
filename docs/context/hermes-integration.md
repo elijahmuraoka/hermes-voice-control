@@ -30,8 +30,57 @@ array rather than through a shell. Its default binary path is the local Hermes
 agent binary path from configuration, and it invokes:
 
 ```bash
-hermes chat -q <prompt> --toolsets safe
+hermes chat -Q -q <prompt> --toolsets safe
 ```
 
-Timeouts, cancellation, and process launch failures are surfaced as controlled
-errors so the browser does not hang behind a failed local Hermes bridge.
+Timeouts, cancellation, process launch failures, empty output, and Hermes CLI
+failure transcripts are surfaced as controlled errors so the browser does not
+hang behind or misreport a failed local Hermes bridge. The `-Q` quiet flag keeps
+stdout to the final answer text so the browser does not speak terminal banners,
+prompt echoes, or session metadata.
+
+`/readyz` includes local-adapter diagnostics when `HVC_HERMES_ADAPTER=local`,
+including whether the configured binary resolves, the read-only command shape,
+the safe toolset, and the adapter timeout. A missing local Hermes binary makes
+readiness fail closed with a controlled diagnostic.
+
+Configure the timeout with:
+
+```bash
+HVC_HERMES_TIMEOUT_SECONDS=90
+```
+
+## Safe real-Hermes harness
+
+Real local Hermes verification is intentionally opt-in. Normal tests and
+`pnpm verify` do not call the user's Hermes runtime.
+
+Run the live read-only harness only from a trusted local shell:
+
+```bash
+HVC_REAL_HERMES_HARNESS=1 HVC_HERMES_ADAPTER=local pnpm hermes:harness
+```
+
+Optional overrides:
+
+```bash
+HVC_REAL_HERMES_HARNESS=1 HVC_HERMES_ADAPTER=local HVC_HERMES_BIN=/opt/homebrew/bin/hermes HVC_HERMES_TIMEOUT_SECONDS=90 pnpm hermes:harness
+```
+
+The harness invokes the same `LocalHermesAdapter` contract as the backend and
+writes redacted evidence to:
+
+```text
+docs/specs/active/2026-06-07-hvc-hardening-live-verification/evidence/hermes-bridge-harness-latest.json
+```
+
+It probes:
+
+- `ask_agent`
+- `ask_bob` compatibility
+- v1 no-action semantics, where the agent must explain that no external action
+  was executed
+
+Cancellation, timeout, malformed/empty output, and binary-resolution behavior
+are covered by backend tests with fake local Hermes processes so CI does not
+depend on a developer's local credentials or runtime state.

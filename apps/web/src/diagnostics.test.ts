@@ -70,7 +70,7 @@ describe("diagnostics", () => {
 
   it("redacts tokens, secrets, and session identifiers from diagnostic text", () => {
     const text =
-      "Authorization=Bearer abc.def.ghi token=raw-secret session_id=sess_123456789 sessions/sess_path_123456789 api_key=key";
+      'Authorization=Bearer abc.def.ghi token=raw-secret session_id=sess_123456789 sessions/sess_path_123456789 api_key=key {"token":"json-secret","session_id":"sess_json_123456789"}';
 
     const redacted = redactDiagnosticText(text);
 
@@ -81,6 +81,8 @@ describe("diagnostics", () => {
     expect(redacted).toContain("api_key=[redacted]");
     expect(redacted).not.toContain("raw-secret");
     expect(redacted).not.toContain("sess_123456789");
+    expect(redacted).not.toContain("json-secret");
+    expect(redacted).not.toContain("sess_json_123456789");
   });
 
   it("keeps the copyable diagnostics bundle local and redacted", () => {

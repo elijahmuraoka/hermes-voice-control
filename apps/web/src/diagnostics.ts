@@ -87,6 +87,8 @@ declare global {
 const MAX_EVENTS = 200;
 const SECRET_KEY_PATTERN =
   /\b((?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|token)\s*[=:]\s*)("[^"]*"|'[^']*'|[^&\s,;]+)/gi;
+const JSON_SECRET_KEY_PATTERN =
+  /("(?:(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|token))"\s*:\s*)("[^"]*"|'[^']*'|[^,\s}]+)/gi;
 const SECRET_DETAIL_KEY_PATTERN =
   /(?:api[_-]?key|authorization|bearer|cookie|password|pin|secret|session[_-]?(?:id|key)?|sessionid|sessionkey|sid|token)/i;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
@@ -109,6 +111,7 @@ export function createHvcDiagnosticsEvent(
 export function redactDiagnosticText(value: string): string {
   return value
     .replace(BEARER_PATTERN, "Bearer [redacted]")
+    .replace(JSON_SECRET_KEY_PATTERN, "$1[redacted]")
     .replace(SECRET_KEY_PATTERN, "$1[redacted]")
     .replace(SESSION_PATH_PATTERN, "$1[redacted]")
     .replace(JWT_PATTERN, "[redacted-jwt]");

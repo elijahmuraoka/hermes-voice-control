@@ -209,10 +209,12 @@ that local proxy through Tailscale Serve.
 
 ## Rollback
 
-Use the matching `off` command for the Serve listener you created:
+Use the matching `off` command for the Serve listener you created. The target is
+optional in `off` mode, so prefer disabling the exact listener flag without
+repeating the backend URL:
 
 ```bash
-tailscale serve --https=443 http://127.0.0.1:8765 off
+tailscale serve --https=443 off
 tailscale serve status --json
 ```
 
@@ -220,6 +222,7 @@ If this node is dedicated to HVC and no other Serve config is expected, clear
 Serve state completely:
 
 ```bash
+tailscale serve get-config --all
 tailscale serve reset
 tailscale serve status --json
 ```

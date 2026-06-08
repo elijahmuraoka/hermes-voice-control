@@ -70,12 +70,13 @@ Expected: readiness is HTTP 200 with `pin_required: true` and
 Disable the exact Serve listener:
 
 ```bash
-tailscale serve --https=443 http://127.0.0.1:8765 off
+tailscale serve --https=443 off
 tailscale serve status --json
 ```
 
 Use `tailscale serve reset` only when this node has no other Serve
-configuration to preserve.
+configuration to preserve. Check `tailscale serve get-config --all` first if
+there is any chance the node serves other private services.
 
 ## Remote Header Guard
 

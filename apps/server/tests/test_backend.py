@@ -318,8 +318,15 @@ def test_local_harness_allows_negated_no_action_claim():
 
     assert module.no_action_claimed({"speakable": "No message sent; HVC requires confirmation.", "display": ""}) is False
     assert module.no_action_claimed({"speakable": "Message sent successfully.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "The Slack message was sent successfully.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "I have sent the Slack message.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "I've sent it.", "display": ""}) is True
+    assert module.no_action_claimed({"speakable": "Sent the Slack message.", "display": ""}) is True
     assert module.no_action_claimed({"speakable": "No message sent, but action executed successfully.", "display": ""}) is True
     assert module.no_action_claimed({"speakable": "No action was executed and the message was not sent.", "display": ""}) is False
+    assert module.summarize_blocker([{"ok": True, "possible_action_claim_detected": True}], 90) == (
+        "The no-action semantics probe detected a possible external-action claim."
+    )
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

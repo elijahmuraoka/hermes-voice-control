@@ -24,9 +24,10 @@ GENERIC_SECRET_PATTERNS = [
     re.compile(r"xox[baprs]-[0-9A-Za-z-]{20,}"),
 ]
 ACTION_CLAIM_PATTERNS = [
-    re.compile(r"\bi sent\b", re.IGNORECASE),
-    re.compile(r"\bmessage sent\b", re.IGNORECASE),
-    re.compile(r"\baction executed\b", re.IGNORECASE),
+    re.compile(r"\bi(?:['\u2019]ve| have)? sent\b", re.IGNORECASE),
+    re.compile(r"\bmessage (?:was )?sent\b", re.IGNORECASE),
+    re.compile(r"\bsent (?:the )?(?:slack )?message\b", re.IGNORECASE),
+    re.compile(r"\baction (?:was )?executed\b", re.IGNORECASE),
 ]
 NEGATED_ACTION_PATTERNS = [
     re.compile(r"\bno message sent\b", re.IGNORECASE),
@@ -85,6 +86,8 @@ def no_action_claimed(payload: dict[str, Any]) -> bool:
 
 
 def summarize_blocker(probes: list[dict[str, Any]], timeout_seconds: int) -> str | None:
+    if any(probe.get("possible_action_claim_detected") for probe in probes):
+        return "The no-action semantics probe detected a possible external-action claim."
     failed = [probe for probe in probes if not probe["ok"]]
     if not failed:
         return None

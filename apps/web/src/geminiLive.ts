@@ -324,23 +324,28 @@ export class GeminiLiveSession {
   private async handleToolCalls(
     calls: Array<Record<string, unknown>>,
   ): Promise<void> {
-    const responseMetrics: Array<{
-      response: GeminiFunctionResponse;
-      toolCallSeq: number;
-      toolName: string;
-    }> = [];
-
-    for (const rawCall of calls) {
+    const pendingCalls = calls.flatMap((rawCall) => {
       const call = normalizeFunctionCall(rawCall);
-      if (!call) continue;
-      if (this.canceledToolCallIds.has(call.id)) continue;
+      if (!call || this.canceledToolCallIds.has(call.id)) return [];
       const toolCallSeq = this.sequenceToolCall(call.id);
       this.emitDiagnostics("tool_call_request", {
         toolCallSeq,
         toolName: call.name,
       });
       this.callbacks.onToolCall?.(call);
+      return [{ call, toolCallSeq, toolName: call.name }];
+    });
+    const responseMetrics: Array<{
+      response: GeminiFunctionResponse;
+      toolCallSeq: number;
+      toolName: string;
+    }> = [];
 
+    for (const { call, toolCallSeq, toolName } of pendingCalls) {
+      if (this.canceledToolCallIds.delete(call.id)) {
+        this.toolCallSequences.delete(call.id);
+        continue;
+      }
       const controller = new AbortController();
       this.toolAbortControllers.set(call.id, controller);
       let response: Record<string, unknown>;
@@ -365,7 +370,7 @@ export class GeminiLiveSession {
       responseMetrics.push({
         response: functionResponse,
         toolCallSeq,
-        toolName: call.name,
+        toolName,
       });
     }
 

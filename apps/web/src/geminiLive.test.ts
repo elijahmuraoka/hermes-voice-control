@@ -527,6 +527,85 @@ describe("GeminiLiveSession", () => {
     expect(toolCanceler).toHaveBeenCalledWith(["call-active"]);
   });
 
+  it("records every batched tool request before awaiting the first tool", async () => {
+    const ws = new MockWebSocket();
+    let resolveFirst!: (value: unknown) => void;
+    const firstResponse = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const toolCaller = vi.fn((call) => {
+      if (call.id === "call-1") return firstResponse;
+      return Promise.resolve({
+        status: "completed",
+        result: { display: "unexpected" },
+      });
+    });
+    const toolCanceler = vi.fn(async () => ({ status: "cancelled" }));
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        toolCaller,
+        toolCanceler,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-1", name: "ask_agent", args: { message: "one" } },
+          { id: "call-2", name: "ask_agent", args: { message: "two" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+
+    expect(toolCaller).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tool_call_request",
+          detail: { toolCallSeq: 1, toolName: "ask_agent" },
+        }),
+        expect.objectContaining({
+          name: "tool_call_request",
+          detail: { toolCallSeq: 2, toolName: "ask_agent" },
+        }),
+      ]),
+    );
+
+    ws.receive({ toolCallCancellation: { ids: ["call-2"] } });
+    resolveFirst({ status: "completed", result: { display: "one" } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(toolCanceler).toHaveBeenCalledWith(["call-2"]);
+    expect(toolCaller).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tool_call_cancellation",
+          detail: { count: 1, reason: "provider", toolCallSeq: 2 },
+        }),
+        expect.objectContaining({
+          name: "tool_call_response",
+          detail: { toolCallSeq: 1, toolName: "ask_agent" },
+        }),
+      ]),
+    );
+    expect(JSON.stringify(diagnostics)).not.toContain("call-2");
+  });
+
   it("filters previously completed responses if Gemini cancels before batch send", async () => {
     const ws = new MockWebSocket();
     let resolveSecond!: (value: unknown) => void;

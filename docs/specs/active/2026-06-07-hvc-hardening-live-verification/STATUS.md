@@ -44,3 +44,13 @@
   design, private deployment rehearsal, security threat modeling, real Hermes
   bridge verification, latency instrumentation, final review, open-source
   release safety, and mobile/audio QA.
+- Issue #16 implementation adds local Hermes adapter readiness diagnostics,
+  malformed empty-output handling, configurable adapter timeout, fake-process
+  contract coverage, and an opt-in real local Hermes harness.
+- The real local Hermes harness refuses accidental execution unless
+  `HVC_REAL_HERMES_HARNESS=1` is set and records redacted evidence under the
+  active spec bundle.
+- The 2026-06-08 local harness run resolved `/opt/homebrew/bin/hermes` and
+  exercised `ask_agent`, `ask_bob`, and no-action probes through the read-only
+  safe command. The real runtime blocker is `HERMES_AGENT_FAILURE`: Hermes
+  returned CLI provider-failure output instead of agent answers.

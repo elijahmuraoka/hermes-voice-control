@@ -86,6 +86,7 @@ const secureCookies = boolEnv("HVC_SECURE_COOKIES", false);
 const sessionTtlSeconds = intEnv("HVC_SESSION_TTL_SECONDS", 86_400, { min: 1 });
 const auditLogRetentionDays = intEnv("HVC_AUDIT_LOG_RETENTION_DAYS", 30, { min: 0 });
 const auditLogMaxRows = intEnv("HVC_AUDIT_LOG_MAX_ROWS", 5_000, { min: 0 });
+const hermesTimeoutSeconds = intEnv("HVC_HERMES_TIMEOUT_SECONDS", 90, { min: 1, max: 600 });
 
 if (!["mock", "real"].includes(geminiMode)) {
   errors.push("HVC_GEMINI_MODE must be mock or real.");
@@ -130,6 +131,7 @@ const result = {
     port,
     geminiMode,
     hermesAdapter,
+    hermesTimeoutSeconds,
     requirePin,
     sessionTtlSeconds,
     auditLogRetentionDays,

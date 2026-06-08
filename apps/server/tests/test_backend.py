@@ -31,9 +31,34 @@ def test_readyz_reports_safe_runtime_posture(tmp_path):
     assert body["checks"]["gemini_mode"] == "mock"
     assert body["checks"]["gemini_api_key_configured"] is False
     assert body["checks"]["gemini_client_available"] is True
+    assert body["checks"]["hermes"] == {"kind": "mock", "available": True, "read_only": True}
     assert body["checks"]["audit_log_retention_days"] == 30
     assert body["checks"]["audit_log_max_rows"] == 5000
     assert TEST_PIN not in res.text
+
+def test_readyz_reports_missing_local_hermes_binary(tmp_path):
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(tmp_path / "missing-hermes"))
+    res = client.get("/readyz")
+    assert res.status_code == 503
+    body = res.json()
+    assert body["ok"] is False
+    assert body["checks"]["hermes"]["kind"] == "local"
+    assert body["checks"]["hermes"]["available"] is False
+    assert body["checks"]["hermes"]["read_only"] is True
+    assert body["checks"]["hermes"]["command"][-2:] == ["--toolsets", "safe"]
+
+def test_readyz_reports_resolved_local_hermes_binary(tmp_path):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes))
+    res = client.get("/readyz")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["checks"]["hermes"]["available"] is True
+    assert body["checks"]["hermes"]["resolved_bin"] == str(hermes)
+
 def test_readyz_fails_real_gemini_without_key(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
@@ -161,6 +186,26 @@ def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     result = LocalHermesAdapter(str(hermes)).ask_agent("hi", mode="quick")
     assert result.ok is True
+    assert calls[0][0][1:3] == ["chat", "-q"]
+    assert "Do not take external actions" in calls[0][0][3]
+    assert "mutate files" in calls[0][0][3]
+    assert "send messages" in calls[0][0][3]
+    assert calls[0][1]["shell"] is False
+    assert calls[0][0][-2:] == ["--toolsets", "safe"]
+
+def test_local_hermes_adapter_ask_bob_uses_same_safe_bridge(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    calls = []
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return ("alias answer", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: calls.append((cmd, kwargs)) or FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_bob("hi", mode="deep")
+    assert result.ok is True
+    assert result.data["mode"] == "deep"
     assert calls[0][0][-2:] == ["--toolsets", "safe"]
 
 def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
@@ -183,6 +228,50 @@ def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
     assert result.ok is False
     assert result.error_code == "HERMES_CANCELLED"
     assert events == ["terminate"]
+
+def test_local_hermes_adapter_times_out(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    events = []
+    class FakeProc:
+        returncode = None
+        def poll(self): return None
+        def kill(self):
+            events.append("kill")
+            self.returncode = -9
+        def communicate(self, timeout=None): return ("late answer", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes), timeout_seconds=0).ask_agent("hi")
+    assert result.ok is False
+    assert result.error_code == "HERMES_TIMEOUT"
+    assert events == ["kill"]
+
+def test_local_hermes_adapter_rejects_empty_output(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return (" \n", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+    assert result.ok is False
+    assert result.error_code == "HERMES_MALFORMED_OUTPUT"
+
+def test_local_hermes_adapter_rejects_cli_failure_output(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return ("API call failed after 3 retries: Connection error.\nFinal error: Connection error.", "")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    result = LocalHermesAdapter(str(hermes)).ask_agent("hi")
+    assert result.ok is False
+    assert result.error_code == "HERMES_AGENT_FAILURE"
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

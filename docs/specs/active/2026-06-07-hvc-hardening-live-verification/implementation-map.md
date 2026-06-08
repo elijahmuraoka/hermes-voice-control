@@ -4,15 +4,16 @@
 
 - `apps/server/app/config.py`: bind/auth settings, weak PIN checks, safe default
   Hermes binary, and no-PIN remote override controls.
-- `apps/server/app/main.py`: session/auth dependencies, remote/proxy guard, and
-  `/tools/cancel`.
+- `apps/server/app/main.py`: session/auth dependencies, remote/proxy guard,
+  `/tools/cancel`, and local Hermes readiness diagnostics.
 - `apps/server/app/store.py`: confirmation request ids and tool-call
   cancellation persistence.
 - `apps/server/app/tools.py`: allowlisted tools, cancellable `ask_agent`
   requests, `ask_bob` compatibility alias, confirmation records, and
   cancellation checks.
 - `apps/server/app/adapters.py`: mock/local Hermes adapters, direct argv launch,
-  safe toolset, timeout/cancel/error handling.
+  safe toolset, readiness diagnostics, timeout/cancel/error handling, and
+  malformed empty-output handling.
 - `apps/server/tests/test_backend.py`: auth, remote guard, confirmation, and
   cancellation coverage.
 
@@ -33,3 +34,5 @@
 - `scripts/browser-responsive.spec.ts`: Playwright responsive smoke plus real
   backend token-flow check.
 - `scripts/e2e-real-gemini-live.mjs`: real Gemini Live websocket/audio smoke.
+- `scripts/run-local-hermes-harness.py`: opt-in real local Hermes bridge harness
+  that records redacted read-only evidence when `HVC_REAL_HERMES_HARNESS=1`.

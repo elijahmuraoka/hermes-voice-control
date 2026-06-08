@@ -6,6 +6,8 @@
 - `pnpm build`
 - `pnpm perf:budget`
 - `pnpm docs:verify`
+- `HVC_REAL_HERMES_HARNESS=1 HVC_HERMES_ADAPTER=local pnpm hermes:harness`
+  when a trusted local Hermes runtime is available.
 - `tomoji docs index --verify`
 - `tomoji docs audit`
 - `pnpm smoke:browser`
@@ -45,3 +47,17 @@ node scripts/e2e-real-gemini-live.mjs
 - 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+- 2026-06-08: issue #16 adds CI-safe fake-process tests for the local Hermes
+  bridge contract: `ask_agent`, `ask_bob`, cancellation, timeout,
+  malformed/empty output, local binary readiness, safe toolsets, and read-only
+  prompt/no-action semantics.
+- 2026-06-08: live real-Hermes evidence is written by the opt-in harness to
+  `docs/specs/active/2026-06-07-hvc-hardening-live-verification/evidence/hermes-bridge-harness-latest.json`.
+- 2026-06-08: local harness run resolved `/opt/homebrew/bin/hermes` and invoked
+  `hermes chat -q <read-only prompt> --toolsets safe`, but the real Hermes
+  runtime returned CLI failure output for `ask_agent`, `ask_bob`, and no-action
+  probes. The recorded blocker is `HERMES_AGENT_FAILURE`.
+- 2026-06-08: issue #16 verification passed `pnpm env:check`, `pnpm verify`
+  (web: 4 files / 27 tests; backend: 35 tests with one Starlette/httpx
+  deprecation warning), `tomoji docs index --verify --json`,
+  `tomoji docs audit --json`, and `git diff --check`.

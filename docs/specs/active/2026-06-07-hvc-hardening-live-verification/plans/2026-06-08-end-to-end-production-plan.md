@@ -16,6 +16,9 @@
 
 Default recommendation: keep Gemini Live as the v1 default until real-smoke data disproves it.
 
+Issue #12 decision artifact:
+[`docs/context/research/realtime-provider-bakeoff.md`](../../../../context/research/realtime-provider-bakeoff.md).
+
 Why:
 
 - The current architecture already matches Gemini Live's intended browser pattern: backend-authenticated ephemeral tokens, direct client-to-provider realtime stream, and backend-owned tool policy.
@@ -92,5 +95,6 @@ Create:
 - [x] Research current official provider capabilities.
 - [x] Draft second-wave production plan.
 - [x] Create/update GitHub issues from the plan.
+- [x] Add issue #12 provider bakeoff decision artifact.
 - [ ] Spawn isolated worktree/session lanes after issue creation.
 - [ ] Run integrated verification and independent review after implementation.

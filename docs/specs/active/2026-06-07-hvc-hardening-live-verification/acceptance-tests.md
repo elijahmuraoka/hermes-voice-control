@@ -45,3 +45,7 @@ node scripts/e2e-real-gemini-live.mjs
 - 2026-06-07: follow-up verification passed `pnpm env:check`, `pnpm verify`,
   `tomoji docs index --verify --json`, `tomoji docs audit --json`,
   `pnpm smoke:browser`, and `git diff --check`.
+- 2026-06-08: issue #12 provider bakeoff docs decision was added at
+  `docs/context/research/realtime-provider-bakeoff.md`. It keeps Gemini Live as
+  the v1 default and marks credentialed Gemini plus alternate-provider smoke as
+  pending until credentials are available.

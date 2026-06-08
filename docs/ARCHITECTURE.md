@@ -64,6 +64,7 @@ pruned at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
 - [Implementation notes](context/implementation-notes.md)
 - [Open-source boundary](context/open-source-boundary.md)
 - [Open-source voice systems research](context/research/open-source-voice-systems.md)
+- [Realtime provider bakeoff](context/research/realtime-provider-bakeoff.md)
 
 ## Current Work
 

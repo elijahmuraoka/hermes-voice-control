@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
-const command = args.find((arg) => !arg.startsWith("--")) ?? "help";
+const command = getCommand(args) ?? "help";
 const privateRoot = resolve(repoRoot, ".private");
 const label = getFlagValue("--label", "io.github.elijahmuraoka.hermes-voice-control");
 const domain = getFlagValue("--domain", "daemon");
@@ -99,7 +99,7 @@ function run() {
 
 function printHelp() {
   console.log(`Usage:
-  pnpm private:launchd -- render [--print] [--domain=daemon|agent]
+  pnpm private:launchd -- render [--domain=daemon|agent]
   pnpm private:launchd -- install [--domain=daemon|agent]
   pnpm private:launchd -- check-env
   pnpm private:launchd -- status [--domain=daemon|agent]
@@ -107,6 +107,7 @@ function printHelp() {
   pnpm private:launchd -- kickstart [--domain=daemon|agent]
   pnpm private:launchd -- bootout [--domain=daemon|agent]
   pnpm private:launchd -- uninstall [--domain=daemon|agent]
+  node scripts/manage-private-launchd.mjs render --print [--domain=daemon|agent]
 
 Defaults:
   label:        ${label}
@@ -121,8 +122,9 @@ The plist contains paths only. Put secrets in the ignored env file and keep it
 chmod 600. The default domain is a LaunchDaemon so the service can survive
 logout and headless reboot. Use --domain=agent only for auto-login or
 GUI-session scoped operation. The install command copies the already-rendered
-local plist; run render, inspect the file, then install. This script does not
-enable Tailscale Funnel.`);
+local plist; run render, inspect the file, then install. Use the direct node
+command for --print so stdout stays valid plist XML. This script does not enable
+Tailscale Funnel.`);
 }
 
 function renderCommand() {
@@ -136,6 +138,7 @@ function renderCommand() {
   ensurePrivateDir(dirname(localPlist));
   ensurePrivateDir(logDir);
   writeFileSync(localPlist, plist, { mode: 0o600 });
+  chmodSync(localPlist, 0o600);
   console.log(`Wrote ${domain === "daemon" ? "LaunchDaemon" : "LaunchAgent"} plist: ${localPlist}`);
 }
 
@@ -263,6 +266,34 @@ function assertPrivateEnvFile() {
   if (!env.HVC_PIN && !env.HVC_PIN_FILE) {
     throw new Error(`Launchd env file ${envFile} must set HVC_PIN_FILE or HVC_PIN.`);
   }
+  if (!env.HVC_PIN && env.HVC_PIN_FILE) {
+    assertPrivatePinFile(env.HVC_PIN_FILE);
+  }
+}
+
+function assertPrivatePinFile(pinFile) {
+  const pinPath = resolve(repoRoot, pinFile);
+  if (!existsSync(pinPath)) {
+    throw new Error(`HVC_PIN_FILE does not exist: ${pinPath}`);
+  }
+  const stat = statSync(pinPath);
+  if (!stat.isFile()) {
+    throw new Error(`Expected HVC_PIN_FILE to be a file: ${pinPath}`);
+  }
+  if ((stat.mode & 0o077) !== 0) {
+    throw new Error(`Run chmod 600 ${pinPath} before installing launchd.`);
+  }
+  if ((stat.mode & 0o400) === 0) {
+    throw new Error(`PIN file owner must be able to read ${pinPath}.`);
+  }
+  if (domain === "daemon" && serviceUser) {
+    const expectedUid = uidForUser(serviceUser);
+    if (stat.uid !== expectedUid) {
+      throw new Error(`Run chown ${serviceUser} ${pinPath} before installing launchd.`);
+    }
+  } else {
+    accessSync(pinPath, constants.R_OK);
+  }
 }
 
 function assertReviewedPlistFile() {
@@ -347,6 +378,18 @@ function getFlagValue(name, fallback) {
   const prefix = `${name}=`;
   const match = args.find((arg) => arg.startsWith(prefix));
   return match ? match.slice(prefix.length) : fallback;
+}
+
+function getCommand(rawArgs) {
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const arg = rawArgs[index];
+    if (arg === "--") continue;
+    if (!arg.startsWith("--")) return arg;
+    if (!arg.includes("=") && rawArgs[index + 1] && !rawArgs[index + 1].startsWith("--")) {
+      index += 1;
+    }
+  }
+  return undefined;
 }
 
 function loadEnvFile(filePath) {

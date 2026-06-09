@@ -189,17 +189,16 @@ Preflight:
 tailscale status
 tailscale serve status --json
 mkdir -p .private/rehearsal
-tailscale serve get-config .private/rehearsal/tailscale-serve-before.json --all
 ```
 
-Keep FastAPI bound to localhost. For HTTPS private-network exposure, use
-secure cookies and add the private frontend origin if a separate frontend origin
-is part of the rehearsal:
+Use the tracked private runner for a one-origin deployment. It builds the web
+app with a relative API base, starts FastAPI on localhost, starts a localhost
+static/proxy server for the built app, verifies readiness plus PIN auth, and
+only configures Tailscale Serve when `--serve` is passed.
 
 ```bash
-export HVC_HOST=127.0.0.1
-export HVC_PORT=8765
-export HVC_REQUIRE_PIN=true
+umask 077
+mkdir -p .private/rehearsal
 if [ -t 0 ]; then
   printf "HVC PIN: "
   stty -echo
@@ -209,76 +208,57 @@ if [ -t 0 ]; then
 else
   IFS= read -r HVC_PIN
 fi
-export HVC_PIN
-export HVC_SECURE_COOKIES=true
-export HVC_ALLOW_LOGS_ENDPOINT=false
-export HVC_FRONTEND_ORIGINS='https://FRONTEND_DEVICE.TAILNET.ts.net'
+printf "%s\n" "$HVC_PIN" > .private/rehearsal/hvc-pin.txt
 
-pnpm env:check
-```
-
-Start a fresh backend with the private-network environment above. Do not reuse
-the localhost HTTP rehearsal process after changing cookie or origin settings:
-
-```bash
-cd apps/server
-uv run uvicorn app.main:app --host "$HVC_HOST" --port "$HVC_PORT"
-```
-
-Then expose that backend through Tailscale Serve from another terminal:
-
-```bash
-tailscale serve --bg --https=443 http://127.0.0.1:8765
-tailscale serve status --json
+HVC_PIN_FILE=.private/rehearsal/hvc-pin.txt pnpm private:tailscale -- --serve
 ```
 
 Then check from another tailnet device:
 
 ```bash
-curl -fsS 'https://BACKEND_DEVICE.TAILNET.ts.net/readyz'
-curl -i 'https://BACKEND_DEVICE.TAILNET.ts.net/auth/session'
+curl -fsS 'https://DEVICE.TAILNET.ts.net/readyz'
+curl -i 'https://DEVICE.TAILNET.ts.net/auth/session'
 ```
 
 Expected results:
 
-- Tailscale Serve reports an HTTPS reverse proxy to `127.0.0.1:8765`.
+- Tailscale Serve reports an HTTPS reverse proxy to `127.0.0.1:8787`.
 - `/readyz` returns HTTP 200 with the same safe posture as the local rehearsal.
 - `/auth/session` returns HTTP 401 before PIN login.
-- `tailscale funnel status` shows no public Funnel exposure.
-
-For full UI rehearsal from a separate private frontend origin, include that exact
-origin in `HVC_FRONTEND_ORIGINS` and point the frontend at the backend's
-Tailscale Serve origin before starting Vite or building static assets:
-
-```bash
-export VITE_API_BASE='https://BACKEND_DEVICE.TAILNET.ts.net'
-pnpm dev:web
-```
-
-If one-origin hosting is required, put a local reverse proxy in front of the
-built frontend and backend, expose only that local proxy through Tailscale Serve,
-and build or start the frontend with a relative API base:
-
-```bash
-export VITE_API_BASE=''
-```
+- `tailscale funnel status` shows tailnet-only Serve state and no public Funnel
+  exposure; the runner fails closed if Funnel status cannot be verified.
+- The web app, auth, and API share the same private HTTPS origin.
+- The runner prints the path of the pre-change Tailscale Serve status snapshot.
+- The runner refuses to overwrite a non-empty Serve config unless it already
+  points at the same HVC proxy target.
+- The runner rejects `--smoke --serve`; smoke runs are non-mutating and should
+  be followed by a separate long-lived `--serve` deployment.
+- The runner rejects `--no-build --serve`; private Serve deployments always
+  rebuild with a same-origin API base.
+- The runner requires an explicit mode: `--smoke`, `--local`, or `--serve`.
+  Use `--local` only for a long-lived localhost-only soak without changing
+  Tailscale Serve.
+- Non-serve modes print the localhost URL and refuse to start if Tailscale Serve
+  already references the selected proxy or backend port.
+- Use the printed `localhost` URL for local browser testing; the services still
+  bind to `127.0.0.1`, but secure cookies are not consistently accepted by
+  browsers on plain-HTTP `127.0.0.1` origins.
+- If `--serve` configures a previously empty Serve state and post-config
+  verification fails, the runner resets Serve automatically before exiting.
 
 ## Rollback
 
-Restore the Serve configuration captured during preflight:
-
-```bash
-tailscale serve set-config .private/rehearsal/tailscale-serve-before.json --all
-tailscale serve status --json
-```
-
-If no saved preflight config exists, use reset only when this node is dedicated
-to HVC and the operator confirms no other Serve config needs to be preserved:
+Use the rollback line printed by the runner. When there was no previous Serve
+config, the rollback is:
 
 ```bash
 tailscale serve reset
 tailscale serve status --json
 ```
+
+When the previous config already pointed at the same HVC proxy target, no Serve
+rollback is needed. The saved status snapshot is evidence, not a `set-config`
+file; do not feed it to `tailscale serve set-config`.
 
 Then stop the local backend and clean rehearsal-only state:
 

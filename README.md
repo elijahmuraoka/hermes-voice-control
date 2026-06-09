@@ -165,9 +165,9 @@ HVC_HERMES_ADAPTER=local
 HVC_HERMES_BIN=/absolute/path/to/hermes
 ```
 
-The local adapter invokes `hermes chat -q <prompt> --toolsets safe`, treats the
-prompt as read-only, and surfaces timeout/cancellation/launch errors without
-hanging the browser session.
+The local adapter invokes `hermes chat -Q -q <prompt> --toolsets safe`, treats
+the prompt as read-only, and surfaces timeout/cancellation/launch errors
+without hanging the browser session.
 
 ## Production Controls
 
@@ -185,6 +185,43 @@ HVC_AUDIT_LOG_MAX_ROWS=5000
 Keep the backend bound to `127.0.0.1` and expose it through a private reverse
 proxy such as Tailscale Serve. Do not use Tailscale Funnel or a public bind
 without a separate security review.
+
+For the supported one-origin private runner:
+
+```bash
+umask 077
+mkdir -p .private/rehearsal
+if [ -t 0 ]; then
+  printf "HVC PIN: "
+  stty -echo
+  IFS= read -r HVC_PIN
+  stty echo
+  printf "\n"
+else
+  IFS= read -r HVC_PIN
+fi
+printf "%s\n" "$HVC_PIN" > .private/rehearsal/hvc-pin.txt
+
+HVC_PIN_FILE=.private/rehearsal/hvc-pin.txt pnpm private:tailscale -- --serve
+```
+
+This serves the built UI and API from the same private HTTPS origin, keeps the
+backend on localhost, requires PIN auth, snapshots the previous Tailscale Serve
+status, refuses to overwrite an incompatible Serve config, and leaves
+Funnel/public exposure off. The runner also refuses `--smoke --serve`; smoke
+runs verify the local backend/proxy only and never mutate Tailscale Serve. It
+also refuses `--no-build --serve` so private deployments always rebuild the web
+app with a same-origin API base. The runner requires an explicit mode:
+`--smoke` for a bounded check, `--local` for a long-lived localhost-only soak,
+or `--serve` for the private Tailscale deployment. Non-serve modes print the
+localhost URL and refuse to start when the selected proxy port is already
+referenced by Tailscale Serve, or when stale Serve state references the selected
+backend port, preventing accidental exposure through stale Serve state. If
+`--serve` configures a previously empty Serve state and post-config verification
+fails, the runner resets Serve automatically before exiting.
+Use the printed `localhost` URL for local browser testing; the services still
+bind to `127.0.0.1`, but secure cookies are not consistently accepted by
+browsers on plain-HTTP `127.0.0.1` origins.
 
 See the [private-network runbook](docs/context/runbooks/private-network.md) for
 Tailscale Serve setup, mode-specific environment checks, and failure modes.

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 const APP_URL = process.env.HVC_E2E_APP_URL ?? "http://127.0.0.1:5173";
 const AGENT_NAME = process.env.HVC_E2E_AGENT_NAME ?? "Hermes Agent";
@@ -46,6 +46,16 @@ test.use({
   },
 });
 
+async function stubUnlockedSession(page: Page) {
+  await page.route("**/auth/session", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ authenticated: true }),
+    });
+  });
+}
+
 for (const viewport of viewports) {
   test(`renders without overflow at ${viewport.name}`, async ({ page }) => {
     const consoleErrors: string[] = [];
@@ -56,6 +66,7 @@ for (const viewport of viewports) {
       width: viewport.width,
       height: viewport.height,
     });
+    await stubUnlockedSession(page);
     await page.goto(APP_URL, { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
     const orbButton = page.getByRole("button", { name: /Voice orb:/ });
@@ -161,6 +172,7 @@ test("exposes local redacted diagnostics with launch budgets", async ({ page }) 
 
 test("honors reduced motion preference", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await stubUnlockedSession(page);
   await page.goto(APP_URL, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
   const duration = await page
@@ -170,6 +182,36 @@ test("honors reduced motion preference", async ({ page }) => {
     ? Number.parseFloat(duration)
     : Number.parseFloat(duration) * 1000;
   expect(durationMs).toBeLessThanOrEqual(0.001);
+});
+
+test("shows and clears the private PIN gate", async ({ page }) => {
+  await page.route("**/auth/session", async (route) => {
+    await route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Authentication required" }),
+    });
+  });
+  await page.route("**/auth/pin", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        expires_at: "2026-01-01T00:00:00Z",
+      }),
+    });
+  });
+
+  await page.goto(APP_URL, { waitUntil: "networkidle" });
+  await expect(
+    page.getByRole("dialog", { name: `Unlock ${AGENT_NAME}` }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Private PIN")).toBeFocused();
+
+  await page.getByLabel("Private PIN").fill("abcdefgh");
+  await page.getByRole("button", { name: /^Unlock$/ }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test.describe("real backend token flow", () => {

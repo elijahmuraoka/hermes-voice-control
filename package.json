@@ -14,6 +14,7 @@
     "smoke:browser": "node scripts/run-browser-smoke.mjs",
     "screenshots:update": "node scripts/update-screenshots.mjs",
     "private:tailscale": "node scripts/run-private-tailscale.mjs",
+    "private:launchd": "node scripts/manage-private-launchd.mjs",
     "env:check": "node scripts/validate-env.mjs",
     "dev:web": "pnpm --filter @hvc/web dev --host 127.0.0.1 --port 5173",
     "dev:server": "cd apps/server && uv run uvicorn app.main:app --host 127.0.0.1 --port 8765"

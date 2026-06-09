@@ -228,6 +228,38 @@ Tailscale Serve setup, mode-specific environment checks, and failure modes.
 Before tagging or publishing a public release, run the
 [open-source boundary checklist](docs/context/open-source-boundary.md).
 
+## Always-On Private Runner
+
+For a Mac mini that should keep HVC running after login or restart, use the
+tracked launchd wrapper. It stores secrets in an ignored env file and renders a
+LaunchDaemon plist that references only paths:
+
+```bash
+umask 077
+mkdir -p .private/deployment
+openssl rand -hex 16 > .private/deployment/hvc-pin.txt
+chmod 600 .private/deployment/hvc-pin.txt
+
+cat > .private/deployment/launchd.env <<'EOF'
+HVC_PIN_FILE=.private/deployment/hvc-pin.txt
+HVC_GEMINI_MODE=real
+GEMINI_API_KEY=<redacted>
+HVC_HERMES_ADAPTER=local
+HVC_HERMES_BIN=/opt/homebrew/bin/hermes
+HVC_TAILSCALE_HOSTNAME=DEVICE.TAILNET.ts.net
+EOF
+chmod 600 .private/deployment/launchd.env
+
+pnpm private:launchd -- render
+sudo pnpm private:launchd -- install
+```
+
+Installing, bootstrapping, kickstarting, stopping, or uninstalling the
+LaunchDaemon changes local machine state. Review the generated plist under
+`.private/deployment/` first, then follow the runbook commands for the approved
+operation. Use `--domain=agent` only when you explicitly want GUI-session or
+auto-login scoped behavior.
+
 ## Verification Scripts
 
 ```bash

@@ -108,3 +108,39 @@
   `apps/web/src/realtime/`. Gemini remains the only registered v1 provider, and
   future providers must use backend-minted ephemeral credentials or signed
   sessions rather than browser API keys.
+
+## 2026-06-09
+
+- PR #32 merged the tracked private Tailscale deployment runner into `main`.
+  The merged path replaces the ignored rehearsal proxy/backend scripts with
+  `pnpm private:tailscale -- --serve`, `--local`, and `--smoke` modes.
+- Post-merge verification on `main` passed:
+  `pnpm install --frozen-lockfile`, `pnpm verify`, `pnpm smoke:browser`,
+  `pnpm env:check`, `tomoji docs audit --json`,
+  `tomoji docs index --verify --json`, `git diff --check`, and syntax checks
+  for both private runner scripts.
+- Independent `codex-review --full-access` found no actionable correctness,
+  security, or regression issues after the private runner, auth gate, proxy,
+  and realtime-auth changes.
+- `tomoji docs reconcile --yes` ran after the merge. It shipped no bundles and
+  reported this active bundle has no PR signal, so it remains active until the
+  remaining physical/mobile QA scope is resolved.
+- The live private URL is
+  `https://bobs-mac-mini.tail764d71.ts.net/`. Tailscale Serve is tailnet-only
+  and proxies `/` to `http://127.0.0.1:8787`.
+- The live tracked runner is running in `HVC_GEMINI_MODE=real` with
+  `HVC_REQUIRE_PIN=true`, `HVC_SECURE_COOKIES=true`, logs endpoint disabled,
+  backend bound to `127.0.0.1:8765`, and the one-origin proxy bound to
+  `127.0.0.1:8787`.
+- Live checks passed through the Tailscale URL: `/readyz` reported real Gemini
+  mode, configured Gemini API key, available local Hermes adapter, and PIN
+  required; unauthenticated `/auth/session` returned 401; PIN login returned an
+  authenticated session; `/gemini/ephemeral-token` returned a real
+  `gemini-2.5-flash-native-audio-latest` ephemeral token; `/chat/text`
+  completed through the local read-only Hermes adapter.
+- Visual fallback screenshot captured the unauthenticated mobile PIN gate at
+  `.private/deployment/live-pin-mobile.png`. The in-app browser bridge was
+  unavailable because its local runtime points `CODEX_HOME` at a missing path.
+- Remaining known launch limitations: physical device/mobile audio QA is still
+  tracked by #20, GitHub Actions Node.js deprecation is tracked by #30, and the
+  durable launchd/service wrapper for the live runner is tracked by #33.

@@ -153,9 +153,25 @@ function installCommand() {
     });
     if (chown.status !== 0) throw new Error("chown root:wheel failed");
   }
-  const prefix = domain === "daemon" ? "sudo pnpm" : "pnpm";
+  const baseCommand = domain === "daemon" ? ["sudo", "pnpm"] : ["pnpm"];
+  const targetFlags = [`--domain=${domain}`, `--label=${label}`];
+  const bootstrapCommand = formatShellCommand([
+    ...baseCommand,
+    "private:launchd",
+    "--",
+    "bootstrap",
+    ...targetFlags,
+    `--install-plist=${installedPlist}`,
+  ]);
+  const kickstartCommand = formatShellCommand([
+    ...baseCommand,
+    "private:launchd",
+    "--",
+    "kickstart",
+    ...targetFlags,
+  ]);
   console.log(`Installed ${domain === "daemon" ? "LaunchDaemon" : "LaunchAgent"} plist: ${installedPlist}`);
-  console.log(`Next approved steps: ${prefix} private:launchd -- bootstrap && ${prefix} private:launchd -- kickstart`);
+  console.log(`Next approved steps: ${bootstrapCommand} && ${kickstartCommand}`);
 }
 
 function uninstallCommand() {
@@ -243,6 +259,10 @@ function assertPrivateEnvFile() {
   } else {
     accessSync(envFile, constants.R_OK);
   }
+  const env = loadEnvFile(envFile);
+  if (!env.HVC_PIN && !env.HVC_PIN_FILE) {
+    throw new Error(`Launchd env file ${envFile} must set HVC_PIN_FILE or HVC_PIN.`);
+  }
 }
 
 function assertReviewedPlistFile() {
@@ -327,6 +347,43 @@ function getFlagValue(name, fallback) {
   const prefix = `${name}=`;
   const match = args.find((arg) => arg.startsWith(prefix));
   return match ? match.slice(prefix.length) : fallback;
+}
+
+function loadEnvFile(filePath) {
+  const env = {};
+  const contents = readFileSync(filePath, "utf8");
+  for (const [index, rawLine] of contents.split(/\r?\n/).entries()) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const assignment = line.startsWith("export ") ? line.slice(7).trim() : line;
+    const match = assignment.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match) {
+      throw new Error(`Invalid env line ${index + 1} in ${filePath}`);
+    }
+    env[match[1]] = unquote(match[2].trim());
+  }
+  return env;
+}
+
+function unquote(value) {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function formatShellCommand(commandParts) {
+  return commandParts.map(shellArg).join(" ");
+}
+
+function shellArg(value) {
+  const raw = String(value);
+  return /^[A-Za-z0-9_./:=+-]+$/.test(raw)
+    ? raw
+    : `'${raw.replace(/'/g, `'\\''`)}'`;
 }
 
 function findCommand(commandName) {

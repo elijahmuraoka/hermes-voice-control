@@ -131,6 +131,8 @@ function renderCommand() {
     process.stdout.write(plist);
     return;
   }
+  assertPrivatePath(dirname(localPlist), "local plist directory");
+  assertPrivatePath(logDir, "log directory");
   ensurePrivateDir(dirname(localPlist));
   ensurePrivateDir(logDir);
   writeFileSync(localPlist, plist, { mode: 0o600 });
@@ -269,6 +271,7 @@ function assertReviewedPlistFile() {
 
 function assertRuntimeDirsReady() {
   for (const path of [privateRoot, dirname(localPlist), logDir]) {
+    assertPrivatePath(path, "runtime directory");
     assertPrivateDirReady(path);
   }
 }
@@ -295,12 +298,19 @@ function assertPrivateDirReady(path) {
 }
 
 function ensurePrivateDir(path) {
-  if (path === privateRoot || path.startsWith(`${privateRoot}/`)) {
-    mkdirSync(privateRoot, { recursive: true, mode: 0o700 });
-    chmodSync(privateRoot, 0o700);
-  }
+  assertPrivatePath(path, "private runtime directory");
+  mkdirSync(privateRoot, { recursive: true, mode: 0o700 });
+  chmodSync(privateRoot, 0o700);
   mkdirSync(path, { recursive: true, mode: 0o700 });
   chmodSync(path, 0o700);
+}
+
+function assertPrivatePath(path, labelText) {
+  if (path !== privateRoot && !path.startsWith(`${privateRoot}/`)) {
+    throw new Error(
+      `${labelText} must stay under ${privateRoot}; refusing to chmod or trust ${path}.`,
+    );
+  }
 }
 
 function ensureInstallAllowed(action) {

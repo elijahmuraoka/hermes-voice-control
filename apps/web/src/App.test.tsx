@@ -15,6 +15,9 @@ const realtimeMock = vi.hoisted(() => ({
   createError: null as Error | null,
 }));
 
+let sessionAuthenticated = true;
+let chatAuthExpired = false;
+
 vi.mock("./realtime", () => {
   class MockRealtimeVoiceSession {
     callbacks: any;
@@ -53,10 +56,48 @@ describe("App", () => {
     realtimeMock.instances.length = 0;
     realtimeMock.connectError = null;
     realtimeMock.createError = null;
+    sessionAuthenticated = true;
+    chatAuthExpired = false;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string) => {
-        if (url.includes("/chat/text")) {
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const requestUrl = String(url);
+        if (requestUrl.includes("/auth/session")) {
+          return new Response(
+            JSON.stringify({ authenticated: sessionAuthenticated }),
+            {
+              status: sessionAuthenticated ? 200 : 401,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        if (requestUrl.includes("/auth/pin")) {
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          if (body.pin === "wrong") {
+            return new Response(JSON.stringify({ detail: "Invalid PIN" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          sessionAuthenticated = true;
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              expires_at: "2026-01-01T00:00:00Z",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        if (requestUrl.includes("/chat/text")) {
+          if (chatAuthExpired) {
+            return new Response(JSON.stringify({ detail: "Session expired" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           return new Response(
             JSON.stringify({
               status: "ok",
@@ -81,8 +122,15 @@ describe("App", () => {
     vi.useRealTimers();
   });
 
-  it("renders premium voice surface and transcript toggle", () => {
+  async function renderUnlockedApp() {
     render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  }
+
+  it("renders premium voice surface and transcript toggle", async () => {
+    await renderUnlockedApp();
     expect(screen.getByText("Hermes Agent")).toBeInTheDocument();
     expect(screen.getByLabelText(/Voice orb/)).toBeInTheDocument();
     expect(
@@ -90,17 +138,43 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not show default PIN or interrupt controls", () => {
-    render(<App />);
+  it("does not show default PIN or interrupt controls", async () => {
+    await renderUnlockedApp();
     expect(screen.queryByLabelText(/Private PIN/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Interrupt/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("keeps text fallback available through the backend", async () => {
+  it("unlocks protected private sessions with a PIN", async () => {
+    sessionAuthenticated = false;
     const user = userEvent.setup();
     render(<App />);
+
+    const pinInput = await screen.findByLabelText("Private PIN");
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    expect(realtimeMock.instances).toHaveLength(0);
+
+    await user.type(pinInput, "abcdefgh");
+    await user.click(screen.getByRole("button", { name: /^Unlock$/ }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    expect(realtimeMock.instances).toHaveLength(1);
+  });
+
+  it("keeps text fallback available through the backend", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
     const input = screen.getByLabelText("Type a message to your Hermes agent");
 
     await user.type(input, "hello");
@@ -116,7 +190,7 @@ describe("App", () => {
   });
 
   it("first orb tap constructs and connects one realtime session, then shows token mode and listening status", async () => {
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -136,7 +210,7 @@ describe("App", () => {
 
   it("records redacted diagnostics when initial voice connection fails", async () => {
     realtimeMock.connectError = new Error("token=secret session_id=sess_123456");
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -160,9 +234,86 @@ describe("App", () => {
     expect(JSON.stringify(snapshot)).not.toContain("sess_123456");
   });
 
+  it("reopens the PIN gate when realtime auth expires", async () => {
+    realtimeMock.connectError = new Error('{"detail":"Session expired"}');
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Private PIN")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("Session expired. Enter your private PIN again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Could not prepare/)).not.toBeInTheDocument();
+  });
+
+  it("clears an active realtime session when text auth expires", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    const first = realtimeMock.instances[0];
+
+    chatAuthExpired = true;
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    await user.type(input, "hello");
+    await user.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Private PIN")).toBeInTheDocument(),
+    );
+    expect(first.setHoldToTalk).toHaveBeenCalledWith(false);
+    expect(first.disconnect).toHaveBeenCalledTimes(1);
+
+    chatAuthExpired = false;
+    await user.type(screen.getByLabelText("Private PIN"), "abcdefgh");
+    await user.click(screen.getByRole("button", { name: /^Unlock$/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    await waitFor(() => expect(realtimeMock.instances).toHaveLength(2));
+    expect(first.resume).not.toHaveBeenCalled();
+  });
+
+  it("clears an active realtime session when realtime auth expires after connect", async () => {
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    const first = realtimeMock.instances[0];
+
+    act(() => {
+      first.callbacks.onError?.(new Error('{"detail":"Session expired"} (HTTP 401)'));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Private PIN")).toBeInTheDocument(),
+    );
+    expect(first.setHoldToTalk).toHaveBeenCalledWith(false);
+    expect(first.disconnect).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores stale session diagnostics and close callbacks after a new call starts", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -206,7 +357,7 @@ describe("App", () => {
     realtimeMock.createError = new Error(
       "Unsupported realtime provider 'openai'.",
     );
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -226,7 +377,7 @@ describe("App", () => {
   });
 
   it("second orb tap pauses and disables microphone capture", async () => {
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -248,7 +399,7 @@ describe("App", () => {
 
   it("mute toggles the realtime session microphone enabled state", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -269,7 +420,7 @@ describe("App", () => {
 
   it("text focus disables active voice capture", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -291,7 +442,7 @@ describe("App", () => {
   });
 
   it("long orb hold sets hold-to-talk true and release sets it false", async () => {
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -316,7 +467,7 @@ describe("App", () => {
   });
 
   it("long hold while the agent is speaking interrupts playback", async () => {
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -342,7 +493,7 @@ describe("App", () => {
 
   it("End disconnects the realtime session and returns to idle", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });

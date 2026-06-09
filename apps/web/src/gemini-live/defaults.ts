@@ -42,7 +42,9 @@ async function jsonFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
   });
   if (!res.ok)
-    throw new Error((await res.text()).slice(0, 200) || `HTTP ${res.status}`);
+    throw new Error(
+      `${(await res.text()).slice(0, 200) || "Request failed"} (HTTP ${res.status})`,
+    );
   return res.json() as Promise<T>;
 }
 

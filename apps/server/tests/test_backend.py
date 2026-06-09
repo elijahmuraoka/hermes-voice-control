@@ -150,6 +150,8 @@ def test_no_pin_mode_rejects_non_local_clients_without_explicit_override(tmp_pat
 def test_no_pin_mode_rejects_local_reverse_proxy_without_explicit_override(tmp_path):
     client = make_client(tmp_path)
     assert client.get("/auth/session", headers={"X-Forwarded-For": "100.96.34.85"}).status_code == 401
+    assert client.get("/auth/session", headers={"X-Forwarded-Host": "node.tailnet.ts.net"}).status_code == 401
+    assert client.get("/auth/session", headers={"X-Forwarded-Proto": "https"}).status_code == 401
     assert client.get("/auth/session", headers={"Tailscale-User-Login": "user@example.com"}).status_code == 401
 
 def test_no_pin_mode_rejects_non_local_host_header_without_explicit_override(tmp_path):

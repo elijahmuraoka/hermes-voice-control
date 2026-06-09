@@ -348,17 +348,29 @@ export class GeminiLiveSession {
       this.callbacks.onToolCall?.(call);
       const controller = new AbortController();
       this.toolAbortControllers.set(call.id, controller);
-      let response: Record<string, unknown>;
+      let response: Record<string, unknown> | null = null;
+      let authError: Error | null = null;
       try {
         response = asResponseObject(
           await this.toolCaller(call, { signal: controller.signal }),
         );
       } catch (error) {
-        response = {
-          error: error instanceof Error ? error.message : "Tool call failed",
-        };
+        if (isAuthenticationError(error)) {
+          authError =
+            error instanceof Error ? error : new Error("Authentication required");
+        } else {
+          response = {
+            error: error instanceof Error ? error.message : "Tool call failed",
+          };
+        }
       } finally {
         this.toolAbortControllers.delete(call.id);
+      }
+
+      if (authError) {
+        this.toolCallSequences.delete(call.id);
+        this.emitError(authError);
+        return;
       }
 
       if (this.canceledToolCallIds.delete(call.id)) {
@@ -366,7 +378,7 @@ export class GeminiLiveSession {
         continue;
       }
 
-      const functionResponse = { id: call.id, name: call.name, response };
+      const functionResponse = { id: call.id, name: call.name, response: response ?? {} };
       responseMetrics.push({
         response: functionResponse,
         toolCallSeq,
@@ -501,6 +513,13 @@ function providerEventType(message: Record<string, unknown>): string {
   if (message.toolCallCancellation || message.tool_call_cancellation)
     return "toolCallCancellation";
   return "message";
+}
+
+function isAuthenticationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /401|Authentication required|PIN required|Session expired/i.test(
+    error.message,
+  );
 }
 
 export { GEMINI_INPUT_MIME_TYPE };

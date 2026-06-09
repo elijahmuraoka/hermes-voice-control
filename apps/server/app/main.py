@@ -50,7 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def session_dep(request: Request) -> str:
         if not settings.require_pin:
             client_host = request.client.host if request.client else "local"
-            proxy_headers = ("forwarded", "x-forwarded-for", "x-real-ip", "tailscale-user-login", "tailscale-user-name")
+            proxy_headers = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "tailscale-user-login", "tailscale-user-name")
             proxied = any(request.headers.get(name) for name in proxy_headers)
             if (client_host not in LOCAL_CLIENT_HOSTS or proxied or not host_header_is_local(request)) and not settings.allow_no_pin_remote:
                 raise HTTPException(status_code=401, detail="PIN auth is required for non-local clients")

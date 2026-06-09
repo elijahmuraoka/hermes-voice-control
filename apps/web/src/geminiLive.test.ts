@@ -736,4 +736,47 @@ describe("GeminiLiveSession", () => {
       },
     });
   });
+
+  it("emits auth errors instead of returning backend 401s to Gemini tools", async () => {
+    const ws = new MockWebSocket();
+    const onError = vi.fn();
+    const onToolResponse = vi.fn();
+    const toolCaller = vi.fn(async () => {
+      throw new Error('{"detail":"Session expired"} (HTTP 401)');
+    });
+    const session = new GeminiLiveSession(
+      {
+        callbacks: { onError, onToolResponse },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        toolCaller,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-expired", name: "ask_agent", args: { message: "hi" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("Session expired") }),
+    );
+    expect(onToolResponse).not.toHaveBeenCalled();
+    expect(ws.sent).toHaveLength(1);
+    expect(ws.sent[0]).toHaveProperty("setup");
+  });
 });

@@ -4,10 +4,18 @@ import {
   useReducer,
   useRef,
   useState,
+  type FormEvent,
   type PointerEvent,
 } from "react";
-import { Mic, MicOff, PhoneOff, Sparkles } from "lucide-react";
-import { sendText } from "./api";
+import {
+  KeyRound,
+  LoaderCircle,
+  Mic,
+  MicOff,
+  PhoneOff,
+  Sparkles,
+} from "lucide-react";
+import { ApiError, getSession, login, sendText } from "./api";
 import {
   createDefaultRealtimeVoiceSession,
   type RealtimeTranscriptEvent,
@@ -37,6 +45,18 @@ type PressState = {
   released: boolean;
 };
 
+type AuthState = "checking" | "authenticated" | "needs-pin";
+
+type AuthGateProps = {
+  status: AuthState;
+  agentName: string;
+  pin: string;
+  error: string;
+  submitting: boolean;
+  onPinChange: (pin: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+};
+
 const emptyPress = (): PressState => ({
   pointerId: null,
   timer: null,
@@ -44,10 +64,82 @@ const emptyPress = (): PressState => ({
   released: true,
 });
 
+function isAuthFailure(error: unknown): boolean {
+  if (error instanceof ApiError) return error.status === 401;
+  if (error instanceof Error)
+    return /401|Authentication required|PIN required|Session expired/i.test(
+      error.message,
+    );
+  return false;
+}
+
+function AuthGate({
+  status,
+  agentName,
+  pin,
+  error,
+  submitting,
+  onPinChange,
+  onSubmit,
+}: AuthGateProps) {
+  const checking = status === "checking";
+
+  return (
+    <div
+      className="auth-gate"
+      role="dialog"
+      aria-modal="true"
+      aria-label={checking ? "Checking private session" : `Unlock ${agentName}`}
+    >
+      <form className="auth-card" onSubmit={onSubmit}>
+        <div className="auth-icon" aria-hidden="true">
+          {checking ? (
+            <LoaderCircle className="spin" size={22} />
+          ) : (
+            <KeyRound size={22} />
+          )}
+        </div>
+        <h2>{checking ? "Checking private session" : "Unlock private session"}</h2>
+        {!checking ? (
+          <>
+            <label htmlFor="hvc-pin">Private PIN</label>
+            <input
+              id="hvc-pin"
+              type="password"
+              value={pin}
+              autoComplete="current-password"
+              autoFocus
+              disabled={submitting}
+              onChange={(event) => onPinChange(event.currentTarget.value)}
+            />
+            <button type="submit" disabled={submitting || !pin.trim()}>
+              {submitting ? (
+                <LoaderCircle className="spin" size={16} />
+              ) : (
+                <KeyRound size={16} />
+              )}
+              {submitting ? "Unlocking" : "Unlock"}
+            </button>
+          </>
+        ) : null}
+        {error && !checking ? (
+          <p className="auth-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(voiceReducer, initialVoiceState);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [tokenMode, setTokenMode] = useState("local");
+  const [authState, setAuthState] = useState<AuthState>("checking");
+  const [pin, setPin] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const stateRef = useRef(state);
   const entriesRef = useRef(entries);
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
@@ -94,6 +186,26 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    getSession()
+      .then((session) => {
+        if (cancelled) return;
+        setAuthState(session.authenticated ? "authenticated" : "needs-pin");
+        setAuthError("");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAuthState("needs-pin");
+        setAuthError("Could not verify the private session.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function clearPressTimer() {
     if (pressRef.current.timer !== null) {
       window.clearTimeout(pressRef.current.timer);
@@ -109,6 +221,48 @@ export default function App() {
       ...items,
       { id: uid(), role: "system", text, status, at: Date.now() },
     ]);
+  }
+
+  function requireAuth(message = "Enter your private PIN to continue.") {
+    clearPressTimer();
+    pressRef.current = emptyPress();
+    connectingRef.current = false;
+    if (sessionRef.current) {
+      endingRef.current = true;
+      sessionRef.current.setHoldToTalk(false);
+      sessionRef.current.disconnect();
+      sessionRef.current = null;
+      transcriptDraftsRef.current = {};
+    }
+    setAuthState("needs-pin");
+    setAuthError(message);
+  }
+
+  function canUsePrivateSession() {
+    if (authState === "authenticated") return true;
+    if (authState === "needs-pin") requireAuth();
+    return false;
+  }
+
+  async function handlePinSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedPin = pin.trim();
+    if (!normalizedPin) {
+      setAuthError("Enter your private PIN.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthError("");
+    try {
+      await login(normalizedPin);
+      setAuthState("authenticated");
+      setPin("");
+    } catch {
+      setAuthError("That PIN was not accepted.");
+    } finally {
+      setAuthSubmitting(false);
+    }
   }
 
   function appendTranscript(event: RealtimeTranscriptEvent) {
@@ -207,6 +361,11 @@ export default function App() {
       },
       onError: (error) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        if (isAuthFailure(error)) {
+          requireAuth("Session expired. Enter your private PIN again.");
+          dispatch({ type: "RECOVER" });
+          return;
+        }
         appendSystem(
           error.message || "Realtime voice session reported an error.",
           "failed",
@@ -222,6 +381,7 @@ export default function App() {
   }
 
   async function startCall(afterConnected?: () => void) {
+    if (!canUsePrivateSession()) return;
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
     if (sessionRef.current) {
@@ -256,6 +416,11 @@ export default function App() {
         diagnosticsRef.current?.mark("session_error", { message: errorMessage });
       }
       sessionRef.current = null;
+      if (isAuthFailure(error)) {
+        requireAuth("Session expired. Enter your private PIN again.");
+        dispatch({ type: "RECOVER" });
+        return;
+      }
       appendSystem(errorMessage, "failed");
       dispatch({
         type: "ERROR",
@@ -291,6 +456,7 @@ export default function App() {
   }
 
   function handleTap() {
+    if (!canUsePrivateSession()) return;
     const current = stateRef.current;
     if (current.inputMode === "text") return;
     if (current.callState === "idle" || current.callState === "error") {
@@ -310,6 +476,7 @@ export default function App() {
   }
 
   function beginHold() {
+    if (!canUsePrivateSession()) return;
     const press = pressRef.current;
     press.holding = true;
     const current = stateRef.current;
@@ -349,6 +516,7 @@ export default function App() {
       stateRef.current.inputMode === "text"
     )
       return;
+    if (!canUsePrivateSession()) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pressRef.current = {
       pointerId: e.pointerId,
@@ -389,6 +557,7 @@ export default function App() {
   }
 
   async function submitText(text: string) {
+    if (!canUsePrivateSession()) return;
     dispatch({ type: "THINK" });
     const user: TranscriptEntry = {
       id: uid(),
@@ -412,7 +581,12 @@ export default function App() {
       ]);
       dispatch({ type: "SPEAK" });
       window.setTimeout(() => dispatch({ type: "DONE" }), 900);
-    } catch {
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        requireAuth("Session expired. Enter your private PIN again.");
+        dispatch({ type: "RECOVER" });
+        return;
+      }
       appendSystem(
         `Text fallback could not reach ${agentNounLower}. The draft was not lost by the server because it never left this UI successfully.`,
         "failed",
@@ -469,6 +643,17 @@ export default function App() {
           })
         }
       />
+      {authState !== "authenticated" ? (
+        <AuthGate
+          status={authState}
+          agentName={agentName}
+          pin={pin}
+          error={authError}
+          submitting={authSubmitting}
+          onPinChange={setPin}
+          onSubmit={handlePinSubmit}
+        />
+      ) : null}
     </main>
   );
 }

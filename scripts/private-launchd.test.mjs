@@ -202,11 +202,12 @@ test("runner validates PIN file before spawning private runner", () => {
 });
 
 function runNode(script, args) {
+  const { HVC_PIN, HVC_PIN_FILE, ...cleanEnv } = process.env;
   return spawnSync(process.execPath, [script, "--", ...args], {
     cwd: repoRoot,
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...cleanEnv,
       PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     },
   });

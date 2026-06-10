@@ -143,9 +143,14 @@ function renderCommand() {
 }
 
 function installCommand() {
-  assertPrivateEnvFile();
-  assertReviewedPlistFile();
-  assertRuntimeDirsReady();
+  const plist = assertReviewedPlistFile();
+  const referencedPaths = plistRuntimePaths(plist);
+  assertPrivateEnvFile(referencedPaths.envFile);
+  assertRuntimeDirsReady([
+    privateRoot,
+    dirname(localPlist),
+    ...referencedPaths.logDirs,
+  ]);
   ensureInstallAllowed("install");
   mkdirSync(dirname(installedPlist), { recursive: true });
   copyFileSync(localPlist, installedPlist);
@@ -208,6 +213,7 @@ ${userBlock}  <key>ProgramArguments</key>
   <array>
     <string>${xml(nodePath)}</string>
     <string>${xml(wrapper)}</string>
+    <string>--</string>
     <string>--env-file</string>
     <string>${xml(envFile)}</string>
   </array>
@@ -238,33 +244,34 @@ ${userBlock}  <key>ProgramArguments</key>
 `;
 }
 
-function assertPrivateEnvFile() {
-  if (!existsSync(envFile)) {
+function assertPrivateEnvFile(filePath = envFile) {
+  assertPrivatePath(filePath, "launchd env file");
+  if (!existsSync(filePath)) {
     throw new Error(
-      `Create ${envFile} with HVC_PIN_FILE/HVC_GEMINI_MODE settings before installing launchd.`,
+      `Create ${filePath} with HVC_PIN_FILE/HVC_GEMINI_MODE settings before installing launchd.`,
     );
   }
-  const stat = statSync(envFile);
+  const stat = statSync(filePath);
   if (!stat.isFile()) {
-    throw new Error(`Expected launchd env path to be a file: ${envFile}`);
+    throw new Error(`Expected launchd env path to be a file: ${filePath}`);
   }
   if ((stat.mode & 0o077) !== 0) {
-    throw new Error(`Run chmod 600 ${envFile} before installing launchd.`);
+    throw new Error(`Run chmod 600 ${filePath} before installing launchd.`);
   }
   if ((stat.mode & 0o400) === 0) {
-    throw new Error(`Env file owner must be able to read ${envFile}.`);
+    throw new Error(`Env file owner must be able to read ${filePath}.`);
   }
   if (domain === "daemon" && serviceUser) {
     const expectedUid = uidForUser(serviceUser);
     if (stat.uid !== expectedUid) {
-      throw new Error(`Run chown ${serviceUser} ${envFile} before installing launchd.`);
+      throw new Error(`Run chown ${serviceUser} ${filePath} before installing launchd.`);
     }
   } else {
-    accessSync(envFile, constants.R_OK);
+    accessSync(filePath, constants.R_OK);
   }
-  const env = loadEnvFile(envFile);
+  const env = loadEnvFile(filePath);
   if (!env.HVC_PIN && !env.HVC_PIN_FILE) {
-    throw new Error(`Launchd env file ${envFile} must set HVC_PIN_FILE or HVC_PIN.`);
+    throw new Error(`Launchd env file ${filePath} must set HVC_PIN_FILE or HVC_PIN.`);
   }
   if (!env.HVC_PIN && env.HVC_PIN_FILE) {
     assertPrivatePinFile(env.HVC_PIN_FILE);
@@ -273,6 +280,7 @@ function assertPrivateEnvFile() {
 
 function assertPrivatePinFile(pinFile) {
   const pinPath = resolve(repoRoot, pinFile);
+  assertPrivatePath(pinPath, "HVC_PIN_FILE");
   if (!existsSync(pinPath)) {
     throw new Error(`HVC_PIN_FILE does not exist: ${pinPath}`);
   }
@@ -308,6 +316,18 @@ function assertReviewedPlistFile() {
     throw new Error(`Run chmod 600 ${localPlist} before installing launchd.`);
   }
   const plist = readFileSync(localPlist, "utf8");
+  const plistLabel = plistStringForKey(plist, "Label");
+  if (plistLabel !== label) {
+    throw new Error(`Render ${localPlist} for label ${label} before installing.`);
+  }
+  const workingDirectory = plistStringForKey(plist, "WorkingDirectory");
+  if (!workingDirectory) {
+    throw new Error(`Render ${localPlist} with a WorkingDirectory before installing.`);
+  }
+  const plistWorkingDirectory = resolve(repoRoot, workingDirectory);
+  if (plistWorkingDirectory !== repoRoot) {
+    throw new Error(`Render ${localPlist} for working directory ${repoRoot} before installing.`);
+  }
   const userKey = "<key>UserName</key>";
   if (domain === "daemon") {
     if (!plist.includes(userKey) || !plist.includes(`<string>${xml(serviceUser)}</string>`)) {
@@ -318,10 +338,47 @@ function assertReviewedPlistFile() {
   } else if (plist.includes(userKey)) {
     throw new Error(`Render ${localPlist} as a LaunchAgent before installing.`);
   }
+  return plist;
 }
 
-function assertRuntimeDirsReady() {
-  for (const path of [privateRoot, dirname(localPlist), logDir]) {
+function plistRuntimePaths(plist) {
+  const programArguments = plistStringArrayForKey(plist, "ProgramArguments");
+  const envFlagIndex = programArguments.indexOf("--env-file");
+  if (envFlagIndex === -1 || !programArguments[envFlagIndex + 1]) {
+    throw new Error(`Render ${localPlist} with a launchd env file before installing.`);
+  }
+  const envPath = resolve(repoRoot, programArguments[envFlagIndex + 1]);
+  const rawStdoutPath = plistStringForKey(plist, "StandardOutPath");
+  const rawStderrPath = plistStringForKey(plist, "StandardErrorPath");
+  if (!rawStdoutPath || !rawStderrPath) {
+    throw new Error(`Render ${localPlist} with StandardOutPath and StandardErrorPath before installing.`);
+  }
+  const stdoutPath = resolve(repoRoot, rawStdoutPath);
+  const stderrPath = resolve(repoRoot, rawStderrPath);
+  const logDirs = [...new Set([dirname(stdoutPath), dirname(stderrPath)])];
+  return { envFile: envPath, logDirs };
+}
+
+function plistStringForKey(plist, key) {
+  const match = plist.match(
+    new RegExp(`<key>${escapeRegExp(key)}</key>\\s*<string>([\\s\\S]*?)</string>`),
+  );
+  if (!match) return "";
+  return xmlUnescape(match[1]);
+}
+
+function plistStringArrayForKey(plist, key) {
+  const match = plist.match(
+    new RegExp(`<key>${escapeRegExp(key)}</key>\\s*<array>([\\s\\S]*?)</array>`),
+  );
+  if (!match) return [];
+  return [...match[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((item) =>
+    xmlUnescape(item[1]),
+  );
+}
+
+function assertRuntimeDirsReady(paths = [privateRoot, dirname(localPlist), logDir]) {
+  for (const path of paths) {
     assertPrivatePath(path, "runtime directory");
     assertPrivateDirReady(path);
   }
@@ -471,6 +528,19 @@ function xml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function xmlUnescape(value) {
+  return String(value)
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildDefaultPath() {

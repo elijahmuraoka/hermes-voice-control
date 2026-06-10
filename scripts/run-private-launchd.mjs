@@ -9,7 +9,7 @@ const args = process.argv.slice(2);
 
 if (args.includes("--help")) {
   console.log(`Usage:
-  node scripts/run-private-launchd.mjs --env-file .private/deployment/launchd.env
+  node scripts/run-private-launchd.mjs -- --env-file .private/deployment/launchd.env
 
 Loads an ignored env file, then runs:
   pnpm private:tailscale -- --serve

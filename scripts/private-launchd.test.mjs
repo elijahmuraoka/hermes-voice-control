@@ -116,6 +116,53 @@ test("manager check-env validates required private PIN file", () => {
   }
 });
 
+test("manager install validates paths referenced by reviewed plist", () => {
+  const tempDir = makePrivateTempDir();
+  try {
+    const plistPath = join(tempDir, "hvc.reviewed.plist");
+    const installedPlist = join(tempDir, "installed.plist");
+    const renderedEnvFile = join(tempDir, "rendered.env");
+    const installEnvFile = join(tempDir, "install.env");
+    const pinFile = join(tempDir, "pin.txt");
+    const renderedLogDir = join(tempDir, "rendered-logs");
+    const installLogDir = join(tempDir, "install-logs");
+
+    writePrivateFile(pinFile, "supersecretpin\n");
+    writePrivateFile(installEnvFile, `HVC_PIN_FILE=${pinFile}\n`);
+
+    const render = runNode(managerScript, [
+      "render",
+      "--domain=agent",
+      "--plist",
+      plistPath,
+      "--env-file",
+      renderedEnvFile,
+      "--log-dir",
+      renderedLogDir,
+    ]);
+    assert.equal(render.status, 0, render.stderr);
+
+    const install = runNode(managerScript, [
+      "install",
+      "--domain=agent",
+      "--plist",
+      plistPath,
+      "--env-file",
+      installEnvFile,
+      "--log-dir",
+      installLogDir,
+      "--install-plist",
+      installedPlist,
+    ]);
+
+    assert.notEqual(install.status, 0);
+    assert.match(install.stderr, new RegExp(`Create ${escapeRegExp(renderedEnvFile)}`));
+    assert.equal(existsSync(installedPlist), false);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runner validates PIN file before spawning private runner", () => {
   const tempDir = mkdtempSync(join(tmpdir(), "hvc-launchd-runner-"));
   try {
@@ -155,7 +202,7 @@ test("runner validates PIN file before spawning private runner", () => {
 });
 
 function runNode(script, args) {
-  return spawnSync(process.execPath, [script, ...args], {
+  return spawnSync(process.execPath, [script, "--", ...args], {
     cwd: repoRoot,
     encoding: "utf8",
     env: {
@@ -176,4 +223,8 @@ function makePrivateTempDir() {
 function writePrivateFile(path, contents) {
   writeFileSync(path, contents, { mode: 0o600 });
   chmodSync(path, 0o600);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

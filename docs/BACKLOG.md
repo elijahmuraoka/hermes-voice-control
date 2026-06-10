@@ -85,3 +85,5 @@ Open work not yet scoped into its own spec.
   open-source release safety and fresh-checkout gate.
 - [#20](https://github.com/elijahmuraoka/hermes-voice-control/issues/20):
   mobile browser and audio QA matrix.
+- [#33](https://github.com/elijahmuraoka/hermes-voice-control/issues/33):
+  durable launchd service for the private HVC runner.

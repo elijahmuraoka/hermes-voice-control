@@ -246,6 +246,98 @@ Expected results:
 - If `--serve` configures a previously empty Serve state and post-config
   verification fails, the runner resets Serve automatically before exiting.
 
+## Durable macOS LaunchDaemon
+
+Use this only after the manual Tailscale Serve rehearsal passes. The tracked
+LaunchDaemon wrapper keeps secrets out of the plist body by loading an ignored
+env file and then running:
+
+```bash
+pnpm private:tailscale -- --serve
+```
+
+Prepare private runtime state:
+
+```bash
+umask 077
+mkdir -p .private/deployment
+openssl rand -hex 16 > .private/deployment/hvc-pin.txt
+chmod 600 .private/deployment/hvc-pin.txt
+
+cat > .private/deployment/launchd.env <<'EOF'
+HVC_PIN_FILE=.private/deployment/hvc-pin.txt
+HVC_GEMINI_MODE=real
+GEMINI_API_KEY=<redacted>
+HVC_HERMES_ADAPTER=local
+HVC_HERMES_BIN=/opt/homebrew/bin/hermes
+HVC_TAILSCALE_HOSTNAME=DEVICE.TAILNET.ts.net
+EOF
+chmod 600 .private/deployment/launchd.env
+```
+
+Render and inspect the plist before installing it:
+
+```bash
+pnpm private:launchd -- render
+plutil -lint .private/deployment/io.github.elijahmuraoka.hermes-voice-control.launchdaemon.plist
+```
+
+The generated plist stores only paths, process arguments, `PATH`, and log
+locations. It does not store the PIN or Gemini API key. By default it is a
+system LaunchDaemon with `UserName` set to the installing operator, so it can
+load outside a GUI login session while still running HVC as that user. Use
+`--domain=agent` only for explicit GUI-session or auto-login scoped operation.
+
+Install the LaunchDaemon plist:
+
+```bash
+sudo pnpm private:launchd -- install
+```
+
+Bootstrap or restart it only after explicit operator approval:
+
+```bash
+sudo pnpm private:launchd -- bootstrap
+sudo pnpm private:launchd -- kickstart
+```
+
+Status and logs:
+
+```bash
+pnpm private:launchd -- status
+tail -n 200 .private/deployment/logs/hvc-private-runner.out.log
+tail -n 200 .private/deployment/logs/hvc-private-runner.err.log
+```
+
+Post-start verification:
+
+```bash
+curl -fsS 'https://DEVICE.TAILNET.ts.net/readyz'
+curl -i 'https://DEVICE.TAILNET.ts.net/auth/session'
+tailscale funnel status
+tailscale serve status --json
+```
+
+Expected results:
+
+- `/readyz` is HTTP 200 with `pin_required: true`, real Gemini mode when
+  configured, and `logs_endpoint_enabled: false`.
+- Unauthenticated `/auth/session` is HTTP 401.
+- `tailscale funnel status` still reports the endpoint as tailnet-only.
+- Logs are under `.private/deployment/logs/`, which is ignored by git.
+
+Stop or roll back:
+
+```bash
+sudo pnpm private:launchd -- bootout
+sudo pnpm private:launchd -- uninstall
+```
+
+If the service is stopped, the LaunchDaemon plist is removed, or the runner
+fails before configuring Serve, fall back to the manual Tailscale Serve
+rehearsal above. If Serve must be removed too, use the rollback command printed
+by the private runner and verify `tailscale serve status --json` afterward.
+
 ## Rollback
 
 Use the rollback line printed by the runner. When there was no previous Serve

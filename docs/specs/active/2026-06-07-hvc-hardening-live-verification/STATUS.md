@@ -144,3 +144,9 @@
 - Remaining known launch limitations: physical device/mobile audio QA is still
   tracked by #20, GitHub Actions Node.js deprecation is tracked by #30, and the
   durable launchd/service wrapper for the live runner is tracked by #33.
+- Issue #33 implementation added a tracked macOS LaunchDaemon wrapper around
+  `pnpm private:tailscale -- --serve`. The generated plist references only
+  paths, loads secrets from an ignored chmod-600 env file, writes logs under
+  `.private/deployment/logs/`, and documents render, install, bootstrap,
+  kickstart, status, stop, and rollback commands. Installing or kickstarting
+  the LaunchDaemon remains operator-approved local machine state.

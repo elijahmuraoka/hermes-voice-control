@@ -4,7 +4,7 @@
   "private": true,
   "description": "Private Gemini Live voice control surface for your Hermes agent.",
   "scripts": {
-    "test": "pnpm --filter @hvc/web test && cd apps/server && uv run --extra dev pytest",
+    "test": "pnpm --filter @hvc/web test && node --test scripts/*.test.mjs && cd apps/server && uv run --extra dev pytest",
     "build": "pnpm --filter @hvc/web build",
     "perf:budget": "node scripts/check-performance-budget.mjs",
     "docs:verify": "node scripts/verify-docs.mjs",

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,9 @@ if (!childEnv.HVC_PIN && !childEnv.HVC_PIN_FILE) {
   throw new Error(
     `Launchd env file ${envFile} must set HVC_PIN_FILE or HVC_PIN.`,
   );
+}
+if (!childEnv.HVC_PIN && childEnv.HVC_PIN_FILE) {
+  assertPrivatePinFile(childEnv.HVC_PIN_FILE);
 }
 
 const child = spawn(pnpmBin, ["private:tailscale", "--", "--serve"], {
@@ -101,6 +104,24 @@ function loadEnvFile(filePath) {
     env[match[1]] = unquote(match[2].trim());
   }
   return env;
+}
+
+function assertPrivatePinFile(pinFile) {
+  const pinPath = resolve(repoRoot, pinFile);
+  if (!existsSync(pinPath)) {
+    throw new Error(`HVC_PIN_FILE does not exist: ${pinPath}`);
+  }
+  const stat = statSync(pinPath);
+  if (!stat.isFile()) {
+    throw new Error(`Expected HVC_PIN_FILE to be a file: ${pinPath}`);
+  }
+  if ((stat.mode & 0o077) !== 0) {
+    throw new Error(`Run chmod 600 ${pinPath} before starting launchd.`);
+  }
+  if ((stat.mode & 0o400) === 0) {
+    throw new Error(`PIN file owner must be able to read ${pinPath}.`);
+  }
+  accessSync(pinPath, constants.R_OK);
 }
 
 function unquote(value) {

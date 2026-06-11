@@ -258,8 +258,14 @@ export default function App() {
       await login(normalizedPin);
       setAuthState("authenticated");
       setPin("");
-    } catch {
-      setAuthError("That PIN was not accepted.");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthError("That PIN was not accepted.");
+      } else if (error instanceof ApiError && error.status === 429) {
+        setAuthError("Too many attempts. Wait a few minutes, then try again.");
+      } else {
+        setAuthError("Could not reach the private session. Check Tailscale and reload.");
+      }
     } finally {
       setAuthSubmitting(false);
     }

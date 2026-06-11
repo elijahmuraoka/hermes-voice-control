@@ -1,5 +1,5 @@
 import type { TranscriptEntry } from "./types";
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8765";
+import { apiBase } from "./config";
 
 export class ApiError extends Error {
   constructor(
@@ -11,7 +11,7 @@ export class ApiError extends Error {
 }
 
 async function jsonFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${apiBase}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init.headers || {}) },
     ...init,
@@ -24,7 +24,7 @@ async function jsonFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 export async function getSession() {
-  const res = await fetch(`${API_BASE}/auth/session`, {
+  const res = await fetch(`${apiBase}/auth/session`, {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
   });

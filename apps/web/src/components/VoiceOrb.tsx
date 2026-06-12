@@ -16,6 +16,7 @@ export function VoiceOrb({
   onPointerCancel,
 }: Props) {
   const cls = `voice-orb state-${state.callState}`;
+  const helperText = subcopy(state.callState, agentName);
   return (
     <div className="orb-stage" aria-live="polite">
       <button
@@ -35,7 +36,7 @@ export function VoiceOrb({
       </button>
       <div className="state-copy">
         <p>{stateLabel(state, agentName)}</p>
-        <span>{subcopy(state.callState, agentName)}</span>
+        {helperText ? <span>{helperText}</span> : null}
       </div>
     </div>
   );
@@ -50,9 +51,11 @@ function subcopy(callState: CallState, agentName: string) {
       return `Tap the orb to resume ${agentName}.`;
     case "agent-speaking":
       return "Hold the orb to barge in.";
+    case "agent-thinking":
+      return "One moment.";
     case "error":
       return "Open transcript for recovery details.";
     default:
-      return "Private local control surface.";
+      return "";
   }
 }

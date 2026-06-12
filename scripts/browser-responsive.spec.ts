@@ -16,6 +16,7 @@ const viewports = [
   { name: "tablet-768", width: 768, height: 1024 },
   { name: "desktop-1280", width: 1280, height: 900 },
 ];
+const DRAWER_BREAKPOINT = 900;
 
 interface BrowserDiagnostics {
   snapshot(): {
@@ -56,6 +57,15 @@ async function stubUnlockedSession(page: Page) {
   });
 }
 
+async function waitForDrawerOpen(page: Page) {
+  await page.waitForFunction(() => {
+    const drawer = document.querySelector(".transcript");
+    if (!drawer) return false;
+    const transform = getComputedStyle(drawer).transform;
+    return transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
+  });
+}
+
 for (const viewport of viewports) {
   test(`renders without overflow at ${viewport.name}`, async ({ page }) => {
     const consoleErrors: string[] = [];
@@ -73,10 +83,17 @@ for (const viewport of viewports) {
     const muteButton = page.getByRole("button", { name: /^Mute$/ });
     const endButton = page.getByRole("button", { name: /^End$/ });
     const textInput = page.getByLabel("Type a message to your Hermes agent");
+    const transcriptTab = page.getByRole("button", {
+      name: /Toggle transcript/,
+    });
     await expect(orbButton).toBeVisible();
     await expect(muteButton).toBeVisible();
     await expect(endButton).toBeVisible();
-    await expect(textInput).toBeVisible();
+    if (viewport.width <= DRAWER_BREAKPOINT) {
+      await expect(textInput).toBeHidden();
+    } else {
+      await expect(textInput).toBeVisible();
+    }
     await page.keyboard.press("Tab");
     await expect(orbButton).toBeFocused();
     await page.keyboard.press("Tab");
@@ -96,31 +113,35 @@ for (const viewport of viewports) {
       .boundingBox();
     expect(orbBox?.width ?? 0).toBeGreaterThanOrEqual(140);
     expect(orbBox?.height ?? 0).toBeGreaterThanOrEqual(140);
-    if (viewport.width <= 390) {
-      const controlRow = page.locator(".control-row");
-      const chat = page.locator(".floating-chat");
-      const transcriptTab = page.getByRole("button", {
-        name: /Toggle transcript/,
-      });
-      const controlBox = await controlRow.boundingBox();
-      const chatBox = await chat.boundingBox();
-      const transcriptBox = await transcriptTab.boundingBox();
-      expect(controlBox).not.toBeNull();
-      expect(chatBox).not.toBeNull();
-      expect(transcriptBox).not.toBeNull();
-      expect(
-        (controlBox?.y ?? 0) + (controlBox?.height ?? 0),
-      ).toBeLessThanOrEqual((chatBox?.y ?? 0) - 4);
-      expect(
-        (chatBox?.y ?? 0) + (chatBox?.height ?? 0),
-      ).toBeLessThanOrEqual((transcriptBox?.y ?? 0) - 4);
-    }
     const screenshotTarget = screenshotTargets[viewport.name];
     if (WRITE_SCREENSHOTS && screenshotTarget) {
       await page.screenshot({
         path: `${SCREENSHOT_DIR}/${screenshotTarget}`,
         fullPage: true,
       });
+    }
+    if (viewport.width <= DRAWER_BREAKPOINT) {
+      const controlRow = page.locator(".control-row");
+      const controlBox = await controlRow.boundingBox();
+      const transcriptBox = await transcriptTab.boundingBox();
+      expect(controlBox).not.toBeNull();
+      expect(transcriptBox).not.toBeNull();
+      expect(
+        (controlBox?.y ?? 0) + (controlBox?.height ?? 0),
+      ).toBeLessThanOrEqual((transcriptBox?.y ?? 0) - 4);
+
+      await transcriptTab.click();
+      await expect(textInput).toBeVisible();
+      await waitForDrawerOpen(page);
+      const composerBox = await page.locator(".transcript-composer").boundingBox();
+      expect(composerBox).not.toBeNull();
+      expect(composerBox?.x ?? 0).toBeGreaterThanOrEqual(0);
+      expect(
+        (composerBox?.x ?? 0) + (composerBox?.width ?? 0),
+      ).toBeLessThanOrEqual(viewport.width);
+      expect(
+        (composerBox?.y ?? 0) + (composerBox?.height ?? 0),
+      ).toBeLessThanOrEqual(viewport.height - 8);
     }
     expect(consoleErrors).toEqual([]);
   });
@@ -228,7 +249,6 @@ test.describe("real backend token flow", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(APP_URL, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: /Voice orb:/ }).click();
-    await expect(page.getByText("real voice")).toBeVisible({ timeout: 20_000 });
     await expect(
       page.getByText(
         new RegExp(

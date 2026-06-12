@@ -76,9 +76,12 @@ export class GeminiLiveSession {
   private sessionClosed = false;
   private clientInitiatedClose = false;
   private toolCallSequence = 0;
+  private suppressedResponseTurns = 0;
   private readonly canceledToolCallIds = new Set<string>();
   private readonly toolAbortControllers = new Map<string, AbortController>();
   private readonly toolCallSequences = new Map<string, number>();
+  private readonly pendingToolCalls = new Map<string, GeminiFunctionCall>();
+  private readonly activeToolCalls = new Map<string, GeminiFunctionCall>();
 
   constructor(
     options: GeminiLiveSessionOptions = {},
@@ -138,6 +141,20 @@ export class GeminiLiveSession {
   interrupt(): void {
     this.audio?.interrupt();
     this.emitStatus("interrupted");
+  }
+
+  abandonPendingResponse(): void {
+    this.suppressedResponseTurns += 1;
+    this.cancelActiveToolCalls({ respondToProvider: true });
+    this.audio?.interrupt();
+  }
+
+  finalizeInputTurn(): boolean {
+    const hadOpenAudioStream = this.audioStreamOpen;
+    this.captureEnabled = false;
+    this.applyCaptureGate();
+    this.endAudioStream();
+    return hadOpenAudioStream;
   }
 
   setHoldToTalk(active: boolean): void {
@@ -212,18 +229,35 @@ export class GeminiLiveSession {
         await this.startCapture();
     }
 
+    const toolCall = message.toolCall ?? message.tool_call;
+    const functionCalls = isRecord(toolCall)
+      ? (toolCall.functionCalls ?? toolCall.function_calls)
+      : undefined;
+    const hasFunctionCalls = Array.isArray(functionCalls) && functionCalls.length > 0;
+
     const serverContent = message.serverContent ?? message.server_content;
-    if (isRecord(serverContent)) await this.handleServerContent(serverContent);
+    const suppressResponse = this.suppressedResponseTurns > 0;
+    let completedSuppressedResponse = false;
+    if (isRecord(serverContent)) {
+      completedSuppressedResponse = await this.handleServerContent(serverContent, {
+        suppressTurnComplete: hasFunctionCalls,
+        suppressResponse,
+      });
+    }
 
     const cancellation =
       message.toolCallCancellation ?? message.tool_call_cancellation;
     this.recordToolCallCancellations(cancellation);
 
-    const toolCall = message.toolCall ?? message.tool_call;
-    const functionCalls = isRecord(toolCall)
-      ? (toolCall.functionCalls ?? toolCall.function_calls)
-      : undefined;
-    if (Array.isArray(functionCalls) && functionCalls.length > 0) {
+    if (hasFunctionCalls) {
+      if (suppressResponse) {
+        if (!completedSuppressedResponse) {
+          this.sendSuppressedToolResponses(
+            functionCalls as Array<Record<string, unknown>>,
+          );
+        }
+        return;
+      }
       await this.handleToolCalls(
         functionCalls as Array<Record<string, unknown>>,
       );
@@ -247,20 +281,46 @@ export class GeminiLiveSession {
     }
   }
 
-  private cancelActiveToolCalls(): void {
-    const requestIds = Array.from(this.toolAbortControllers.keys());
+  private cancelActiveToolCalls({
+    respondToProvider = false,
+  }: { respondToProvider?: boolean } = {}): void {
+    const requestIds = Array.from(
+      new Set([
+        ...this.toolAbortControllers.keys(),
+        ...this.pendingToolCalls.keys(),
+      ]),
+    );
     if (requestIds.length === 0) return;
+    const activeCalls = requestIds.flatMap((id) => {
+      const call = this.pendingToolCalls.get(id) ?? this.activeToolCalls.get(id);
+      return call ? [call] : [];
+    });
     for (const id of requestIds) {
       this.canceledToolCallIds.add(id);
+      this.pendingToolCalls.delete(id);
       this.toolAbortControllers.get(id)?.abort();
     }
+    if (respondToProvider) this.sendAbandonedToolResponses(activeCalls);
     this.emitToolCancellation(requestIds, "client_disconnect");
     void this.toolCanceler(requestIds).catch((error) => this.emitError(error));
   }
 
   private async handleServerContent(
     serverContent: Record<string, unknown>,
-  ): Promise<void> {
+    options: { suppressTurnComplete?: boolean; suppressResponse?: boolean } = {},
+  ): Promise<boolean> {
+    const turnComplete = Boolean(
+      serverContent.turnComplete || serverContent.turn_complete,
+    );
+    if (options.suppressResponse && this.suppressedResponseTurns > 0) {
+      if (serverContent.interrupted) this.audio?.interrupt();
+      if (turnComplete && !options.suppressTurnComplete) {
+        this.finishSuppressedResponseTurn();
+        return true;
+      }
+      return false;
+    }
+
     if (serverContent.interrupted) {
       this.interrupt();
     }
@@ -300,9 +360,34 @@ export class GeminiLiveSession {
       }
     }
 
-    if (serverContent.turnComplete || serverContent.turn_complete) {
-      this.emitStatus("listening");
+    if (turnComplete && !options.suppressTurnComplete) {
+      this.emitStatus("turn-complete");
+      return true;
     }
+    return false;
+  }
+
+  private finishSuppressedResponseTurn(): void {
+    if (this.suppressedResponseTurns > 0) this.suppressedResponseTurns -= 1;
+    this.emitStatus("turn-complete");
+  }
+
+  private sendSuppressedToolResponses(calls: Array<Record<string, unknown>>): void {
+    const normalizedCalls = calls.flatMap((rawCall) => {
+      const call = normalizeFunctionCall(rawCall);
+      return call ? [call] : [];
+    });
+    this.sendAbandonedToolResponses(normalizedCalls);
+  }
+
+  private sendAbandonedToolResponses(calls: GeminiFunctionCall[]): void {
+    const functionResponses = calls.map((call) => ({
+      id: call.id,
+      name: call.name,
+      response: { status: "cancelled", reason: "abandoned_response" },
+    }));
+    if (functionResponses.length === 0) return;
+    this.sendJson({ toolResponse: { functionResponses } });
   }
 
   private emitTranscription(value: unknown, role: "user" | "model"): void {
@@ -328,6 +413,7 @@ export class GeminiLiveSession {
       const call = normalizeFunctionCall(rawCall);
       if (!call || this.canceledToolCallIds.has(call.id)) return [];
       const toolCallSeq = this.sequenceToolCall(call.id);
+      this.pendingToolCalls.set(call.id, call);
       this.emitDiagnostics("tool_call_request", {
         toolCallSeq,
         toolName: call.name,
@@ -342,12 +428,15 @@ export class GeminiLiveSession {
 
     for (const { call, toolCallSeq, toolName } of pendingCalls) {
       if (this.canceledToolCallIds.delete(call.id)) {
+        this.pendingToolCalls.delete(call.id);
         this.toolCallSequences.delete(call.id);
         continue;
       }
       this.callbacks.onToolCall?.(call);
       const controller = new AbortController();
+      this.pendingToolCalls.delete(call.id);
       this.toolAbortControllers.set(call.id, controller);
+      this.activeToolCalls.set(call.id, call);
       let response: Record<string, unknown> | null = null;
       let authError: Error | null = null;
       try {
@@ -365,6 +454,7 @@ export class GeminiLiveSession {
         }
       } finally {
         this.toolAbortControllers.delete(call.id);
+        this.activeToolCalls.delete(call.id);
       }
 
       if (authError) {

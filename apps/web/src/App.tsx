@@ -13,7 +13,6 @@ import {
   Mic,
   MicOff,
   PhoneOff,
-  Sparkles,
 } from "lucide-react";
 import { ApiError, getSession, login, sendText } from "./api";
 import {
@@ -26,7 +25,6 @@ import { initialVoiceState, voiceReducer } from "./stateMachine";
 import type { TranscriptEntry } from "./types";
 import { VoiceOrb } from "./components/VoiceOrb";
 import { TranscriptDrawer } from "./components/TranscriptDrawer";
-import { FloatingChat } from "./components/FloatingChat";
 import { agentName, agentNounLower } from "./config";
 import {
   createHvcDiagnosticsRecorder,
@@ -37,15 +35,28 @@ import "./styles.css";
 
 const uid = () => Math.random().toString(36).slice(2);
 const HOLD_DELAY_MS = 220;
+const NO_SPEECH_TIMEOUT_MS = 3500;
+const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
+const TOOL_RESPONSE_TIMEOUT_MS = 95000;
 
 type PressState = {
   pointerId: number | null;
   timer: number | null;
   holding: boolean;
+  activated: boolean;
   released: boolean;
 };
 
 type AuthState = "checking" | "authenticated" | "needs-pin";
+
+type VoiceTurn = {
+  id: number;
+  heardUser: boolean;
+  heardAgent: boolean;
+  usedTool: boolean;
+  expectsProviderTurnComplete: boolean;
+  waiting: boolean;
+};
 
 type AuthGateProps = {
   status: AuthState;
@@ -61,6 +72,7 @@ const emptyPress = (): PressState => ({
   pointerId: null,
   timer: null,
   holding: false,
+  activated: false,
   released: true,
 });
 
@@ -135,7 +147,6 @@ function AuthGate({
 export default function App() {
   const [state, dispatch] = useReducer(voiceReducer, initialVoiceState);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [tokenMode, setTokenMode] = useState("local");
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [pin, setPin] = useState("");
   const [authError, setAuthError] = useState("");
@@ -150,6 +161,21 @@ export default function App() {
   const transcriptDraftsRef = useRef<
     Partial<Record<RealtimeTranscriptEvent["role"], string>>
   >({});
+  const voiceTurnRef = useRef<VoiceTurn>({
+    id: 0,
+    heardUser: false,
+    heardAgent: false,
+    usedTool: false,
+    expectsProviderTurnComplete: false,
+    waiting: false,
+  });
+  const toolCallsInFlightRef = useRef(new Set<string>());
+  const staleProviderTurnCompletesRef = useRef(0);
+  const captureReadyRef = useRef(false);
+  const pendingHoldActivationRef = useRef<(() => boolean) | null>(null);
+  const noSpeechTimerRef = useRef<number | null>(null);
+  const responseTimerRef = useRef<number | null>(null);
+  const heardUserDuringHoldRef = useRef(false);
   const initialPressState = useMemo(emptyPress, []);
   const pressRef = useRef<PressState>(initialPressState);
 
@@ -179,6 +205,7 @@ export default function App() {
       window.removeEventListener("blur", cancel);
       document.removeEventListener("visibilitychange", visibility);
       clearPressTimer();
+      clearVoiceTurnTimers();
       currentEndingRef.current = true;
       currentSessionRef.current?.disconnect();
       currentSessionRef.current = null;
@@ -213,6 +240,94 @@ export default function App() {
     }
   }
 
+  function clearNoSpeechTimer() {
+    if (noSpeechTimerRef.current !== null) {
+      window.clearTimeout(noSpeechTimerRef.current);
+      noSpeechTimerRef.current = null;
+    }
+  }
+
+  function clearResponseTimer() {
+    if (responseTimerRef.current !== null) {
+      window.clearTimeout(responseTimerRef.current);
+      responseTimerRef.current = null;
+    }
+  }
+
+  function clearVoiceTurnTimers() {
+    clearNoSpeechTimer();
+    clearResponseTimer();
+  }
+
+  function clearPendingHoldActivation() {
+    pendingHoldActivationRef.current = null;
+  }
+
+  function clearToolActivity() {
+    toolCallsInFlightRef.current.clear();
+  }
+
+  function markExpectedProviderCompletionStale(expectsProviderTurnComplete: boolean) {
+    settleOpenTranscriptDrafts("cancelled");
+    if (!expectsProviderTurnComplete) return;
+    staleProviderTurnCompletesRef.current += 1;
+    sessionRef.current?.abandonPendingResponse();
+  }
+
+  function markCurrentProviderTurnStale() {
+    const turn = voiceTurnRef.current;
+    if (!turn.waiting || !turn.expectsProviderTurnComplete) return;
+    markExpectedProviderCompletionStale(true);
+  }
+
+  function stopVoiceTurnWatch() {
+    voiceTurnRef.current = {
+      ...voiceTurnRef.current,
+      waiting: false,
+    };
+    clearVoiceTurnTimers();
+    clearToolActivity();
+  }
+
+  function abandonPendingVoiceTurn() {
+    settleOpenTranscriptDrafts("cancelled");
+    markCurrentProviderTurnStale();
+    stopVoiceTurnWatch();
+  }
+
+  function resetHoldSpeechState() {
+    heardUserDuringHoldRef.current = false;
+  }
+
+  function markToolCallStarted(id: string) {
+    toolCallsInFlightRef.current.add(id);
+    const turn = voiceTurnRef.current;
+    if (turn.waiting) {
+      turn.usedTool = true;
+      turn.heardUser = true;
+      clearNoSpeechTimer();
+    }
+  }
+
+  function markToolCallFinished(id: string) {
+    toolCallsInFlightRef.current.delete(id);
+  }
+
+  function markCaptureReady(): boolean {
+    captureReadyRef.current = true;
+    const activateHold = pendingHoldActivationRef.current;
+    pendingHoldActivationRef.current = null;
+    return activateHold?.() ?? false;
+  }
+
+  function markCaptureNotReady({
+    preservePendingHoldActivation = false,
+  }: { preservePendingHoldActivation?: boolean } = {}) {
+    captureReadyRef.current = false;
+    staleProviderTurnCompletesRef.current = 0;
+    if (!preservePendingHoldActivation) clearPendingHoldActivation();
+  }
+
   function appendSystem(
     text: string,
     status: TranscriptEntry["status"] = "complete",
@@ -223,8 +338,17 @@ export default function App() {
     ]);
   }
 
+  function restoreHandsFreeCapture() {
+    if (stateRef.current.inputMode === "text") return;
+    sessionRef.current?.setHoldToTalk(false);
+    sessionRef.current?.setMicrophoneEnabled(!stateRef.current.isMuted);
+  }
+
   function requireAuth(message = "Enter your private PIN to continue.") {
     clearPressTimer();
+    stopVoiceTurnWatch();
+    resetHoldSpeechState();
+    markCaptureNotReady();
     pressRef.current = emptyPress();
     connectingRef.current = false;
     if (sessionRef.current) {
@@ -310,6 +434,149 @@ export default function App() {
     if (event.final) delete transcriptDraftsRef.current[event.role];
   }
 
+  function settleTranscriptDraft(
+    role: RealtimeTranscriptEvent["role"],
+    status: TranscriptEntry["status"],
+  ) {
+    const id = transcriptDraftsRef.current[role];
+    if (!id) return;
+    setEntries((items) =>
+      items.map((entry) =>
+        entry.id === id && entry.status === "streaming"
+          ? { ...entry, status }
+          : entry,
+      ),
+    );
+    delete transcriptDraftsRef.current[role];
+  }
+
+  function settleOpenTranscriptDrafts(status: TranscriptEntry["status"]) {
+    settleTranscriptDraft("user", status);
+    settleTranscriptDraft("agent", status);
+  }
+
+  function startVoiceTurnWatch(expectsProviderTurnComplete: boolean) {
+    clearVoiceTurnTimers();
+    clearToolActivity();
+    const turnId = voiceTurnRef.current.id + 1;
+    const heardUser = heardUserDuringHoldRef.current;
+    resetHoldSpeechState();
+    voiceTurnRef.current = {
+      id: turnId,
+      heardUser,
+      heardAgent: false,
+      usedTool: false,
+      expectsProviderTurnComplete,
+      waiting: true,
+    };
+
+    if (!heardUser) {
+      noSpeechTimerRef.current = window.setTimeout(() => {
+        const turn = voiceTurnRef.current;
+        if (
+          turn.id !== turnId ||
+          !turn.waiting ||
+          turn.heardUser ||
+          turn.heardAgent
+        )
+          return;
+        appendSystem("I didn't catch that.", "cancelled");
+        markCurrentProviderTurnStale();
+        stopVoiceTurnWatch();
+        restoreHandsFreeCapture();
+        dispatch({ type: "DONE" });
+      }, NO_SPEECH_TIMEOUT_MS);
+    }
+
+    armResponseTimer(turnId, INITIAL_RESPONSE_TIMEOUT_MS);
+  }
+
+  function armResponseTimer(turnId: number, delayMs: number) {
+    clearResponseTimer();
+    responseTimerRef.current = window.setTimeout(() => {
+      const turn = voiceTurnRef.current;
+      if (turn.id !== turnId || !turn.waiting || turn.heardAgent) return;
+      if (
+        delayMs === INITIAL_RESPONSE_TIMEOUT_MS &&
+        (turn.usedTool || toolCallsInFlightRef.current.size > 0)
+      ) {
+        armResponseTimer(
+          turnId,
+          TOOL_RESPONSE_TIMEOUT_MS - INITIAL_RESPONSE_TIMEOUT_MS,
+        );
+        return;
+      }
+      appendSystem(
+        turn.heardUser
+          ? `I heard you, but ${agentName} did not return a response.`
+          : "I didn't catch that.",
+        "failed",
+      );
+      markCurrentProviderTurnStale();
+      stopVoiceTurnWatch();
+      restoreHandsFreeCapture();
+      dispatch({ type: "DONE" });
+    }, delayMs);
+  }
+
+  function markVoiceTurnHeard(role: RealtimeTranscriptEvent["role"]) {
+    if (role === "user" && stateRef.current.callState === "hold-to-talk") {
+      heardUserDuringHoldRef.current = true;
+    }
+    const turn = voiceTurnRef.current;
+    if (!turn.waiting) return;
+    if (role === "user") {
+      turn.heardUser = true;
+      clearNoSpeechTimer();
+      return;
+    }
+    turn.heardAgent = true;
+    stopVoiceTurnWatch();
+  }
+
+  function shouldIgnoreStaleProviderCallback(): boolean {
+    return (
+      staleProviderTurnCompletesRef.current > 0 &&
+      !voiceTurnRef.current.waiting &&
+      stateRef.current.callState !== "agent-speaking"
+    );
+  }
+
+  function finishVoiceTurnFromProvider() {
+    const turn = voiceTurnRef.current;
+    if (
+      staleProviderTurnCompletesRef.current > 0 &&
+      !turn.heardAgent &&
+      stateRef.current.callState !== "agent-speaking"
+    ) {
+      staleProviderTurnCompletesRef.current -= 1;
+      return;
+    }
+    if (turn.heardAgent || stateRef.current.callState === "agent-speaking") {
+      staleProviderTurnCompletesRef.current = 0;
+    }
+    if (
+      turn.waiting &&
+      !turn.heardAgent &&
+      (turn.usedTool || toolCallsInFlightRef.current.size > 0)
+    ) {
+      armResponseTimer(turn.id, TOOL_RESPONSE_TIMEOUT_MS);
+      return;
+    }
+    if (turn.waiting && !turn.heardAgent) {
+      appendSystem(
+        turn.heardUser
+          ? `I heard you, but ${agentName} did not return a response.`
+          : "I didn't catch that.",
+        turn.heardUser ? "failed" : "cancelled",
+      );
+    }
+    stopVoiceTurnWatch();
+    resetHoldSpeechState();
+    restoreHandsFreeCapture();
+    dispatch({ type: "DONE" });
+  }
+
   function isCurrentSessionGeneration(sessionGeneration: number): boolean {
     return sessionGeneration === sessionGenerationRef.current;
   }
@@ -318,21 +585,24 @@ export default function App() {
     sessionGeneration: number,
   ): RealtimeVoiceCallbacks {
     return {
-      onToken: (token) => {
-        if (!isCurrentSessionGeneration(sessionGeneration)) return;
-        setTokenMode(token.mode);
-      },
       onStatus: (status) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
-        if (
-          status === "setup-complete" ||
-          status === "connected" ||
-          status === "listening"
-        ) {
+        if (status === "listening") {
+          const activatedPendingHold = markCaptureReady();
+          if (!activatedPendingHold) dispatch({ type: "CONNECTED" });
+          return;
+        }
+        if (status === "setup-complete" || status === "connected") {
           dispatch({ type: "CONNECTED" });
           return;
         }
+        if (status === "turn-complete") {
+          finishVoiceTurnFromProvider();
+          return;
+        }
         if (status === "agent-speaking") {
+          if (shouldIgnoreStaleProviderCallback()) return;
+          markVoiceTurnHeard("agent");
           dispatch({ type: "SPEAK" });
           return;
         }
@@ -345,21 +615,27 @@ export default function App() {
           !connectingRef.current &&
           !endingRef.current
         ) {
+          markCaptureNotReady();
           appendSystem("Voice session closed.");
           dispatch({ type: "RECOVER" });
         }
       },
       onTranscript: (event) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        if (event.role === "agent" && shouldIgnoreStaleProviderCallback())
+          return;
+        markVoiceTurnHeard(event.role);
         appendTranscript(event);
       },
       onToolCall: (call) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
-        appendSystem(`${agentName} is using ${call.name}.`, "streaming");
+        if (shouldIgnoreStaleProviderCallback()) return;
+        markToolCallStarted(call.id);
       },
       onToolResponse: (response) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
-        appendSystem(`${response.name} finished.`, "complete");
+        if (shouldIgnoreStaleProviderCallback()) return;
+        markToolCallFinished(response.id);
       },
       onDiagnosticsEvent: (event) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
@@ -367,11 +643,14 @@ export default function App() {
       },
       onError: (error) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        markCaptureNotReady();
         if (isAuthFailure(error)) {
           requireAuth("Session expired. Enter your private PIN again.");
           dispatch({ type: "RECOVER" });
           return;
         }
+        stopVoiceTurnWatch();
+        resetHoldSpeechState();
         appendSystem(
           error.message || "Realtime voice session reported an error.",
           "failed",
@@ -380,13 +659,16 @@ export default function App() {
       },
       onClose: () => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        stopVoiceTurnWatch();
+        resetHoldSpeechState();
+        markCaptureNotReady();
         sessionRef.current = null;
         endingRef.current = false;
       },
     };
   }
 
-  async function startCall(afterConnected?: () => void) {
+  async function startCall() {
     if (!canUsePrivateSession()) return;
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
@@ -394,12 +676,13 @@ export default function App() {
       sessionRef.current.resume();
       sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
       dispatch({ type: "RESUME" });
-      afterConnected?.();
+      if (captureReadyRef.current) markCaptureReady();
       return;
     }
 
     connectingRef.current = true;
     endingRef.current = false;
+    markCaptureNotReady({ preservePendingHoldActivation: true });
     const sessionGeneration = sessionGenerationRef.current + 1;
     sessionGenerationRef.current = sessionGeneration;
     diagnosticsRef.current?.startSession();
@@ -412,7 +695,6 @@ export default function App() {
       });
       sessionRef.current = session;
       await session.connect();
-      afterConnected?.();
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -422,6 +704,7 @@ export default function App() {
         diagnosticsRef.current?.mark("session_error", { message: errorMessage });
       }
       sessionRef.current = null;
+      markCaptureNotReady();
       if (isAuthFailure(error)) {
         requireAuth("Session expired. Enter your private PIN again.");
         dispatch({ type: "RECOVER" });
@@ -439,12 +722,16 @@ export default function App() {
   }
 
   function pauseCall() {
+    abandonPendingVoiceTurn();
+    resetHoldSpeechState();
     sessionRef.current?.setMicrophoneEnabled(false);
     sessionRef.current?.setHoldToTalk(false);
     dispatch({ type: "PAUSE" });
   }
 
   function resumeCall() {
+    stopVoiceTurnWatch();
+    resetHoldSpeechState();
     sessionRef.current?.resume();
     sessionRef.current?.setMicrophoneEnabled(!stateRef.current.isMuted);
     dispatch({ type: "RESUME" });
@@ -452,6 +739,9 @@ export default function App() {
 
   function endCall() {
     clearPressTimer();
+    stopVoiceTurnWatch();
+    resetHoldSpeechState();
+    markCaptureNotReady();
     pressRef.current = emptyPress();
     endingRef.current = true;
     sessionRef.current?.setHoldToTalk(false);
@@ -486,20 +776,26 @@ export default function App() {
     const press = pressRef.current;
     press.holding = true;
     const current = stateRef.current;
-    if (current.inputMode === "text") return;
+    if (current.inputMode === "text") return false;
 
     const activateHold = () => {
+      if (press.released || pressRef.current !== press) return false;
+      abandonPendingVoiceTurn();
+      press.activated = true;
+      resetHoldSpeechState();
       sessionRef.current?.setHoldToTalk(true);
       sessionRef.current?.setMicrophoneEnabled(true);
       if (stateRef.current.callState === "agent-speaking")
         sessionRef.current?.interrupt();
       dispatch({ type: "POINTER_DOWN" });
+      return true;
     };
 
     if (current.callState === "idle" || current.callState === "error") {
-      void startCall(() => {
-        if (!press.released) activateHold();
-      });
+      pendingHoldActivationRef.current = activateHold;
+      void startCall();
+    } else if (current.callState === "connecting" || !captureReadyRef.current) {
+      pendingHoldActivationRef.current = activateHold;
     } else {
       activateHold();
     }
@@ -507,10 +803,22 @@ export default function App() {
 
   function cancelPress() {
     clearPressTimer();
-    const wasHolding = pressRef.current.holding;
+    const press = pressRef.current;
+    press.released = true;
+    const wasHolding = press.holding;
     pressRef.current = emptyPress();
     if (wasHolding) {
-      sessionRef.current?.setHoldToTalk(false);
+      if (press.activated) {
+        const expectsProviderTurnComplete =
+          sessionRef.current?.finalizeInputTurn() ?? false;
+        markExpectedProviderCompletionStale(expectsProviderTurnComplete);
+        restoreHandsFreeCapture();
+      } else {
+        sessionRef.current?.setHoldToTalk(false);
+      }
+      stopVoiceTurnWatch();
+      resetHoldSpeechState();
+      clearPendingHoldActivation();
       dispatch({ type: "POINTER_CANCEL" });
     }
   }
@@ -528,6 +836,7 @@ export default function App() {
       pointerId: e.pointerId,
       timer: window.setTimeout(beginHold, HOLD_DELAY_MS),
       holding: false,
+      activated: false,
       released: false,
     };
   }
@@ -536,11 +845,22 @@ export default function App() {
     if (pressRef.current.pointerId !== e.pointerId) return;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
     clearPressTimer();
-    const wasHolding = pressRef.current.holding;
+    const press = pressRef.current;
+    press.released = true;
+    const wasHolding = press.holding;
+    const wasActivated = press.activated;
     pressRef.current = emptyPress();
     if (wasHolding) {
-      sessionRef.current?.setHoldToTalk(false);
-      dispatch({ type: "POINTER_UP" });
+      if (wasActivated) {
+        const expectsProviderTurnComplete =
+          sessionRef.current?.finalizeInputTurn() ?? false;
+        sessionRef.current?.setHoldToTalk(false);
+        dispatch({ type: "POINTER_UP" });
+        startVoiceTurnWatch(expectsProviderTurnComplete);
+      } else {
+        sessionRef.current?.setHoldToTalk(false);
+        clearPendingHoldActivation();
+      }
     } else {
       handleTap();
     }
@@ -548,13 +868,17 @@ export default function App() {
 
   function toggleMute() {
     const nextMuted = !stateRef.current.isMuted;
+    resetHoldSpeechState();
     sessionRef.current?.setMicrophoneEnabled(!nextMuted);
     dispatch({ type: nextMuted ? "MUTE" : "UNMUTE" });
   }
 
   function focusText() {
+    abandonPendingVoiceTurn();
+    resetHoldSpeechState();
     sessionRef.current?.setMicrophoneEnabled(false);
     sessionRef.current?.setHoldToTalk(false);
+    dispatch({ type: "SET_DRAWER", drawer: "open" });
     dispatch({ type: "FOCUS_TEXT" });
   }
 
@@ -564,6 +888,8 @@ export default function App() {
 
   async function submitText(text: string) {
     if (!canUsePrivateSession()) return;
+    abandonPendingVoiceTurn();
+    resetHoldSpeechState();
     dispatch({ type: "THINK" });
     const user: TranscriptEntry = {
       id: uid(),
@@ -609,10 +935,6 @@ export default function App() {
             <span className="eyebrow">private voice control</span>
             <h1>{agentName}</h1>
           </div>
-          <div className="status-pill">
-            <Sparkles size={14} />
-            {tokenMode} voice
-          </div>
         </header>
         <VoiceOrb
           state={state}
@@ -631,17 +953,15 @@ export default function App() {
             End
           </button>
         </div>
-        <FloatingChat
-          onSubmit={submitText}
-          onFocus={focusText}
-          onBlur={blurText}
-          agentNoun={agentNounLower}
-        />
       </section>
       <TranscriptDrawer
         drawer={state.drawer}
         entries={entries}
         agentName={agentName}
+        agentNoun={agentNounLower}
+        onSubmit={submitText}
+        onFocus={focusText}
+        onBlur={blurText}
         onToggle={() =>
           dispatch({
             type: "SET_DRAWER",

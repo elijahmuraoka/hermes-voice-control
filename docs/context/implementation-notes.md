@@ -10,7 +10,7 @@
   the Hermes agent is speaking is the interrupt/barge-in gesture.
 - No visible Interrupt button and no default PIN wall for direct localhost
   development. Tailscale Serve should use PIN/session auth.
-- Transcript drawer and floating text fallback are first-class.
+- Transcript drawer and its built-in text fallback composer are first-class.
 - Backend defaults to mock Gemini and mock Hermes so local development cannot
   accidentally spend API quota or mutate local systems.
 - FastAPI is used because the local Hermes adapter path is Python-native.

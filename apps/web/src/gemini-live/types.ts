@@ -6,6 +6,7 @@ export type GeminiLiveStatus =
   | "connected"
   | "setup-complete"
   | "listening"
+  | "turn-complete"
   | "model-speaking"
   | "interrupted"
   | "closed"

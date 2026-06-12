@@ -95,9 +95,12 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       return {
         ...state,
         inputMode: "text",
-        callState: ["listening", "user-speaking", "hold-to-talk"].includes(
-          state.callState,
-        )
+        callState: [
+          "listening",
+          "user-speaking",
+          "hold-to-talk",
+          "agent-thinking",
+        ].includes(state.callState)
           ? "idle"
           : state.callState,
       };
@@ -115,7 +118,7 @@ export function stateLabel(state: VoiceState, agentName = "Hermes Agent"): strin
     paused: "Paused",
     "user-speaking": "Hearing you",
     "hold-to-talk": "Holding to talk",
-    "agent-thinking": `${agentName} is thinking...`,
+    "agent-thinking": "Finishing your turn...",
     "agent-speaking": `${agentName} is speaking`,
     muted: "Mic paused",
     reconnecting: "Reconnecting...",

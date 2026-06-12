@@ -7,6 +7,7 @@ export type RealtimeVoiceStatus =
   | "connected"
   | "setup-complete"
   | "listening"
+  | "turn-complete"
   | "agent-speaking"
   | "interrupted"
   | "closed"
@@ -63,6 +64,8 @@ export interface RealtimeVoiceSession {
   connect(): Promise<void>;
   resume(): void;
   interrupt(): void;
+  abandonPendingResponse(): void;
+  finalizeInputTurn(): boolean;
   setHoldToTalk(active: boolean): void;
   setMicrophoneEnabled(enabled: boolean): void;
   disconnect(): void;

@@ -111,6 +111,74 @@ describe("GeminiLiveSession", () => {
     expect(statuses).toEqual(["connecting", "connected"]);
   });
 
+  it("emits turn-complete separately from listening readiness", async () => {
+    const ws = new MockWebSocket();
+    const statuses: string[] = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: { onStatus: (status) => statuses.push(status) },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({ serverContent: { turnComplete: true } });
+
+    expect(statuses).toEqual(["connecting", "connected", "turn-complete"]);
+  });
+
+  it("does not treat a tool-call message as a completed voice turn", async () => {
+    const ws = new MockWebSocket();
+    const events: string[] = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => events.push(`status:${status}`),
+          onToolCall: (call) => events.push(`tool:${call.id}`),
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        toolCaller: async () => ({ status: "completed" }),
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      serverContent: { turnComplete: true },
+      toolCall: {
+        functionCalls: [
+          { id: "call-with-turn", name: "ask_agent", args: { message: "hi" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+
+    expect(events).toEqual([
+      "status:connecting",
+      "status:connected",
+      "tool:call-with-turn",
+    ]);
+  });
+
   it("uses the Gemini model returned with the constrained ephemeral token", async () => {
     const ws = new MockWebSocket();
     const onToken = vi.fn();
@@ -340,6 +408,234 @@ describe("GeminiLiveSession", () => {
     expect(ws.sent.at(-1)).toEqual({ realtimeInput: { audioStreamEnd: true } });
   });
 
+  it("finalizes an input turn without reopening capture on later mic chunks", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const session = new GeminiLiveSession(
+      {},
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({ setupComplete: {} });
+    await Promise.resolve();
+    audio.emit({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" });
+
+    expect(session.finalizeInputTurn()).toBe(true);
+    const finalizedLength = ws.sent.length;
+    audio.emit({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "ambient-after-release" });
+
+    expect(ws.sent[finalizedLength - 1]).toEqual({
+      realtimeInput: { audioStreamEnd: true },
+    });
+    expect(ws.sent).toHaveLength(finalizedLength);
+
+    session.setMicrophoneEnabled(true);
+    audio.emit({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "next-hold" });
+
+    expect(ws.sent.at(-1)).toEqual({
+      realtimeInput: {
+        mediaChunks: [{ mimeType: GEMINI_INPUT_MIME_TYPE, data: "next-hold" }],
+      },
+    });
+  });
+
+  it("reports when there was no open audio stream to finalize", async () => {
+    const ws = new MockWebSocket();
+    const session = new GeminiLiveSession(
+      { audio: { startCapture: false } },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    const sentLength = ws.sent.length;
+
+    expect(session.finalizeInputTurn()).toBe(false);
+    expect(ws.sent).toHaveLength(sentLength);
+  });
+
+  it("suppresses an abandoned provider response until turn complete", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const statuses: string[] = [];
+    const transcript = vi.fn();
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => statuses.push(status),
+          onTranscript: transcript,
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    session.abandonPendingResponse();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "stale", final: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "pcm" } },
+            { text: "stale text" },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+
+    expect(audio.interrupted).toBe(1);
+    expect(audio.played).toEqual([]);
+    expect(transcript).not.toHaveBeenCalled();
+    expect(statuses).toEqual(["connecting", "connected", "turn-complete"]);
+  });
+
+  it("suppresses abandoned tool calls until the provider completes the turn", async () => {
+    const ws = new MockWebSocket();
+    const statuses: string[] = [];
+    const toolCaller = vi.fn(async () => ({ ok: true }));
+    const toolCall = vi.fn();
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => statuses.push(status),
+          onToolCall: toolCall,
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        toolCaller,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    session.abandonPendingResponse();
+    ws.receive({
+      serverContent: { turnComplete: true },
+      toolCall: {
+        functionCalls: [
+          { id: "stale-tool", name: "ask_agent", args: { message: "old" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(toolCall).not.toHaveBeenCalled();
+    expect(toolCaller).not.toHaveBeenCalled();
+    expect(ws.sent.at(-1)).toEqual({
+      toolResponse: {
+        functionResponses: [
+          {
+            id: "stale-tool",
+            name: "ask_agent",
+            response: {
+              status: "cancelled",
+              reason: "abandoned_response",
+            },
+          },
+        ],
+      },
+    });
+    expect(statuses).toEqual(["connecting", "connected"]);
+
+    ws.receive({ serverContent: { turnComplete: true } });
+    expect(statuses).toEqual(["connecting", "connected", "turn-complete"]);
+  });
+
+  it("keeps stale retry output suppressed until the provider completes it", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const statuses: string[] = [];
+    const transcript = vi.fn();
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => statuses.push(status),
+          onTranscript: transcript,
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    session.abandonPendingResponse();
+    session.sendAudioChunk({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "retry-pcm" });
+    session.finalizeInputTurn();
+
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "stale answer", final: true },
+        modelTurn: {
+          parts: [
+            {
+              inlineData: { mimeType: "audio/pcm;rate=24000", data: "stale" },
+            },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(audio.played).toEqual([]);
+    expect(transcript).not.toHaveBeenCalled();
+    expect(statuses).toEqual(["connecting", "connected", "turn-complete"]);
+
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "current answer", final: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "pcm" } },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(audio.played).toEqual([{ base64: "pcm", rate: 24000 }]);
+    expect(transcript).toHaveBeenCalledWith({
+      role: "model",
+      text: "current answer",
+      final: true,
+    });
+    expect(statuses).toEqual([
+      "connecting",
+      "connected",
+      "turn-complete",
+      "model-speaking",
+      "turn-complete",
+    ]);
+  });
+
   it("ends an open audio stream before disconnecting", async () => {
     const ws = new MockWebSocket();
     const session = new GeminiLiveSession(
@@ -525,6 +821,137 @@ describe("GeminiLiveSession", () => {
 
     expect(observedSignal?.aborted).toBe(true);
     expect(toolCanceler).toHaveBeenCalledWith(["call-active"]);
+  });
+
+  it("replies to Gemini when abandoning an active tool call", async () => {
+    const ws = new MockWebSocket();
+    const statuses: string[] = [];
+    let observedSignal: AbortSignal | undefined;
+    const never = new Promise(() => undefined);
+    const onToolResponse = vi.fn();
+    const toolCaller = vi.fn((_call, context: { signal: AbortSignal }) => {
+      observedSignal = context.signal;
+      return never;
+    });
+    const toolCanceler = vi.fn(async () => ({ status: "cancelled" }));
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => statuses.push(status),
+          onToolResponse,
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        toolCaller,
+        toolCanceler,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-active", name: "ask_agent", args: { message: "hi" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+    session.abandonPendingResponse();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(toolCanceler).toHaveBeenCalledWith(["call-active"]);
+    expect(onToolResponse).not.toHaveBeenCalled();
+    expect(ws.sent.at(-1)).toEqual({
+      toolResponse: {
+        functionResponses: [
+          {
+            id: "call-active",
+            name: "ask_agent",
+            response: {
+              status: "cancelled",
+              reason: "abandoned_response",
+            },
+          },
+        ],
+      },
+    });
+
+    ws.receive({ serverContent: { turnComplete: true } });
+    expect(statuses).toEqual(["connecting", "connected", "turn-complete"]);
+  });
+
+  it("cancels queued batched tool calls when abandoning an active batch", async () => {
+    const ws = new MockWebSocket();
+    let resolveFirst!: (value: unknown) => void;
+    const firstResponse = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+    const onToolCall = vi.fn();
+    const onToolResponse = vi.fn();
+    const toolCaller = vi.fn((call) => {
+      if (call.id === "call-1") return firstResponse;
+      return Promise.resolve({
+        status: "completed",
+        result: { display: "stale queued call executed" },
+      });
+    });
+    const toolCanceler = vi.fn(async () => ({ status: "cancelled" }));
+    const session = new GeminiLiveSession(
+      {
+        callbacks: { onToolCall, onToolResponse },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        toolCaller,
+        toolCanceler,
+        audio: new MockAudio(),
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-1", name: "ask_agent", args: { message: "one" } },
+          { id: "call-2", name: "ask_agent", args: { message: "two" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+
+    session.abandonPendingResponse();
+    resolveFirst({ status: "completed", result: { display: "late" } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(toolCaller).toHaveBeenCalledTimes(1);
+    expect(onToolCall).toHaveBeenCalledTimes(1);
+    expect(onToolResponse).not.toHaveBeenCalled();
+    expect(toolCanceler).toHaveBeenCalledWith(["call-1", "call-2"]);
+    expect(ws.sent.at(-1)).toEqual({
+      toolResponse: {
+        functionResponses: [
+          {
+            id: "call-1",
+            name: "ask_agent",
+            response: { status: "cancelled", reason: "abandoned_response" },
+          },
+          {
+            id: "call-2",
+            name: "ask_agent",
+            response: { status: "cancelled", reason: "abandoned_response" },
+          },
+        ],
+      },
+    });
   });
 
   it("records every batched tool request before awaiting the first tool", async () => {

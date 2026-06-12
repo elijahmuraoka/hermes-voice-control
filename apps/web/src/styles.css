@@ -117,22 +117,9 @@ input {
   text-wrap: balance;
 }
 
-.status-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 10px 13px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(246, 240, 232, 0.78);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
 .control-row button,
 .auth-card button,
-.floating-chat button {
+.transcript-composer button {
   border: 0;
   border-radius: 999px;
   background: #f6f0e8;
@@ -146,7 +133,7 @@ input {
 
 .control-row button:active,
 .auth-card button:active,
-.floating-chat button:active,
+.transcript-composer button:active,
 .voice-orb:active {
   transform: scale(0.96);
 }
@@ -396,48 +383,11 @@ input {
   color: #ffb7a5;
 }
 
-.floating-chat {
-  z-index: 3;
-  width: min(620px, 100%);
-  display: flex;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: rgba(0, 0, 0, 0.42);
-  padding: 10px;
-  backdrop-filter: blur(24px);
-  transition:
-    border-color 0.18s,
-    box-shadow 0.18s,
-    background 0.18s;
-}
-
-.floating-chat:focus-within {
-  border-color: rgba(157, 232, 255, 0.55);
-  background: rgba(5, 8, 10, 0.72);
-  box-shadow:
-    0 0 0 4px rgba(157, 232, 255, 0.1),
-    0 20px 60px rgba(0, 0, 0, 0.32);
-}
-
-.floating-chat input {
-  flex: 1;
-  background: transparent;
-  color: #fff;
-  border: 0;
-  outline: 0;
-  padding: 0 12px;
-  min-height: 42px;
-  min-width: 0;
-}
-
-.floating-chat button:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
 .transcript {
   position: relative;
+  height: calc(100dvh - 44px);
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 32px;
   background: rgba(10, 10, 9, 0.72);
@@ -462,9 +412,11 @@ input {
 }
 
 .transcript-body {
-  height: calc(100dvh - 128px);
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 18px;
+  scroll-behavior: smooth;
 }
 
 .empty-transcript {
@@ -489,6 +441,10 @@ input {
   padding: 14px;
   margin-bottom: 12px;
   background: rgba(255, 255, 255, 0.045);
+  transition:
+    border-color 0.18s,
+    background 0.18s,
+    opacity 0.18s;
 }
 
 .message-meta {
@@ -504,6 +460,7 @@ input {
   margin: 8px 0 0;
   line-height: 1.55;
   text-wrap: pretty;
+  white-space: pre-wrap;
 }
 
 .role-user {
@@ -512,6 +469,113 @@ input {
 
 .role-agent {
   background: rgba(157, 232, 255, 0.08);
+}
+
+.status-streaming {
+  border-color: rgba(214, 179, 106, 0.3);
+  background: rgba(214, 179, 106, 0.14);
+}
+
+.status-cancelled,
+.status-failed {
+  opacity: 0.78;
+}
+
+.live-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(214, 179, 106, 0.9);
+}
+
+.live-meta::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: livePulse 1.15s ease-in-out infinite;
+}
+
+.transcript-composer {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+  background: rgba(3, 3, 3, 0.42);
+}
+
+.composer-row {
+  display: flex;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.055);
+  padding: 8px;
+  transition:
+    border-color 0.18s,
+    box-shadow 0.18s,
+    background 0.18s;
+}
+
+.transcript-composer:focus-within .composer-row {
+  border-color: rgba(157, 232, 255, 0.55);
+  background: rgba(5, 8, 10, 0.72);
+  box-shadow:
+    0 0 0 4px rgba(157, 232, 255, 0.1),
+    0 18px 44px rgba(0, 0, 0, 0.22);
+}
+
+.transcript-composer input {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  padding: 0 12px;
+}
+
+.transcript-composer button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.transcript-composer button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.live-transcript {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid rgba(214, 179, 106, 0.24);
+  border-radius: 18px;
+  background: rgba(214, 179, 106, 0.1);
+  padding: 10px 12px;
+}
+
+.live-transcript span {
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 18px rgba(214, 179, 106, 0.55);
+  animation: livePulse 1.15s ease-in-out infinite;
+}
+
+.live-transcript p {
+  margin: 0;
+  color: rgba(246, 240, 232, 0.92);
+  line-height: 1.45;
+  text-wrap: pretty;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -549,6 +613,13 @@ input {
   }
 }
 
+@keyframes livePulse {
+  50% {
+    transform: scale(1.45);
+    opacity: 0.45;
+  }
+}
+
 @media (max-width: 900px) {
   body {
     overflow: auto;
@@ -565,9 +636,6 @@ input {
   .topbar h1 {
     font-size: 52px;
   }
-  .status-pill {
-    font-size: 12px;
-  }
   .voice-orb {
     width: 72vw;
     height: 72vw;
@@ -580,6 +648,7 @@ input {
     right: 10px;
     bottom: 10px;
     z-index: 8;
+    height: 72dvh;
     max-height: 72dvh;
     transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1);
   }
@@ -590,12 +659,15 @@ input {
   .drawer-open {
     transform: translateY(0);
   }
-  .transcript-body {
-    height: calc(72dvh - 58px);
+  .drawer-peeking .transcript-body,
+  .drawer-peeking .transcript-composer,
+  .drawer-closed .transcript-body,
+  .drawer-closed .transcript-composer {
+    visibility: hidden;
+    pointer-events: none;
   }
-  .floating-chat {
-    position: relative;
-    bottom: auto;
+  .transcript-body {
+    flex: 1;
   }
 }
 
@@ -611,11 +683,6 @@ input {
   .topbar h1 {
     font-size: 46px;
     max-width: 100%;
-  }
-  .status-pill {
-    align-self: flex-start;
-    max-width: 100%;
-    padding: 8px 10px;
   }
   .state-copy p {
     font-size: 24px;

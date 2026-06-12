@@ -53,6 +53,14 @@ class GeminiRealtimeVoiceSession implements RealtimeVoiceSession {
     this.session.interrupt();
   }
 
+  abandonPendingResponse(): void {
+    this.session.abandonPendingResponse();
+  }
+
+  finalizeInputTurn(): boolean {
+    return this.session.finalizeInputTurn();
+  }
+
   setHoldToTalk(active: boolean): void {
     this.session.setHoldToTalk(active);
   }

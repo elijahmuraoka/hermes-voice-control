@@ -8,6 +8,7 @@ describe("gemini realtime provider adapter", () => {
   it("maps provider status into the app realtime contract", () => {
     expect(toRealtimeVoiceStatus("model-speaking")).toBe("agent-speaking");
     expect(toRealtimeVoiceStatus("listening")).toBe("listening");
+    expect(toRealtimeVoiceStatus("turn-complete")).toBe("turn-complete");
   });
 
   it("maps Gemini model transcripts to agent transcripts", () => {

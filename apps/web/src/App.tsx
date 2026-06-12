@@ -558,7 +558,7 @@ export default function App() {
     if (
       turn.waiting &&
       !turn.heardAgent &&
-      (turn.usedTool || toolCallsInFlightRef.current.size > 0)
+      toolCallsInFlightRef.current.size > 0
     ) {
       armResponseTimer(turn.id, TOOL_RESPONSE_TIMEOUT_MS);
       return;

@@ -1013,6 +1013,47 @@ describe("App", () => {
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
   });
 
+  it("ends a completed tool turn with no agent output on provider completion", async () => {
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    vi.useFakeTimers();
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    act(() => {
+      realtimeMock.instances[0].callbacks.onTranscript?.({
+        role: "user",
+        text: "check the house",
+        final: true,
+      });
+    });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    act(() => {
+      realtimeMock.instances[0].callbacks.onToolCall?.({
+        id: "tool-done-no-output",
+        name: "ask_agent",
+        args: { message: "check the house" },
+      });
+      realtimeMock.instances[0].callbacks.onToolResponse?.({
+        id: "tool-done-no-output",
+        name: "ask_agent",
+        response: { status: "completed" },
+      });
+      realtimeMock.instances[0].callbacks.onStatus("turn-complete");
+    });
+
+    expect(
+      screen.getByText(/I heard you, but Hermes Agent did not return a response/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
   it("does not fail slow tool-backed hold responses at the first response timeout", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);

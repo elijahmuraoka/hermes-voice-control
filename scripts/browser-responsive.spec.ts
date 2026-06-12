@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const APP_URL = process.env.HVC_E2E_APP_URL ?? "http://127.0.0.1:5173";
-const AGENT_NAME = process.env.HVC_E2E_AGENT_NAME ?? "Hermes Agent";
+const AGENT_NAME = process.env.HVC_E2E_AGENT_NAME ?? "Bob";
 const AGENT_NAME_PATTERN = AGENT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const SCREENSHOT_DIR = "docs/assets/screenshots";
 const WRITE_SCREENSHOTS = process.env.HVC_E2E_WRITE_SCREENSHOTS === "true";
@@ -82,7 +82,7 @@ for (const viewport of viewports) {
     const orbButton = page.getByRole("button", { name: /Voice orb:/ });
     const muteButton = page.getByRole("button", { name: /^Mute$/ });
     const endButton = page.getByRole("button", { name: /^End$/ });
-    const textInput = page.getByLabel("Type a message to your Hermes agent");
+    const textInput = page.getByLabel(`Type a message to ${AGENT_NAME}`);
     const transcriptTab = page.getByRole("button", {
       name: /Toggle transcript/,
     });
@@ -189,6 +189,57 @@ test("exposes local redacted diagnostics with launch budgets", async ({ page }) 
   expect(diagnostics?.redacted).not.toContain("other=baz");
   expect(diagnostics?.redacted).not.toContain("sess_123");
   expect(diagnostics?.redacted).not.toContain("secret");
+});
+
+test("prevents mobile long-press text and image selection on the voice surface", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await stubUnlockedSession(page);
+  await page.goto(APP_URL, { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
+
+  const selectionStyles = await page.evaluate(() => {
+    const selectors = [".hero-panel", ".topbar h1", ".orb-stage", ".voice-orb"];
+    const styles = selectors.map((selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return { selector, missing: true };
+      const style = getComputedStyle(element);
+      return {
+        selector,
+        userSelect: style.userSelect,
+        webkitUserSelect: style.getPropertyValue("-webkit-user-select"),
+      };
+    });
+    return { styles };
+  });
+  const authoredStyles = await page
+    .request.get(`${APP_URL}/src/styles.css`)
+    .then((response) => response.text());
+
+  expect(selectionStyles.styles).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        selector: ".hero-panel",
+        userSelect: "none",
+        webkitUserSelect: "none",
+      }),
+      expect.objectContaining({
+        selector: ".topbar h1",
+        userSelect: "none",
+        webkitUserSelect: "none",
+      }),
+      expect.objectContaining({
+        selector: ".orb-stage",
+        userSelect: "none",
+        webkitUserSelect: "none",
+      }),
+      expect.objectContaining({
+        selector: ".voice-orb",
+        userSelect: "none",
+        webkitUserSelect: "none",
+      }),
+    ]),
+  );
+  expect(authoredStyles).toContain("-webkit-touch-callout: none");
 });
 
 test("honors reduced motion preference", async ({ page }) => {

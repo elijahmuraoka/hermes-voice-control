@@ -7,6 +7,11 @@ from dataclasses import dataclass
 SAFE_TOOLSET = "safe"
 DEFAULT_HERMES_TIMEOUT_SECONDS = 90
 HERMES_FAILURE_MARKERS = ("API call failed after", "Final error:")
+AGENT_IDENTITY_PROMPT = (
+    "You are Bob, Elijah's private Hermes Agent voice interface. "
+    "If asked who you are, say you are Bob. Do not introduce yourself as Hermes; "
+    "Hermes Voice Control is only the software surface carrying your answer."
+)
 READ_ONLY_PROMPT_SUFFIX = (
     "Answer read-only. Do not take external actions, mutate files, send messages, "
     "or claim that an action was performed. If the user asks for an action, explain "
@@ -33,7 +38,7 @@ class HermesAdapter:
 class MockHermesAdapter(HermesAdapter):
     def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
         text = message.strip() or "I heard silence."
-        return AdapterResult(ok=True, data={"speakable": f"Mock Hermes agent heard: {text}", "display": f"Mock Hermes agent heard: {text}", "mode": mode})
+        return AdapterResult(ok=True, data={"speakable": f"Mock Bob heard: {text}", "display": f"Mock Bob heard: {text}", "mode": mode})
 
     def diagnostics(self) -> dict:
         return {"kind": "mock", "available": True, "read_only": True}
@@ -62,7 +67,7 @@ class LocalHermesAdapter(HermesAdapter):
         }
 
     def _build_prompt(self, message: str, mode: str) -> str:
-        return f"Voice message for the user's Hermes agent ({mode} mode):\n\n{message}\n\n{READ_ONLY_PROMPT_SUFFIX}"
+        return f"{AGENT_IDENTITY_PROMPT}\n\nVoice message for Bob ({mode} mode):\n\n{message}\n\n{READ_ONLY_PROMPT_SUFFIX}"
 
     def _looks_like_cli_failure(self, output: str) -> bool:
         lines = [line.strip() for line in output.strip().splitlines() if line.strip()]

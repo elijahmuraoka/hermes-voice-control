@@ -110,7 +110,7 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       return state;
   }
 }
-export function stateLabel(state: VoiceState, agentName = "Hermes Agent"): string {
+export function stateLabel(state: VoiceState, agentName = "Bob"): string {
   const labels: Record<string, string> = {
     idle: `Tap to talk to ${agentName}`,
     connecting: "Connecting voice...",

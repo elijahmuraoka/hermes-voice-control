@@ -883,6 +883,12 @@ export default function App() {
   }
 
   function blurText() {
+    if (sessionRef.current) {
+      sessionRef.current.resume();
+      sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
+      dispatch({ type: "RESUME" });
+      return;
+    }
     dispatch({ type: "BLUR_TEXT" });
   }
 

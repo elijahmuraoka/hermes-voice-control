@@ -148,7 +148,7 @@ describe("App", () => {
 
   it("renders premium voice surface and transcript toggle", async () => {
     await renderUnlockedApp();
-    expect(screen.getByText("Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
     expect(screen.getByLabelText(/Voice orb/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Toggle transcript/ }),
@@ -192,7 +192,7 @@ describe("App", () => {
   it("keeps text fallback available through the backend", async () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
-    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    const input = screen.getByLabelText("Type a message to Bob");
 
     await user.type(input, "hello");
     await user.click(
@@ -206,6 +206,29 @@ describe("App", () => {
     );
   });
 
+  it("resumes hands-free capture after leaving the text composer", async () => {
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to Bob");
+    fireEvent.focus(input);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
+
+    fireEvent.blur(input);
+
+    expect(session.resume).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
   it("activates hold-to-talk after returning from text mode with an existing session", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
@@ -216,9 +239,9 @@ describe("App", () => {
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
 
-    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    const input = screen.getByLabelText("Type a message to Bob");
     fireEvent.focus(input);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
     fireEvent.blur(input);
 
     vi.useFakeTimers();
@@ -306,7 +329,7 @@ describe("App", () => {
     const first = realtimeMock.instances[0];
 
     chatAuthExpired = true;
-    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    const input = screen.getByLabelText("Type a message to Bob");
     await user.type(input, "hello");
     await user.click(
       screen.getByRole("button", { name: /Send typed message/ }),
@@ -328,7 +351,8 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     fireEvent.pointerUp(orb, { pointerId: 2 });
     await waitFor(() => expect(realtimeMock.instances).toHaveLength(2));
-    expect(first.resume).not.toHaveBeenCalled();
+    expect(first.resume).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances[1]).not.toBe(first);
   });
 
   it("clears an active realtime session when realtime auth expires after connect", async () => {
@@ -408,7 +432,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "Could not prepare your Hermes agent voice. Confirm you are on the private network and try again.",
+          "Could not prepare Bob voice. Confirm you are on the private network and try again.",
         ),
       ).toBeInTheDocument(),
     );
@@ -472,7 +496,7 @@ describe("App", () => {
     );
 
     await user.click(
-      screen.getByLabelText("Type a message to your Hermes agent"),
+      screen.getByLabelText("Type a message to Bob"),
     );
 
     expect(
@@ -499,12 +523,12 @@ describe("App", () => {
     fireEvent.pointerUp(orb, { pointerId: 2 });
     expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
 
-    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
+    fireEvent.focus(screen.getByLabelText("Type a message to Bob"));
 
     expect(
       screen.queryByText("Finishing your turn..."),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("turn-complete"));
 
@@ -793,7 +817,7 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     fireEvent.pointerUp(orb, { pointerId: 2 });
-    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
+    fireEvent.focus(screen.getByLabelText("Type a message to Bob"));
 
     act(() => session.callbacks.onStatus("agent-speaking"));
     act(() =>
@@ -812,9 +836,9 @@ describe("App", () => {
     );
 
     expect(session.abandonPendingResponse).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Hermes Agent is speaking")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bob is speaking")).not.toBeInTheDocument();
     expect(screen.queryByText("old abandoned answer")).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
 
     act(() => session.callbacks.onStatus("turn-complete"));
     expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
@@ -877,7 +901,7 @@ describe("App", () => {
 
     act(() => session.callbacks.onStatus("agent-speaking"));
 
-    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+    expect(screen.getByText("Bob is speaking")).toBeInTheDocument();
     expect(screen.getAllByText("I didn't catch that.")).toHaveLength(1);
   });
 
@@ -960,7 +984,7 @@ describe("App", () => {
     });
     expect(screen.getAllByText("turn on")).toHaveLength(2);
 
-    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
+    fireEvent.focus(screen.getByLabelText("Type a message to Bob"));
     expect(screen.queryByLabelText("Live transcript")).not.toBeInTheDocument();
 
     act(() => {
@@ -1007,7 +1031,7 @@ describe("App", () => {
 
     expect(
       screen.getByText(
-        "I heard you, but Hermes Agent did not return a response.",
+        "I heard you, but Bob did not return a response.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
@@ -1049,7 +1073,7 @@ describe("App", () => {
     });
 
     expect(
-      screen.getByText(/I heard you, but Hermes Agent did not return a response/i),
+      screen.getByText(/I heard you, but Bob did not return a response/i),
     ).toBeInTheDocument();
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
   });
@@ -1108,7 +1132,7 @@ describe("App", () => {
     expect(
       screen.queryByText(/did not return a response/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+    expect(screen.getByText("Bob is speaking")).toBeInTheDocument();
   });
 
   it("keeps raw realtime tool activity out of the transcript", async () => {
@@ -1150,7 +1174,7 @@ describe("App", () => {
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("agent-speaking"));
     await waitFor(() =>
-      expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument(),
+      expect(screen.getByText("Bob is speaking")).toBeInTheDocument(),
     );
 
     vi.useFakeTimers();
@@ -1177,6 +1201,6 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /End/ }));
 
     expect(realtimeMock.instances[0].disconnect).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
   });
 });

@@ -69,6 +69,16 @@ input {
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
   padding: 28px;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.hero-panel * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .hero-panel:before {

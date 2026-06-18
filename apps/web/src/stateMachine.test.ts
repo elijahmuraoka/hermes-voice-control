@@ -39,4 +39,17 @@ describe("voiceReducer", () => {
     expect(s.inputMode).toBe("text");
     expect(s.callState).toBe("idle");
   });
+  it("mute controls always return to hands-free mode", () => {
+    let s = voiceReducer(
+      { ...initialVoiceState, inputMode: "text", callState: "agent-speaking" },
+      { type: "MUTE" },
+    );
+    expect(s.inputMode).toBe("hands-free");
+    expect(s.callState).toBe("muted");
+    expect(s.isMuted).toBe(true);
+    s = voiceReducer(s, { type: "UNMUTE" });
+    expect(s.inputMode).toBe("hands-free");
+    expect(s.callState).toBe("listening");
+    expect(s.isMuted).toBe(false);
+  });
 });

@@ -41,7 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
     auth = AuthManager(settings.pin, settings.session_ttl_seconds, store)
     broker = build_broker(settings.gemini_mode)
-    adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin, settings.hermes_timeout_seconds)
+    adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin, settings.hermes_timeout_seconds, settings.agent_name)
     tools = ToolService(store, adapter)
     app = FastAPI(title="Hermes Voice Control", version="0.1.0")
     app.state.settings = settings

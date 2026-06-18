@@ -87,6 +87,9 @@
   `https://github.com/elijahmuraoka/hermes-voice-control`.
 - 2026-06-07: public copy and visible app labels were generalized to a
   configurable Hermes agent name via `VITE_HVC_AGENT_NAME`.
+- 2026-06-18: backend Hermes adapter identity was generalized to
+  `HVC_AGENT_NAME` with `VITE_HVC_AGENT_NAME` fallback so private names stay out
+  of fresh-checkout defaults.
 - 2026-06-07: README screenshots were regenerated from local Vite using Chrome
   DevTools Protocol at 390x844 and 1280x900. The README now embeds one mobile
   screenshot and one desktop screenshot.

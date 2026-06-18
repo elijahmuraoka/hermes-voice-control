@@ -148,7 +148,7 @@ describe("App", () => {
 
   it("renders premium voice surface and transcript toggle", async () => {
     await renderUnlockedApp();
-    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.getByText("Hermes Agent")).toBeInTheDocument();
     expect(screen.getByLabelText(/Voice orb/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Toggle transcript/ }),
@@ -192,7 +192,7 @@ describe("App", () => {
   it("keeps text fallback available through the backend", async () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
-    const input = screen.getByLabelText("Type a message to Bob");
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
 
     await user.type(input, "hello");
     await user.click(
@@ -206,7 +206,7 @@ describe("App", () => {
     );
   });
 
-  it("resumes hands-free capture after leaving the text composer", async () => {
+  it("does not resume hands-free capture just because the text composer blurs", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
@@ -217,14 +217,219 @@ describe("App", () => {
     );
 
     const session = realtimeMock.instances[0];
-    const input = screen.getByLabelText("Type a message to Bob");
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
-    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
 
     fireEvent.blur(input);
 
-    expect(session.resume).toHaveBeenCalledTimes(1);
+    expect(session.resume).not.toHaveBeenCalled();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("restores hands-free capture after a successful typed send from a live session", async () => {
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "hello" } });
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    fireEvent.blur(input);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(2));
+    await waitFor(
+      () => {
+        expect(session.resume).toHaveBeenCalled();
+        expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+      },
+      { timeout: 1500 },
+    );
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
+  it("preserves capture restore when text composer is blurred and refocused", async () => {
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(2));
+    await waitFor(
+      () => {
+        expect(session.resume).toHaveBeenCalled();
+        expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+      },
+      { timeout: 1500 },
+    );
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
+  it("does not reopen the mic when the composer is refocused before typed response completion", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    await user.type(input, "hello{enter}");
+
+    await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(2));
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+
+    await waitFor(
+      () => expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument(),
+      { timeout: 1500 },
+    );
+    expect(session.resume).not.toHaveBeenCalled();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    await user.type(input, "again{enter}");
+    await waitFor(() => expect(screen.getAllByText("again")).toHaveLength(1));
+    await waitFor(
+      () => {
+        expect(session.resume).toHaveBeenCalled();
+        expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+      },
+      { timeout: 1500 },
+    );
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
+  it("restores hands-free capture after submitting typed text with Enter", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    await user.type(input, "hello{enter}");
+
+    await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(2));
+    await waitFor(
+      () => {
+        expect(session.resume).toHaveBeenCalled();
+        expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+      },
+      { timeout: 1500 },
+    );
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
+  it("keeps an intentionally paused session paused after typed text send", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    await user.type(input, "hello{enter}");
+
+    await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(2));
+    await waitFor(
+      () => expect(screen.getByText("Paused")).toBeInTheDocument(),
+      { timeout: 1500 },
+    );
+    expect(session.resume).not.toHaveBeenCalled();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it("keeps a muted session muted after typed text send", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: /^Mute$/ }));
+    expect(screen.getByText("Mic paused")).toBeInTheDocument();
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    await user.type(input, "hello{enter}");
+
+    await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(2));
+    await waitFor(
+      () => expect(screen.getByText("Mic paused")).toBeInTheDocument(),
+      { timeout: 1500 },
+    );
+    expect(session.resume).not.toHaveBeenCalled();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it("uses the first orb tap after text focus to resume capture", async () => {
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+
+    const session = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    fireEvent.focus(input);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+
+    expect(session.resume).toHaveBeenCalled();
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
   });
@@ -239,9 +444,9 @@ describe("App", () => {
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
 
-    const input = screen.getByLabelText("Type a message to Bob");
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
-    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
     fireEvent.blur(input);
 
     vi.useFakeTimers();
@@ -329,7 +534,7 @@ describe("App", () => {
     const first = realtimeMock.instances[0];
 
     chatAuthExpired = true;
-    const input = screen.getByLabelText("Type a message to Bob");
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
     await user.type(input, "hello");
     await user.click(
       screen.getByRole("button", { name: /Send typed message/ }),
@@ -351,7 +556,7 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     fireEvent.pointerUp(orb, { pointerId: 2 });
     await waitFor(() => expect(realtimeMock.instances).toHaveLength(2));
-    expect(first.resume).toHaveBeenCalledTimes(1);
+    expect(first.resume).not.toHaveBeenCalled();
     expect(realtimeMock.instances[1]).not.toBe(first);
   });
 
@@ -432,7 +637,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "Could not prepare Bob voice. Confirm you are on the private network and try again.",
+          "Could not prepare your Hermes agent voice. Confirm you are on the private network and try again.",
         ),
       ).toBeInTheDocument(),
     );
@@ -496,7 +701,7 @@ describe("App", () => {
     );
 
     await user.click(
-      screen.getByLabelText("Type a message to Bob"),
+      screen.getByLabelText("Type a message to your Hermes agent"),
     );
 
     expect(
@@ -523,12 +728,12 @@ describe("App", () => {
     fireEvent.pointerUp(orb, { pointerId: 2 });
     expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
 
-    fireEvent.focus(screen.getByLabelText("Type a message to Bob"));
+    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
 
     expect(
       screen.queryByText("Finishing your turn..."),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("turn-complete"));
 
@@ -817,7 +1022,7 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     fireEvent.pointerUp(orb, { pointerId: 2 });
-    fireEvent.focus(screen.getByLabelText("Type a message to Bob"));
+    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
 
     act(() => session.callbacks.onStatus("agent-speaking"));
     act(() =>
@@ -836,9 +1041,9 @@ describe("App", () => {
     );
 
     expect(session.abandonPendingResponse).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Bob is speaking")).not.toBeInTheDocument();
+    expect(screen.queryByText("Hermes Agent is speaking")).not.toBeInTheDocument();
     expect(screen.queryByText("old abandoned answer")).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
 
     act(() => session.callbacks.onStatus("turn-complete"));
     expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
@@ -901,7 +1106,12 @@ describe("App", () => {
 
     act(() => session.callbacks.onStatus("agent-speaking"));
 
-    expect(screen.getByText("Bob is speaking")).toBeInTheDocument();
+    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+    expect(screen.getAllByText("I didn't catch that.")).toHaveLength(1);
+
+    act(() => session.callbacks.onStatus("turn-complete"));
+
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
     expect(screen.getAllByText("I didn't catch that.")).toHaveLength(1);
   });
 
@@ -984,7 +1194,7 @@ describe("App", () => {
     });
     expect(screen.getAllByText("turn on")).toHaveLength(2);
 
-    fireEvent.focus(screen.getByLabelText("Type a message to Bob"));
+    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
     expect(screen.queryByLabelText("Live transcript")).not.toBeInTheDocument();
 
     act(() => {
@@ -1031,7 +1241,7 @@ describe("App", () => {
 
     expect(
       screen.getByText(
-        "I heard you, but Bob did not return a response.",
+        "I heard you, but Hermes Agent did not return a response.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
@@ -1073,7 +1283,7 @@ describe("App", () => {
     });
 
     expect(
-      screen.getByText(/I heard you, but Bob did not return a response/i),
+      screen.getByText(/I heard you, but Hermes Agent did not return a response/i),
     ).toBeInTheDocument();
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
   });
@@ -1132,7 +1342,7 @@ describe("App", () => {
     expect(
       screen.queryByText(/did not return a response/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Bob is speaking")).toBeInTheDocument();
+    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
   });
 
   it("keeps raw realtime tool activity out of the transcript", async () => {
@@ -1174,7 +1384,7 @@ describe("App", () => {
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("agent-speaking"));
     await waitFor(() =>
-      expect(screen.getByText("Bob is speaking")).toBeInTheDocument(),
+      expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument(),
     );
 
     vi.useFakeTimers();
@@ -1201,6 +1411,6 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /End/ }));
 
     expect(realtimeMock.instances[0].disconnect).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Tap to talk to Bob")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
   });
 });

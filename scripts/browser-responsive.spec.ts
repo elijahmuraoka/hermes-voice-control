@@ -1,7 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const APP_URL = process.env.HVC_E2E_APP_URL ?? "http://127.0.0.1:5173";
-const AGENT_NAME = process.env.HVC_E2E_AGENT_NAME ?? "Bob";
+const configuredAgentName = process.env.HVC_E2E_AGENT_NAME;
+const AGENT_NAME = configuredAgentName ?? "Hermes Agent";
+const AGENT_NOUN = configuredAgentName ?? "your Hermes agent";
 const AGENT_NAME_PATTERN = AGENT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const SCREENSHOT_DIR = "docs/assets/screenshots";
 const WRITE_SCREENSHOTS = process.env.HVC_E2E_WRITE_SCREENSHOTS === "true";
@@ -82,7 +84,7 @@ for (const viewport of viewports) {
     const orbButton = page.getByRole("button", { name: /Voice orb:/ });
     const muteButton = page.getByRole("button", { name: /^Mute$/ });
     const endButton = page.getByRole("button", { name: /^End$/ });
-    const textInput = page.getByLabel(`Type a message to ${AGENT_NAME}`);
+    const textInput = page.getByLabel(`Type a message to ${AGENT_NOUN}`);
     const transcriptTab = page.getByRole("button", {
       name: /Toggle transcript/,
     });

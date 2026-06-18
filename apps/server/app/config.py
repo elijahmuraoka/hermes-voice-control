@@ -58,6 +58,7 @@ class Settings:
     db_path: Path = Path("./hvc.sqlite3")
     gemini_mode: str = "mock"
     hermes_adapter: str = "mock"
+    agent_name: str = "Hermes Agent"
     hermes_bin: str = "hermes"
     hermes_timeout_seconds: int = 90
     allow_remote_bind: bool = False
@@ -81,6 +82,7 @@ class Settings:
             db_path=Path(os.getenv("HVC_DB_PATH", "./hvc.sqlite3")),
             gemini_mode=os.getenv("HVC_GEMINI_MODE", "mock"),
             hermes_adapter=os.getenv("HVC_HERMES_ADAPTER", "mock"),
+            agent_name=os.getenv("HVC_AGENT_NAME", os.getenv("VITE_HVC_AGENT_NAME", "Hermes Agent")),
             hermes_bin=os.getenv("HVC_HERMES_BIN", "hermes"),
             hermes_timeout_seconds=env_int("HVC_HERMES_TIMEOUT_SECONDS", 90),
             allow_remote_bind=env_bool("HVC_ALLOW_REMOTE_BIND", False),

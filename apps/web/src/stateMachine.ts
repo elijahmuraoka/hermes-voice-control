@@ -75,9 +75,19 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
         inputMode: "hands-free",
       };
     case "MUTE":
-      return { ...state, isMuted: true, callState: "muted" };
+      return {
+        ...state,
+        isMuted: true,
+        callState: "muted",
+        inputMode: "hands-free",
+      };
     case "UNMUTE":
-      return { ...state, isMuted: false, callState: "listening" };
+      return {
+        ...state,
+        isMuted: false,
+        callState: "listening",
+        inputMode: "hands-free",
+      };
     case "INTERRUPT":
       return { ...state, callState: "listening", inputMode: "hands-free" };
     case "ERROR":
@@ -110,7 +120,7 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       return state;
   }
 }
-export function stateLabel(state: VoiceState, agentName = "Bob"): string {
+export function stateLabel(state: VoiceState, agentName = "Hermes Agent"): string {
   const labels: Record<string, string> = {
     idle: `Tap to talk to ${agentName}`,
     connecting: "Connecting voice...",

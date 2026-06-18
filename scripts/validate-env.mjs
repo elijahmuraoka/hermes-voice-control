@@ -79,6 +79,7 @@ const host = process.env.HVC_HOST ?? "127.0.0.1";
 const port = intEnv("HVC_PORT", 8765, { min: 1, max: 65535 });
 const geminiMode = process.env.HVC_GEMINI_MODE ?? "mock";
 const hermesAdapter = process.env.HVC_HERMES_ADAPTER ?? "mock";
+const agentName = process.env.HVC_AGENT_NAME ?? process.env.VITE_HVC_AGENT_NAME ?? "Hermes Agent";
 const requirePin = boolEnv("HVC_REQUIRE_PIN", false);
 const allowRemoteBind = boolEnv("HVC_ALLOW_REMOTE_BIND", false);
 const allowNoPinRemote = boolEnv("HVC_ALLOW_NO_PIN_REMOTE", false);
@@ -144,6 +145,7 @@ const result = {
     port,
     geminiMode,
     hermesAdapter,
+    agentName,
     hermesTimeoutSeconds,
     requirePin,
     sessionTtlSeconds,

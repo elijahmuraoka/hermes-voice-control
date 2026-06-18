@@ -58,6 +58,8 @@ type VoiceTurn = {
   waiting: boolean;
 };
 
+type TextFocusReturnMode = "none" | "restore-capture" | "paused" | "muted";
+
 type AuthGateProps = {
   status: AuthState;
   agentName: string;
@@ -176,6 +178,8 @@ export default function App() {
   const noSpeechTimerRef = useRef<number | null>(null);
   const responseTimerRef = useRef<number | null>(null);
   const heardUserDuringHoldRef = useRef(false);
+  const textFocusReturnModeRef = useRef<TextFocusReturnMode>("none");
+  const textFocusEpochRef = useRef(0);
   const initialPressState = useMemo(emptyPress, []);
   const pressRef = useRef<PressState>(initialPressState);
 
@@ -338,8 +342,12 @@ export default function App() {
     ]);
   }
 
-  function restoreHandsFreeCapture() {
-    if (stateRef.current.inputMode === "text") return;
+  function restoreHandsFreeCapture({
+    force = false,
+    resume = false,
+  }: { force?: boolean; resume?: boolean } = {}) {
+    if (!force && stateRef.current.inputMode === "text") return;
+    if (resume) sessionRef.current?.resume();
     sessionRef.current?.setHoldToTalk(false);
     sessionRef.current?.setMicrophoneEnabled(!stateRef.current.isMuted);
   }
@@ -348,6 +356,7 @@ export default function App() {
     clearPressTimer();
     stopVoiceTurnWatch();
     resetHoldSpeechState();
+    textFocusReturnModeRef.current = "none";
     markCaptureNotReady();
     pressRef.current = emptyPress();
     connectingRef.current = false;
@@ -673,6 +682,7 @@ export default function App() {
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
     if (sessionRef.current) {
+      textFocusReturnModeRef.current = "none";
       sessionRef.current.resume();
       sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
       dispatch({ type: "RESUME" });
@@ -722,6 +732,7 @@ export default function App() {
   }
 
   function pauseCall() {
+    textFocusReturnModeRef.current = "none";
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
     sessionRef.current?.setMicrophoneEnabled(false);
@@ -730,6 +741,7 @@ export default function App() {
   }
 
   function resumeCall() {
+    textFocusReturnModeRef.current = "none";
     stopVoiceTurnWatch();
     resetHoldSpeechState();
     sessionRef.current?.resume();
@@ -741,6 +753,7 @@ export default function App() {
     clearPressTimer();
     stopVoiceTurnWatch();
     resetHoldSpeechState();
+    textFocusReturnModeRef.current = "none";
     markCaptureNotReady();
     pressRef.current = emptyPress();
     endingRef.current = true;
@@ -824,10 +837,10 @@ export default function App() {
   }
 
   function handlePointerDown(e: PointerEvent<HTMLButtonElement>) {
+    exitTextModeForOrbPress();
     if (
       e.button !== 0 ||
-      pressRef.current.pointerId !== null ||
-      stateRef.current.inputMode === "text"
+      pressRef.current.pointerId !== null
     )
       return;
     if (!canUsePrivateSession()) return;
@@ -868,12 +881,33 @@ export default function App() {
 
   function toggleMute() {
     const nextMuted = !stateRef.current.isMuted;
+    textFocusReturnModeRef.current = "none";
     resetHoldSpeechState();
     sessionRef.current?.setMicrophoneEnabled(!nextMuted);
     dispatch({ type: nextMuted ? "MUTE" : "UNMUTE" });
   }
 
   function focusText() {
+    textFocusEpochRef.current += 1;
+    const current = stateRef.current;
+    if (
+      current.inputMode !== "text" &&
+      textFocusReturnModeRef.current === "none"
+    ) {
+      const captureWasActive =
+        sessionRef.current !== null &&
+        !current.isMuted &&
+        ["listening", "user-speaking", "hold-to-talk", "agent-thinking"].includes(
+          current.callState,
+        );
+      textFocusReturnModeRef.current = captureWasActive
+        ? "restore-capture"
+        : current.callState === "paused"
+          ? "paused"
+          : current.callState === "muted"
+            ? "muted"
+            : "none";
+    }
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
     sessionRef.current?.setMicrophoneEnabled(false);
@@ -883,17 +917,51 @@ export default function App() {
   }
 
   function blurText() {
-    if (sessionRef.current) {
-      sessionRef.current.resume();
-      sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
-      dispatch({ type: "RESUME" });
+    dispatch({ type: "BLUR_TEXT" });
+  }
+
+  function exitTextModeForOrbPress() {
+    if (stateRef.current.inputMode !== "text") return;
+    textFocusReturnModeRef.current = "none";
+    stateRef.current = { ...stateRef.current, inputMode: "hands-free" };
+    dispatch({ type: "BLUR_TEXT" });
+  }
+
+  function dispatchTextTurnFinished(returnMode: TextFocusReturnMode) {
+    dispatch({
+      type:
+        returnMode === "paused"
+          ? "PAUSE"
+          : returnMode === "muted"
+            ? "MUTE"
+            : "DONE",
+    });
+  }
+
+  function completeTextTurn(submitFocusEpoch: number) {
+    const returnMode = textFocusReturnModeRef.current;
+    const refocusedAfterSubmit =
+      textFocusEpochRef.current !== submitFocusEpoch &&
+      stateRef.current.inputMode === "text";
+    if (refocusedAfterSubmit) {
+      dispatchTextTurnFinished(returnMode);
+      dispatch({ type: "FOCUS_TEXT" });
+      sessionRef.current?.setMicrophoneEnabled(false);
       return;
     }
-    dispatch({ type: "BLUR_TEXT" });
+    textFocusReturnModeRef.current = "none";
+    if (returnMode === "restore-capture") {
+      dispatch({ type: "DONE" });
+      // DONE exits text mode, but stateRef can be one render behind here.
+      restoreHandsFreeCapture({ force: true, resume: true });
+      return;
+    }
+    dispatchTextTurnFinished(returnMode);
   }
 
   async function submitText(text: string) {
     if (!canUsePrivateSession()) return;
+    const submitFocusEpoch = textFocusEpochRef.current;
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
     dispatch({ type: "THINK" });
@@ -918,7 +986,9 @@ export default function App() {
         },
       ]);
       dispatch({ type: "SPEAK" });
-      window.setTimeout(() => dispatch({ type: "DONE" }), 900);
+      window.setTimeout(() => {
+        completeTextTurn(submitFocusEpoch);
+      }, 900);
     } catch (error) {
       if (isAuthFailure(error)) {
         requireAuth("Session expired. Enter your private PIN again.");

@@ -57,7 +57,8 @@ Expected:
 - No Gemini quota, local Hermes binary, Tailscale account, or personal context
   is required.
 - README setup steps are generic and refer to "your Hermes agent" or the
-  configurable `VITE_HVC_AGENT_NAME`, not a specific local operator.
+  configurable `HVC_AGENT_NAME` / `VITE_HVC_AGENT_NAME`, not a specific local
+  operator.
 
 ## Secret And History Scan
 

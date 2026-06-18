@@ -39,6 +39,10 @@ NEGATED_ACTION_PATTERNS = [
 MAX_EVIDENCE_TEXT_CHARS = 2000
 
 
+def default_agent_name() -> str:
+    return os.getenv("HVC_AGENT_NAME", os.getenv("VITE_HVC_AGENT_NAME", "Hermes Agent"))
+
+
 def opt_in_enabled() -> bool:
     return os.getenv("HVC_REAL_HERMES_HARNESS", "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -127,6 +131,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run opt-in, read-only real Hermes bridge probes and write redacted evidence.")
     parser.add_argument("--hermes-bin", default=os.getenv("HVC_HERMES_BIN", "hermes"))
     parser.add_argument("--timeout-seconds", type=int, default=None)
+    parser.add_argument("--agent-name", default=default_agent_name())
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     argv = sys.argv[1:]
     if argv[:1] == ["--"]:
@@ -169,7 +174,11 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": str(error)}, indent=2))
         return 2
 
-    adapter = LocalHermesAdapter(args.hermes_bin, timeout_seconds=timeout_seconds)
+    adapter = LocalHermesAdapter(
+        args.hermes_bin,
+        timeout_seconds=timeout_seconds,
+        agent_name=args.agent_name,
+    )
     diagnostics = adapter.diagnostics()
     evidence: dict[str, Any] = {
         "ok": False,

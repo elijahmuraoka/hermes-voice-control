@@ -261,7 +261,7 @@ def test_tool_allowlist_and_mock_agent(tmp_path):
     client = make_client(tmp_path)
     denied = client.post("/tools/call", json={"request_id": "r1", "tool": "shell", "arguments": {}}); assert denied.status_code == 403
     ok = client.post("/tools/call", json={"request_id": "r2", "tool": "ask_agent", "arguments": {"message": "hello", "mode": "quick"}})
-    assert ok.status_code == 200; assert ok.json()["status"] == "completed"; assert "Mock Bob heard" in ok.json()["result"]["speakable"]
+    assert ok.status_code == 200; assert ok.json()["status"] == "completed"; assert "Mock Hermes Agent heard" in ok.json()["result"]["speakable"]
     alias = client.post("/tools/call", json={"request_id": "r2-alias", "tool": "ask_bob", "arguments": {"message": "hello", "mode": "quick"}})
     assert alias.status_code == 200
 def test_ask_agent_denies_action_mode(tmp_path):
@@ -285,7 +285,7 @@ def test_ask_agent_audit_log_omits_free_text_inputs_and_outputs(tmp_path):
     assert spoken_secret in res.text
     logs = client.get("/logs").text
     assert spoken_secret not in logs
-    assert "Mock Bob heard" not in logs
+    assert "Mock Hermes Agent heard" not in logs
     assert "message_chars" in logs
     assert "transcript_items" in logs
 
@@ -318,8 +318,8 @@ def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     result = LocalHermesAdapter(str(hermes)).ask_agent("hi", mode="quick")
     assert result.ok is True
     assert calls[0][0][1:4] == ["chat", "-Q", "-q"]
-    assert "You are Bob" in calls[0][0][4]
-    assert "If asked who you are, say you are Bob" in calls[0][0][4]
+    assert "You are Hermes Agent" in calls[0][0][4]
+    assert "If asked who you are, say you are Hermes Agent" in calls[0][0][4]
     assert "Do not take external actions" in calls[0][0][4]
     assert "mutate files" in calls[0][0][4]
     assert "send messages" in calls[0][0][4]

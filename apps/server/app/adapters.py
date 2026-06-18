@@ -7,16 +7,20 @@ from dataclasses import dataclass
 SAFE_TOOLSET = "safe"
 DEFAULT_HERMES_TIMEOUT_SECONDS = 90
 HERMES_FAILURE_MARKERS = ("API call failed after", "Final error:")
-AGENT_IDENTITY_PROMPT = (
-    "You are Bob, Elijah's private Hermes Agent voice interface. "
-    "If asked who you are, say you are Bob. Do not introduce yourself as Hermes; "
-    "Hermes Voice Control is only the software surface carrying your answer."
-)
+DEFAULT_AGENT_NAME = "Hermes Agent"
 READ_ONLY_PROMPT_SUFFIX = (
     "Answer read-only. Do not take external actions, mutate files, send messages, "
     "or claim that an action was performed. If the user asks for an action, explain "
     "that it needs explicit confirmation in Hermes Voice Control."
 )
+
+def agent_identity_prompt(agent_name: str) -> str:
+    return (
+        f"You are {agent_name}, the user's private Hermes agent voice interface. "
+        f"If asked who you are, say you are {agent_name}. Do not introduce yourself "
+        "as Hermes Voice Control; Hermes Voice Control is only the software surface "
+        "carrying your answer."
+    )
 
 @dataclass
 class AdapterResult:
@@ -36,17 +40,22 @@ class HermesAdapter:
         return {"kind": "unknown", "available": False}
 
 class MockHermesAdapter(HermesAdapter):
+    def __init__(self, agent_name: str = DEFAULT_AGENT_NAME):
+        self.agent_name = agent_name
+
     def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
         text = message.strip() or "I heard silence."
-        return AdapterResult(ok=True, data={"speakable": f"Mock Bob heard: {text}", "display": f"Mock Bob heard: {text}", "mode": mode})
+        answer = f"Mock {self.agent_name} heard: {text}"
+        return AdapterResult(ok=True, data={"speakable": answer, "display": answer, "mode": mode})
 
     def diagnostics(self) -> dict:
         return {"kind": "mock", "available": True, "read_only": True}
 
 class LocalHermesAdapter(HermesAdapter):
-    def __init__(self, hermes_bin: str, timeout_seconds: int = DEFAULT_HERMES_TIMEOUT_SECONDS):
+    def __init__(self, hermes_bin: str, timeout_seconds: int = DEFAULT_HERMES_TIMEOUT_SECONDS, agent_name: str = DEFAULT_AGENT_NAME):
         self.hermes_bin = hermes_bin
         self.timeout_seconds = timeout_seconds
+        self.agent_name = agent_name
 
     def _resolve_hermes_bin(self) -> str | None:
         if os.path.sep in self.hermes_bin or (os.path.altsep and os.path.altsep in self.hermes_bin):
@@ -67,7 +76,7 @@ class LocalHermesAdapter(HermesAdapter):
         }
 
     def _build_prompt(self, message: str, mode: str) -> str:
-        return f"{AGENT_IDENTITY_PROMPT}\n\nVoice message for Bob ({mode} mode):\n\n{message}\n\n{READ_ONLY_PROMPT_SUFFIX}"
+        return f"{agent_identity_prompt(self.agent_name)}\n\nVoice message for {self.agent_name} ({mode} mode):\n\n{message}\n\n{READ_ONLY_PROMPT_SUFFIX}"
 
     def _looks_like_cli_failure(self, output: str) -> bool:
         lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
@@ -117,5 +126,5 @@ class LocalHermesAdapter(HermesAdapter):
             return AdapterResult(ok=False, error_code="HERMES_AGENT_FAILURE", safe_message="Local Hermes returned a CLI failure instead of an agent answer.")
         return AdapterResult(ok=True, data={"speakable": output, "display": output, "mode": mode})
 
-def build_adapter(kind: str, hermes_bin: str, timeout_seconds: int = DEFAULT_HERMES_TIMEOUT_SECONDS) -> HermesAdapter:
-    return LocalHermesAdapter(hermes_bin, timeout_seconds=timeout_seconds) if kind == "local" else MockHermesAdapter()
+def build_adapter(kind: str, hermes_bin: str, timeout_seconds: int = DEFAULT_HERMES_TIMEOUT_SECONDS, agent_name: str = DEFAULT_AGENT_NAME) -> HermesAdapter:
+    return LocalHermesAdapter(hermes_bin, timeout_seconds=timeout_seconds, agent_name=agent_name) if kind == "local" else MockHermesAdapter(agent_name=agent_name)

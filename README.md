@@ -120,9 +120,11 @@ pnpm dev:web
 
 Open `http://127.0.0.1:5173`.
 
-To customize the visible assistant name, set:
+To customize the assistant name, set it for both the backend adapter prompt and
+the frontend build:
 
 ```bash
+HVC_AGENT_NAME="My Hermes Agent"
 VITE_HVC_AGENT_NAME="My Hermes Agent"
 ```
 

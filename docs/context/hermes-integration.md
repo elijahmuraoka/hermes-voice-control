@@ -64,7 +64,7 @@ HVC_REAL_HERMES_HARNESS=1 HVC_HERMES_ADAPTER=local pnpm hermes:harness
 Optional overrides:
 
 ```bash
-HVC_REAL_HERMES_HARNESS=1 HVC_HERMES_ADAPTER=local HVC_HERMES_BIN=/opt/homebrew/bin/hermes HVC_HERMES_TIMEOUT_SECONDS=90 pnpm hermes:harness
+HVC_REAL_HERMES_HARNESS=1 HVC_HERMES_ADAPTER=local HVC_HERMES_BIN=/opt/homebrew/bin/hermes HVC_HERMES_TIMEOUT_SECONDS=90 HVC_AGENT_NAME="My Hermes Agent" pnpm hermes:harness
 ```
 
 The harness invokes the same `LocalHermesAdapter` contract as the backend and

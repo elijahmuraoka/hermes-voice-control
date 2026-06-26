@@ -42,7 +42,7 @@ class ChatJobService:
         include_adapter_diagnostics: bool = False,
         message_chars: int = 0,
         transcript_items: int = 0,
-    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    ) -> tuple[dict[str, Any] | None, dict[str, Any], HTTPException | None]:
         job_id = secrets.token_urlsafe(18)
         row = self.store.create_chat_job(job_id, session_hash, req.request_id)
         running = RunningChatJob()
@@ -72,12 +72,12 @@ class ChatJobService:
         if running.event.wait(max(0, budget_ms) / 1000):
             status = self.status(job_id, session_hash) or public_chat_job(row)
             if running.exception:
-                return None, status
+                return None, status, running.exception
             if running.result is None:
                 raise HTTPException(status_code=500, detail="Chat job finished without a result")
-            return running.result, status
+            return running.result, status, None
         status = self.status(job_id, session_hash)
-        return None, status if status else public_chat_job(row)
+        return None, status if status else public_chat_job(row), None
 
     def status(self, job_id: str, session_hash: str) -> dict[str, Any] | None:
         row = self.store.get_chat_job(job_id, session_hash)
@@ -115,7 +115,10 @@ class ChatJobService:
     ) -> None:
         try:
             internal_req = chat_job_tool_request(req, job_id)
-            self.store.update_chat_job_state(job_id, session_hash, "thinking", started=True)
+            updated = self.store.update_chat_job_state(job_id, session_hash, "thinking", started=True, unless_cancelled=True)
+            if updated and chat_job_cancelled(updated):
+                self._preserve_cancelled_job(job_id, session_hash, req, running)
+                return
             self.store.log(
                 "chat.job",
                 "thinking",

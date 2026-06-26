@@ -92,6 +92,9 @@ def persisted_chat_job(tmp_path: Path, job_id: str) -> dict:
 def chat_job_count(tmp_path: Path) -> int:
     with sqlite3.connect(tmp_path / "test.sqlite3") as conn:
         return conn.execute("SELECT COUNT(*) FROM chat_jobs").fetchone()[0]
+def audit_log_count(tmp_path: Path, event_type: str, status: str) -> int:
+    with sqlite3.connect(tmp_path / "test.sqlite3") as conn:
+        return conn.execute("SELECT COUNT(*) FROM audit_logs WHERE event_type=? AND status=?", (event_type, status)).fetchone()[0]
 def pause_cancel_before_store_update(client: TestClient) -> tuple[threading.Event, threading.Event]:
     original_cancel = client.app.state.store.request_chat_job_cancel
     cancel_ready = threading.Event()
@@ -493,11 +496,15 @@ def test_chat_text_job_fast_failure_returns_job_id_and_persisted_error(tmp_path)
     res = client.post(
         "/chat/text",
         json={"request_id": "job-fast-missing-hermes", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 1000},
+        headers={"X-HVC-Adapter-Diagnostics": "1"},
     )
 
     assert res.status_code == 502
     assert res.json() == {"detail": "Local Hermes binary was not found."}
     job_id = res.headers["x-hvc-chat-job-id"]
+    diagnostics = json.loads(res.headers["x-hvc-adapter-diagnostics"])
+    assert diagnostics["error_code"] == "HERMES_NOT_FOUND"
+    assert diagnostics["phases"][-1]["name"] == "binary_missing"
     status = client.get(f"/chat/jobs/{job_id}")
     assert status.status_code == 200
     body = status.json()
@@ -509,6 +516,8 @@ def test_chat_text_job_fast_failure_returns_job_id_and_persisted_error(tmp_path)
         "result_json": None,
         "error_json": json.dumps(body["error"], sort_keys=True),
     }
+    assert "adapter" not in persisted_chat_job(tmp_path, job_id)["error_json"]
+    assert "phases" not in persisted_chat_job(tmp_path, job_id)["error_json"]
 
 def test_chat_text_job_fast_response_preserves_completed_body(tmp_path):
     client = make_client(tmp_path)
@@ -606,6 +615,50 @@ def test_chat_text_job_cancel_signals_local_hermes_process(tmp_path, monkeypatch
     status = client.get(f"/chat/jobs/{job_id}")
     assert status.json()["cancelled"] is True
     assert "kill" not in events
+
+def test_chat_text_job_cancel_before_thinking_skips_tool_call(tmp_path):
+    client = make_client(tmp_path)
+    original_update = client.app.state.store.update_chat_job_state
+    thinking_ready = threading.Event()
+    release_thinking = threading.Event()
+    tool_called = threading.Event()
+
+    def paused_thinking_update(job_id, session_hash, state, *args, **kwargs):
+        if state == "thinking":
+            thinking_ready.set()
+            assert release_thinking.wait(2)
+        return original_update(job_id, session_hash, state, *args, **kwargs)
+
+    def unexpected_tool_call(*args, **kwargs):
+        tool_called.set()
+        raise AssertionError("tools.call should not run after cancellation wins before thinking")
+
+    client.app.state.store.update_chat_job_state = paused_thinking_update
+    client.app.state.tools.call = unexpected_tool_call
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-cancel-before-thinking", "message": "cancel before start", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    )
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    wait_until(lambda: thinking_ready.is_set())
+
+    cancelled = client.post(f"/chat/jobs/{job_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["state"] == "cancelled"
+    assert client.get(f"/chat/jobs/{job_id}").json()["state"] == "cancelled"
+
+    release_thinking.set()
+    wait_for_job_runner_to_finish(client, job_id)
+    final = client.get(f"/chat/jobs/{job_id}").json()
+    assert final["state"] == "cancelled"
+    assert final["cancelled"] is True
+    assert "result" not in final
+    assert "error" not in final
+    assert tool_called.is_set() is False
+    assert persisted_chat_job(tmp_path, job_id) == {"state": "cancelled", "result_json": None, "error_json": None}
+    assert audit_log_count(tmp_path, "chat.job", "thinking") == 0
 
 def test_chat_text_job_cancel_does_not_poison_reused_public_request_id(tmp_path):
     class ReusedRequestAdapter(HermesAdapter):

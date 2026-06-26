@@ -175,7 +175,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         req = ToolCallRequest(request_id=request_id, tool="ask_agent", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
         if wants_chat_job(payload, request):
             tools.validate_ask_agent_args(req, session_hash)
-            result, status = chat_jobs.submit(
+            result, status, error = chat_jobs.submit(
                 req,
                 session_hash,
                 budget_ms=chat_job_budget_ms(payload, request, settings),
@@ -185,17 +185,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             job_id = status["job_id"]
             if result is None:
-                if status["state"] == "failed":
-                    error = status.get("error") or {}
+                if error is not None:
+                    headers = dict(error.headers or {})
+                    headers[CHAT_JOB_ID_HEADER] = job_id
+                    detail = error.detail if isinstance(error.detail, str) else "Request failed"
                     return JSONResponse(
-                        status_code=error.get("status_code", 500),
-                        content={"detail": error.get("detail", "Internal server error")},
-                        headers={CHAT_JOB_ID_HEADER: job_id},
+                        status_code=error.status_code,
+                        content={"detail": detail},
+                        headers=headers,
                     )
-                if status["state"] == "cancelled":
+                if status["state"] == "failed":
+                    failed_error = status.get("error") or {}
                     return JSONResponse(
-                        status_code=409,
-                        content={"detail": "Tool call was cancelled"},
+                        status_code=failed_error.get("status_code", 500),
+                        content={"detail": failed_error.get("detail", "Internal server error")},
                         headers={CHAT_JOB_ID_HEADER: job_id},
                     )
                 return JSONResponse(

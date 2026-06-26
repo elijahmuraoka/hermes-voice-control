@@ -174,6 +174,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request_id = "text-chat"
         req = ToolCallRequest(request_id=request_id, tool="ask_agent", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
         if wants_chat_job(payload, request):
+            tools.validate_ask_agent_args(req, session_hash)
             result, status = chat_jobs.submit(
                 req,
                 session_hash,
@@ -184,6 +185,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             job_id = status["job_id"]
             if result is None:
+                if status["state"] == "failed":
+                    error = status.get("error") or {}
+                    return JSONResponse(
+                        status_code=error.get("status_code", 500),
+                        content={"detail": error.get("detail", "Internal server error")},
+                        headers={CHAT_JOB_ID_HEADER: job_id},
+                    )
+                if status["state"] == "cancelled":
+                    return JSONResponse(
+                        status_code=409,
+                        content={"detail": "Tool call was cancelled"},
+                        headers={CHAT_JOB_ID_HEADER: job_id},
+                    )
                 return JSONResponse(
                     status_code=202,
                     content=status,

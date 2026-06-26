@@ -70,11 +70,12 @@ class ChatJobService:
         )
         thread.start()
         if running.event.wait(max(0, budget_ms) / 1000):
+            status = self.status(job_id, session_hash) or public_chat_job(row)
             if running.exception:
-                raise running.exception
+                return None, status
             if running.result is None:
                 raise HTTPException(status_code=500, detail="Chat job finished without a result")
-            return running.result, self.status(job_id, session_hash)
+            return running.result, status
         status = self.status(job_id, session_hash)
         return None, status if status else public_chat_job(row)
 

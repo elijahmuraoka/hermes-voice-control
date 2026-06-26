@@ -89,6 +89,9 @@ def persisted_chat_job(tmp_path: Path, job_id: str) -> dict:
         row = conn.execute("SELECT state, result_json, error_json FROM chat_jobs WHERE id=?", (job_id,)).fetchone()
     assert row is not None
     return dict(row)
+def chat_job_count(tmp_path: Path) -> int:
+    with sqlite3.connect(tmp_path / "test.sqlite3") as conn:
+        return conn.execute("SELECT COUNT(*) FROM chat_jobs").fetchone()[0]
 def pause_cancel_before_store_update(client: TestClient) -> tuple[threading.Event, threading.Event]:
     original_cancel = client.app.state.store.request_chat_job_cancel
     cancel_ready = threading.Event()
@@ -394,6 +397,24 @@ def test_chat_text_invalid_payload_uses_sanitized_tool_validation(tmp_path):
     assert secret not in logs
     assert "validation_error" in logs
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"request_id": "job-empty-message", "message": "", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+        {"request_id": "job-invalid-mode", "message": "hello", "mode": "action", "job": True, "interactive_budget_ms": 0},
+        {"request_id": "job-oversized-message", "message": "x" * 9001, "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    ],
+)
+def test_chat_text_job_invalid_payload_returns_422_without_creating_job(tmp_path, payload):
+    client = make_client(tmp_path)
+
+    res = client.post("/chat/text", json=payload)
+
+    assert res.status_code == 422
+    assert res.json() == {"detail": "Invalid tool arguments"}
+    assert "x-hvc-chat-job-id" not in res.headers
+    assert chat_job_count(tmp_path) == 0
+
 def test_chat_text_diagnostics_are_opt_in_and_redacted(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
     hermes.write_text("#!/bin/sh\nexit 0\n")
@@ -465,6 +486,29 @@ def test_chat_text_failure_diagnostics_are_opt_in(tmp_path):
     assert diagnostics["error_code"] == "HERMES_NOT_FOUND"
     assert diagnostics["phases"][-1]["name"] == "binary_missing"
     assert "hello" not in json.dumps(diagnostics)
+
+def test_chat_text_job_fast_failure_returns_job_id_and_persisted_error(tmp_path):
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(tmp_path / "missing-hermes"))
+
+    res = client.post(
+        "/chat/text",
+        json={"request_id": "job-fast-missing-hermes", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 1000},
+    )
+
+    assert res.status_code == 502
+    assert res.json() == {"detail": "Local Hermes binary was not found."}
+    job_id = res.headers["x-hvc-chat-job-id"]
+    status = client.get(f"/chat/jobs/{job_id}")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["state"] == "failed"
+    assert body["request_id"] == "job-fast-missing-hermes"
+    assert body["error"] == {"code": None, "detail": "Local Hermes binary was not found.", "status_code": 502}
+    assert persisted_chat_job(tmp_path, job_id) == {
+        "state": "failed",
+        "result_json": None,
+        "error_json": json.dumps(body["error"], sort_keys=True),
+    }
 
 def test_chat_text_job_fast_response_preserves_completed_body(tmp_path):
     client = make_client(tmp_path)

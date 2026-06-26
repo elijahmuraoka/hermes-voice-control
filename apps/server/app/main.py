@@ -14,6 +14,7 @@ from .tools import ToolCallRequest, ToolCancelRequest, ToolService
 class PinRequest(BaseModel):
     pin: str
 class TextMessage(BaseModel):
+    request_id: str | None = None
     message: str
     mode: str = "quick"
     transcript_window: list[dict] = Field(default_factory=list)
@@ -129,7 +130,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def cancel_tool(req: ToolCancelRequest, session_hash: str = Depends(session_dep)): return tools.cancel(req, session_hash)
     @app.post("/chat/text")
     def chat_text(payload: TextMessage, session_hash: str = Depends(session_dep)):
-        req = ToolCallRequest(request_id="text-chat", tool="ask_agent", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
+        request_id = (payload.request_id or "").strip() or "text-chat"
+        if len(request_id) > 120:
+            request_id = "text-chat"
+        req = ToolCallRequest(request_id=request_id, tool="ask_agent", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
         return tools.call(req, session_hash)
     @app.get("/confirmations")
     def confirmations(session_hash: str = Depends(session_dep)): return {"items": tools.pending_confirmations(session_hash)}

@@ -19,6 +19,7 @@ const realtimeMock = vi.hoisted(() => ({
 
 let sessionAuthenticated = true;
 let chatAuthExpired = false;
+let chatNeverResolves = false;
 
 function createConnectGate() {
   let resolve!: () => void;
@@ -75,6 +76,7 @@ describe("App", () => {
     realtimeMock.emitInitialStatuses = true;
     sessionAuthenticated = true;
     chatAuthExpired = false;
+    chatNeverResolves = false;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -108,11 +110,24 @@ describe("App", () => {
             },
           );
         }
+        if (requestUrl.includes("/tools/cancel")) {
+          return new Response(JSON.stringify({ status: "cancelled" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (requestUrl.includes("/chat/text")) {
           if (chatAuthExpired) {
             return new Response(JSON.stringify({ detail: "Session expired" }), {
               status: 401,
               headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (chatNeverResolves) {
+            return new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("Aborted", "AbortError")),
+              );
             });
           }
           return new Response(
@@ -202,6 +217,36 @@ describe("App", () => {
     await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(2));
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("/chat/text"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("cancels a slow text fallback and leaves the composer usable", async () => {
+    chatNeverResolves = true;
+    await renderUnlockedApp();
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+
+    fireEvent.change(input, { target: { value: "slow request" } });
+    vi.useFakeTimers();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/took too long to answer, so I stopped/i),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Text request timed out.")).toBeInTheDocument();
+    expect(input).not.toBeDisabled();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/tools/cancel"),
       expect.objectContaining({ method: "POST" }),
     );
   });

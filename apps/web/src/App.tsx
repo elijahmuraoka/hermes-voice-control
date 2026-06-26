@@ -14,7 +14,7 @@ import {
   MicOff,
   PhoneOff,
 } from "lucide-react";
-import { ApiError, getSession, login, sendText } from "./api";
+import { ApiError, ApiTimeoutError, getSession, login, sendText } from "./api";
 import {
   createDefaultRealtimeVoiceSession,
   type RealtimeTranscriptEvent,
@@ -993,6 +993,14 @@ export default function App() {
       if (isAuthFailure(error)) {
         requireAuth("Session expired. Enter your private PIN again.");
         dispatch({ type: "RECOVER" });
+        return;
+      }
+      if (error instanceof ApiTimeoutError) {
+        appendSystem(
+          `${agentName} took too long to answer, so I stopped that text request. Try again with a shorter message.`,
+          "failed",
+        );
+        dispatch({ type: "ERROR", error: "Text request timed out." });
         return;
       }
       appendSystem(

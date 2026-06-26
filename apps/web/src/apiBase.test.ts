@@ -123,4 +123,50 @@ describe("apiBase", () => {
       "https://hvc.example.test/api/gemini/ephemeral-token",
     ]);
   });
+
+  it("cancels a timed-out text fallback request by id", async () => {
+    vi.useFakeTimers();
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetchMock = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+      const requestUrl = String(url);
+      calls.push({ url: requestUrl, init });
+      if (requestUrl.includes("/chat/text")) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        });
+      }
+      if (requestUrl.includes("/tools/cancel")) {
+        return new Promise<Response>(() => undefined);
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "cancelled" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { api } = await loadClientModules({
+      DEV: false,
+      PROD: true,
+      VITE_API_BASE: "",
+    });
+
+    const request = expect(api.sendText("slow", [], 25)).rejects.toThrow(
+      "Text fallback timed out",
+    );
+    await vi.advanceTimersByTimeAsync(25);
+    await request;
+
+    const chatCall = calls.find((call) => call.url === "/chat/text");
+    const cancelCall = calls.find((call) => call.url === "/tools/cancel");
+    expect(chatCall).toBeTruthy();
+    expect(cancelCall).toBeTruthy();
+    const chatBody = JSON.parse(String(chatCall?.init?.body));
+    const cancelBody = JSON.parse(String(cancelCall?.init?.body));
+    expect(chatBody.request_id).toMatch(/^text-/);
+    expect(cancelBody.request_ids).toEqual([chatBody.request_id]);
+  });
 });

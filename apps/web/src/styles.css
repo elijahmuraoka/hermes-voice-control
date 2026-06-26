@@ -486,6 +486,16 @@ input {
   background: rgba(214, 179, 106, 0.14);
 }
 
+.status-working {
+  border-color: rgba(157, 232, 255, 0.32);
+  background: rgba(157, 232, 255, 0.11);
+}
+
+.status-needs_permission {
+  border-color: rgba(214, 179, 106, 0.42);
+  background: rgba(214, 179, 106, 0.13);
+}
+
 .status-cancelled,
 .status-failed {
   opacity: 0.78;
@@ -505,6 +515,65 @@ input {
   border-radius: 50%;
   background: var(--gold);
   animation: livePulse 1.15s ease-in-out infinite;
+}
+
+.status-working .live-meta,
+.status-needs_permission .message-meta span:last-child {
+  color: rgba(157, 232, 255, 0.9);
+}
+
+.status-working .message-meta span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(157, 232, 255, 0.9);
+}
+
+.status-working .message-meta span:last-child::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+  animation: livePulse 1.15s ease-in-out infinite;
+}
+
+.message-action {
+  min-height: 34px;
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(246, 240, 232, 0.16);
+  border-radius: 999px;
+  background: rgba(246, 240, 232, 0.08);
+  color: rgba(246, 240, 232, 0.88);
+  padding: 0 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s,
+    background 0.18s,
+    transform 0.18s cubic-bezier(0.2, 0, 0, 1),
+    opacity 0.18s;
+}
+
+.message-action:hover {
+  border-color: rgba(157, 232, 255, 0.38);
+  background: rgba(157, 232, 255, 0.12);
+}
+
+.message-action:active {
+  transform: scale(0.96);
+}
+
+.message-action:focus-visible {
+  outline: 2px solid rgba(157, 232, 255, 0.82);
+  outline-offset: 3px;
+}
+
+.message-action:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 .transcript-composer {
@@ -678,6 +747,25 @@ input {
   }
   .transcript-body {
     flex: 1;
+  }
+  .message {
+    border-radius: 18px;
+    padding: 12px;
+  }
+  .message-meta {
+    gap: 10px;
+    min-width: 0;
+  }
+  .message-meta span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .message p {
+    overflow-wrap: anywhere;
+  }
+  .message-action {
+    width: 100%;
+    justify-content: center;
   }
 }
 

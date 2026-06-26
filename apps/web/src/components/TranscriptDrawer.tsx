@@ -1,4 +1,4 @@
-import { MessageCircle, Send, X } from "lucide-react";
+import { CircleStop, LoaderCircle, MessageCircle, Send, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DrawerState, TranscriptEntry } from "../types";
 interface Props {
@@ -8,12 +8,16 @@ interface Props {
   agentNoun: string;
   onToggle: () => void;
   onSubmit: (text: string) => Promise<void> | void;
+  onCancelJob: (jobId: string) => Promise<void> | void;
+  cancellingJobIds: ReadonlySet<string>;
   onFocus: () => void;
   onBlur: () => void;
 }
 
 function statusLabel(status: TranscriptEntry["status"]) {
   if (status === "streaming") return "live";
+  if (status === "working") return "working";
+  if (status === "needs_permission") return "approval needed";
   if (status === "complete") return "";
   return status;
 }
@@ -25,6 +29,8 @@ export function TranscriptDrawer({
   agentNoun,
   onToggle,
   onSubmit,
+  onCancelJob,
+  cancellingJobIds,
   onFocus,
   onBlur,
 }: Props) {
@@ -80,28 +86,53 @@ export function TranscriptDrawer({
             <p>Quiet for now.</p>
           </div>
         ) : (
-          entries.map((e) => (
-            <article
-              key={e.id}
-              className={`message role-${e.role} status-${e.status}`}
-            >
-              <div className="message-meta">
-                <span>
-                  {e.role === "agent"
-                    ? agentName
-                    : e.role === "user"
-                      ? "You"
-                      : "System"}
-                </span>
-                {statusLabel(e.status) ? (
-                  <span className={e.status === "streaming" ? "live-meta" : ""}>
-                    {statusLabel(e.status)}
+          entries.map((e) => {
+            const isCancellableJob = e.status === "working" && e.jobId;
+            const isCancelling =
+              e.jobId !== undefined && cancellingJobIds.has(e.jobId);
+            return (
+              <article
+                key={e.id}
+                className={`message role-${e.role} status-${e.status}${
+                  e.jobId ? " message-job" : ""
+                }`}
+              >
+                <div className="message-meta">
+                  <span>
+                    {e.role === "agent"
+                      ? agentName
+                      : e.role === "user"
+                        ? "You"
+                        : "System"}
                   </span>
+                  {statusLabel(e.status) ? (
+                    <span className={e.status === "streaming" ? "live-meta" : ""}>
+                      {statusLabel(e.status)}
+                    </span>
+                  ) : null}
+                </div>
+                <p>{e.text}</p>
+                {isCancellableJob ? (
+                  <button
+                    type="button"
+                    className="message-action"
+                    onClick={() => {
+                      if (e.jobId) void onCancelJob(e.jobId);
+                    }}
+                    disabled={isCancelling}
+                    aria-label="Cancel background reply"
+                  >
+                    {isCancelling ? (
+                      <LoaderCircle className="spin" size={15} />
+                    ) : (
+                      <CircleStop size={15} />
+                    )}
+                    <span>{isCancelling ? "Cancelling" : "Cancel"}</span>
+                  </button>
                 ) : null}
-              </div>
-              <p>{e.text}</p>
-            </article>
-          ))
+              </article>
+            );
+          })
         )}
       </div>
       <form

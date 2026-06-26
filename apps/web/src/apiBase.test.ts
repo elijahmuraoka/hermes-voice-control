@@ -26,6 +26,17 @@ function stubSuccessfulFetch() {
       ? { authenticated: true }
       : requestUrl.includes("/auth/pin")
         ? { ok: true, expires_at: "2026-01-01T00:00:00Z" }
+        : requestUrl.includes("/chat/jobs/job-1/cancel")
+          ? { job_id: "job-1", state: "cancelled", cancelled: true }
+          : requestUrl.includes("/chat/jobs/job-1")
+            ? {
+                job_id: "job-1",
+                state: "complete",
+                result: {
+                  status: "completed",
+                  result: { speakable: "hello", display: "hello" },
+                },
+              }
         : requestUrl.includes("/gemini/ephemeral-token")
           ? {
               token: "ephemeral-token",
@@ -59,6 +70,8 @@ async function callEveryBrowserApi(
   await api.getSession();
   await api.login("private-pin");
   await api.sendText("hello", []);
+  await api.getTextJob("job-1");
+  await api.cancelTextJob("job-1");
   await api.getGeminiToken();
   await defaults.defaultTokenProvider();
   await defaults.defaultToolCaller(call, {
@@ -89,6 +102,8 @@ describe("apiBase", () => {
       "/auth/session",
       "/auth/pin",
       "/chat/text",
+      "/chat/jobs/job-1",
+      "/chat/jobs/job-1/cancel",
       "/gemini/ephemeral-token",
       "/gemini/ephemeral-token",
       "/tools/call",
@@ -124,7 +139,56 @@ describe("apiBase", () => {
     ]);
   });
 
-  it("cancels a timed-out text fallback request by id", async () => {
+  it("requests background job mode for typed chat", async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetchMock = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+      const requestUrl = String(url);
+      calls.push({ url: requestUrl, init });
+      if (requestUrl.includes("/chat/text")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ job_id: "job-mode", state: "thinking" }),
+            {
+              status: 202,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { api } = await loadClientModules({
+      DEV: false,
+      PROD: true,
+      VITE_API_BASE: "",
+    });
+
+    await expect(api.sendText("slow", [])).resolves.toEqual({
+      job_id: "job-mode",
+      state: "thinking",
+    });
+
+    const chatCall = calls.find((call) => call.url === "/chat/text");
+    expect(chatCall).toBeTruthy();
+    const chatBody = JSON.parse(String(chatCall?.init?.body));
+    expect(chatBody.request_id).toMatch(/^text-/);
+    expect(chatBody).toEqual(
+      expect.objectContaining({
+        job: true,
+        interactive_budget_ms: 0,
+        message: "slow",
+        mode: "quick",
+      }),
+    );
+  });
+
+  it("times out a blackholed typed chat job creation request", async () => {
     vi.useFakeTimers();
     const calls: { url: string; init?: RequestInit }[] = [];
     const fetchMock = vi.fn((url: string | URL | Request, init?: RequestInit) => {
@@ -137,11 +201,8 @@ describe("apiBase", () => {
           );
         });
       }
-      if (requestUrl.includes("/tools/cancel")) {
-        return new Promise<Response>(() => undefined);
-      }
       return Promise.resolve(
-        new Response(JSON.stringify({ status: "cancelled" }), {
+        new Response(JSON.stringify({ ok: true }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -155,18 +216,11 @@ describe("apiBase", () => {
     });
 
     const request = expect(api.sendText("slow", [], 25)).rejects.toThrow(
-      "Text fallback timed out",
+      api.ApiRequestTimeoutError,
     );
     await vi.advanceTimersByTimeAsync(25);
     await request;
 
-    const chatCall = calls.find((call) => call.url === "/chat/text");
-    const cancelCall = calls.find((call) => call.url === "/tools/cancel");
-    expect(chatCall).toBeTruthy();
-    expect(cancelCall).toBeTruthy();
-    const chatBody = JSON.parse(String(chatCall?.init?.body));
-    const cancelBody = JSON.parse(String(cancelCall?.init?.body));
-    expect(chatBody.request_id).toMatch(/^text-/);
-    expect(cancelBody.request_ids).toEqual([chatBody.request_id]);
+    expect(calls.map((call) => call.url)).toEqual(["/chat/text"]);
   });
 });

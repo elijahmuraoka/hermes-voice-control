@@ -10,6 +10,8 @@ DEFAULT_PIN = "000000"
 COMMON_WEAK_PINS = {"12345678", "87654321", "password", "password1", "aaaaaaaa", "11111111", "00000000", "qwertyui", "change-me", "changeme"}
 HERMES_TIMEOUT_SECONDS_MIN = 1
 HERMES_TIMEOUT_SECONDS_MAX = 600
+CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN = 0
+CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX = 30_000
 
 
 def _is_sequential(value: str) -> bool:
@@ -68,6 +70,7 @@ class Settings:
     audit_log_max_rows: int = 5_000
     secure_cookies: bool = False
     debug_errors: bool = False
+    chat_job_interactive_budget_ms: int = 750
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -92,6 +95,7 @@ class Settings:
             audit_log_max_rows=env_int("HVC_AUDIT_LOG_MAX_ROWS", 5000),
             secure_cookies=env_bool("HVC_SECURE_COOKIES", False),
             debug_errors=env_bool("HVC_DEBUG_ERRORS", False),
+            chat_job_interactive_budget_ms=env_int("HVC_CHAT_JOB_INTERACTIVE_BUDGET_MS", 750),
         )
 
     def assert_safe_bind(self) -> None:
@@ -109,3 +113,5 @@ class Settings:
     def assert_safe_hermes(self) -> None:
         if not HERMES_TIMEOUT_SECONDS_MIN <= self.hermes_timeout_seconds <= HERMES_TIMEOUT_SECONDS_MAX:
             raise RuntimeError("HVC_HERMES_TIMEOUT_SECONDS must be between 1 and 600 seconds")
+        if not CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN <= self.chat_job_interactive_budget_ms <= CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX:
+            raise RuntimeError("HVC_CHAT_JOB_INTERACTIVE_BUDGET_MS must be between 0 and 30000 milliseconds")

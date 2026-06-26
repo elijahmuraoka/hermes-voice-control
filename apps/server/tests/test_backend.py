@@ -4,11 +4,12 @@ import json
 import sys
 import sqlite3
 import subprocess
+import time
 import types
 import pytest
 from fastapi.testclient import TestClient
 from app import gemini as gemini_module
-from app.adapters import LocalHermesAdapter
+from app.adapters import AdapterResult, HermesAdapter, LocalHermesAdapter
 from app.config import Settings
 from app.main import create_app
 from app.store import Store
@@ -45,6 +46,22 @@ def load_harness_module():
 
 def load_text_latency_harness_module():
     return load_script_module("run-live-text-latency-harness.py", "hvc_text_latency_harness")
+def wait_until(predicate, timeout: float = 2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(0.02)
+    raise AssertionError("condition was not met before timeout")
+def wait_for_job_state(client: TestClient, job_id: str, state: str) -> dict:
+    def read_matching_state():
+        response = client.get(f"/chat/jobs/{job_id}")
+        if response.status_code != 200:
+            return None
+        body = response.json()
+        return body if body["state"] == state else None
+    return wait_until(read_matching_state)
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
 def test_readyz_reports_safe_runtime_posture(tmp_path):
@@ -400,6 +417,148 @@ def test_chat_text_failure_diagnostics_are_opt_in(tmp_path):
     assert diagnostics["error_code"] == "HERMES_NOT_FOUND"
     assert diagnostics["phases"][-1]["name"] == "binary_missing"
     assert "hello" not in json.dumps(diagnostics)
+
+def test_chat_text_job_fast_response_preserves_completed_body(tmp_path):
+    client = make_client(tmp_path)
+
+    res = client.post("/chat/text", json={"request_id": "job-fast", "message": "hello", "mode": "quick", "job": True})
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "completed"
+    assert "state" not in res.json()
+    job_id = res.headers["x-hvc-chat-job-id"]
+    status = client.get(f"/chat/jobs/{job_id}")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["state"] == "complete"
+    assert body["result"]["request_id"] == "job-fast"
+
+def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(tmp_path):
+    class SlowAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+            time.sleep(0.08)
+            return AdapterResult(ok=True, data={"speakable": "slow answer", "display": "slow answer", "mode": mode})
+
+    client = make_pin_client(tmp_path)
+    token = login(client)
+    client.app.state.tools.adapter = SlowAdapter()
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-slow", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    )
+
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    assert started.headers["location"] == f"/chat/jobs/{job_id}"
+    assert started.json()["state"] in {"queued", "thinking"}
+
+    refreshed = TestClient(client.app)
+    refreshed.cookies.set("hvc_session", token)
+    completed = wait_for_job_state(refreshed, job_id, "complete")
+    assert completed["result"]["result"]["speakable"] == "slow answer"
+
+def test_chat_text_job_cancel_signals_local_hermes_process(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+    events = []
+
+    class FakeProc:
+        returncode = None
+        def poll(self): return self.returncode
+        def terminate(self):
+            events.append("terminate")
+            self.returncode = -15
+        def kill(self):
+            events.append("kill")
+            self.returncode = -9
+        def communicate(self, timeout=None): return ("", "")
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes), hermes_timeout_seconds=5)
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-cancel", "message": "cancel me", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    )
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+
+    cancelled = client.post(f"/chat/jobs/{job_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["state"] == "cancelled"
+    wait_until(lambda: events == ["terminate"])
+    status = client.get(f"/chat/jobs/{job_id}")
+    assert status.json()["cancelled"] is True
+    assert "kill" not in events
+
+def test_chat_text_job_failure_is_persisted_as_safe_metadata(tmp_path):
+    class FailingAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+            time.sleep(0.05)
+            return AdapterResult(ok=False, error_code="HERMES_TEST_FAILURE", safe_message="The Hermes agent could not answer right now.")
+
+    client = make_client(tmp_path)
+    client.app.state.tools.adapter = FailingAdapter()
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-failed", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    )
+
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    failed = wait_for_job_state(client, job_id, "failed")
+    assert failed["error"] == {"code": None, "detail": "The Hermes agent could not answer right now.", "status_code": 502}
+
+def test_chat_text_job_status_is_session_scoped(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    created = client.post("/chat/text", json={"request_id": "job-private", "message": "hello", "mode": "quick", "job": True})
+    assert created.status_code == 200
+    job_id = created.headers["x-hvc-chat-job-id"]
+
+    other = TestClient(client.app)
+    login(other)
+    hidden = other.get(f"/chat/jobs/{job_id}")
+
+    assert hidden.status_code == 404
+    assert hidden.json() == {"detail": "Chat job not found"}
+
+def test_chat_text_job_persistence_omits_raw_prompt_transcript_and_logs(tmp_path):
+    class SafeDelayedAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+            time.sleep(0.05)
+            return AdapterResult(ok=True, data={"speakable": "safe final", "display": "safe final", "mode": mode})
+
+    client = make_client(tmp_path)
+    client.app.state.tools.adapter = SafeDelayedAdapter()
+    secret = "job-secret-do-not-store"
+
+    started = client.post(
+        "/chat/text",
+        json={
+            "request_id": "job-redacted",
+            "message": f"please remember {secret}",
+            "mode": "quick",
+            "transcript_window": [{"role": "user", "text": secret}],
+            "job": True,
+            "interactive_budget_ms": 0,
+        },
+    )
+
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    wait_for_job_state(client, job_id, "complete")
+    with sqlite3.connect(tmp_path / "test.sqlite3") as conn:
+        conn.row_factory = sqlite3.Row
+        rows = [dict(row) for row in conn.execute("SELECT id, request_id, state, result_json, error_json FROM chat_jobs")]
+    assert secret not in json.dumps(rows)
+    logs = client.get("/logs").text
+    assert secret not in logs
+    assert "message_chars" in logs
+    assert "transcript_items" in logs
 
 def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"

@@ -82,6 +82,12 @@ class ToolService:
         with self.store.connect() as conn:
             row = conn.execute("SELECT 1 FROM tool_call_cancellations WHERE session_hash=? AND request_id=?", (session_hash, request_id)).fetchone()
         return row is not None
+    def validate_ask_agent_args(self, req: ToolCallRequest, session_hash: str) -> AskAgentArgs:
+        try:
+            return AskAgentArgs.model_validate(req.arguments)
+        except ValidationError as exc:
+            self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": safe_validation_errors(exc)}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
+            raise HTTPException(status_code=422, detail="Invalid tool arguments") from exc
     def call(self, req: ToolCallRequest, session_hash: str, include_adapter_diagnostics: bool = False) -> dict[str, Any]:
         if self._is_cancelled(req.request_id, session_hash):
             self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
@@ -91,11 +97,7 @@ class ToolService:
             self.store.log("tool.denied", "denied", {"tool": req.tool}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="TOOL_NOT_ALLOWED")
             raise HTTPException(status_code=403, detail="Tool not allowed")
         if req.tool in {"ask_agent", "ask_bob"}:
-            try:
-                args = AskAgentArgs.model_validate(req.arguments)
-            except ValidationError as exc:
-                self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": safe_validation_errors(exc)}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
-                raise HTTPException(status_code=422, detail="Invalid tool arguments") from exc
+            args = self.validate_ask_agent_args(req, session_hash)
             result = self.adapter.ask_agent(args.message, mode=args.mode, transcript_window=args.transcript_window, should_cancel=lambda: self._is_cancelled(req.request_id, session_hash))
             if self._is_cancelled(req.request_id, session_hash):
                 self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id, "suppressed_after_adapter": True}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)

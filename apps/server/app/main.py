@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from .adapters import build_adapter
-from .config import LOCAL_CLIENT_HOSTS, Settings
+from .chat_jobs import ChatJobService
+from .config import CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX, CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN, LOCAL_CLIENT_HOSTS, Settings
 from .gemini import build_broker
 from .security import AuthManager
 from .store import Store
@@ -18,8 +19,13 @@ class TextMessage(BaseModel):
     message: str
     mode: str = "quick"
     transcript_window: list[dict] = Field(default_factory=list)
+    job: bool = False
+    interactive_budget_ms: int | None = Field(default=None, ge=CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN, le=CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX)
 
 LOCAL_HOST_HEADERS = {"127.0.0.1", "localhost", "::1", "testserver"}
+CHAT_JOB_HEADER = "X-HVC-Chat-Job"
+CHAT_JOB_BUDGET_HEADER = "X-HVC-Chat-Budget-Ms"
+CHAT_JOB_ID_HEADER = "X-HVC-Chat-Job-Id"
 
 
 def host_header_is_local(request: Request) -> bool:
@@ -36,6 +42,25 @@ def host_header_is_local(request: Request) -> bool:
 def wants_adapter_diagnostics(request: Request) -> bool:
     return request.headers.get(ADAPTER_DIAGNOSTICS_HEADER, "").strip().lower() in {"1", "true", "yes", "on"}
 
+
+def wants_chat_job(payload: TextMessage, request: Request) -> bool:
+    return payload.job or request.headers.get(CHAT_JOB_HEADER, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def chat_job_budget_ms(payload: TextMessage, request: Request, settings: Settings) -> int:
+    if payload.interactive_budget_ms is not None:
+        return payload.interactive_budget_ms
+    header_value = request.headers.get(CHAT_JOB_BUDGET_HEADER)
+    if not header_value:
+        return settings.chat_job_interactive_budget_ms
+    try:
+        parsed = int(header_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid chat job budget") from exc
+    if not CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN <= parsed <= CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX:
+        raise HTTPException(status_code=422, detail="Invalid chat job budget")
+    return parsed
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.assert_safe_bind()
@@ -48,16 +73,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     broker = build_broker(settings.gemini_mode)
     adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin, settings.hermes_timeout_seconds, settings.agent_name)
     tools = ToolService(store, adapter)
+    chat_jobs = ChatJobService(store, tools)
     app = FastAPI(title="Hermes Voice Control", version="0.1.0")
     app.state.settings = settings
     app.state.store = store
+    app.state.tools = tools
+    app.state.chat_jobs = chat_jobs
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.frontend_origins),
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER],
-        expose_headers=[ADAPTER_DIAGNOSTICS_HEADER],
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_HEADER, CHAT_JOB_BUDGET_HEADER],
+        expose_headers=[ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_ID_HEADER, "Location"],
     )
     def session_dep(request: Request) -> str:
         if not settings.require_pin:
@@ -145,12 +173,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if len(request_id) > 120:
             request_id = "text-chat"
         req = ToolCallRequest(request_id=request_id, tool="ask_agent", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
+        if wants_chat_job(payload, request):
+            tools.validate_ask_agent_args(req, session_hash)
+            result, status, error = chat_jobs.submit(
+                req,
+                session_hash,
+                budget_ms=chat_job_budget_ms(payload, request, settings),
+                include_adapter_diagnostics=wants_adapter_diagnostics(request),
+                message_chars=len(payload.message),
+                transcript_items=len(payload.transcript_window),
+            )
+            job_id = status["job_id"]
+            if result is None:
+                if error is not None:
+                    headers = dict(error.headers or {})
+                    headers[CHAT_JOB_ID_HEADER] = job_id
+                    detail = error.detail if isinstance(error.detail, str) else "Request failed"
+                    return JSONResponse(
+                        status_code=error.status_code,
+                        content={"detail": detail},
+                        headers=headers,
+                    )
+                if status["state"] == "failed":
+                    failed_error = status.get("error") or {}
+                    return JSONResponse(
+                        status_code=failed_error.get("status_code", 500),
+                        content={"detail": failed_error.get("detail", "Internal server error")},
+                        headers={CHAT_JOB_ID_HEADER: job_id},
+                    )
+                return JSONResponse(
+                    status_code=202,
+                    content=status,
+                    headers={CHAT_JOB_ID_HEADER: job_id, "Location": f"/chat/jobs/{job_id}"},
+                )
+            response.headers[CHAT_JOB_ID_HEADER] = job_id
+            diagnostics = result.pop(ADAPTER_DIAGNOSTICS_RESPONSE_KEY, None)
+            for name, value in adapter_diagnostics_headers(diagnostics).items():
+                if name == ADAPTER_DIAGNOSTICS_HEADER:
+                    response.headers[name] = value
+            return result
         result = tools.call(req, session_hash, include_adapter_diagnostics=wants_adapter_diagnostics(request))
         diagnostics = result.pop(ADAPTER_DIAGNOSTICS_RESPONSE_KEY, None)
         for name, value in adapter_diagnostics_headers(diagnostics).items():
             if name == ADAPTER_DIAGNOSTICS_HEADER:
                 response.headers[name] = value
         return result
+    @app.get("/chat/jobs/{job_id}")
+    def chat_job_status(job_id: str, session_hash: str = Depends(session_dep)):
+        status = chat_jobs.status(job_id, session_hash)
+        if status is None:
+            raise HTTPException(status_code=404, detail="Chat job not found")
+        return status
+    @app.post("/chat/jobs/{job_id}/cancel")
+    def chat_job_cancel(job_id: str, session_hash: str = Depends(session_dep)):
+        return chat_jobs.cancel(job_id, session_hash)
     @app.get("/confirmations")
     def confirmations(session_hash: str = Depends(session_dep)): return {"items": tools.pending_confirmations(session_hash)}
     @app.post("/confirmations/{confirmation_id}/approve")

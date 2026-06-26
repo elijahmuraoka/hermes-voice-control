@@ -9,12 +9,17 @@
   sets the HttpOnly session cookie without returning the raw session token in
   JSON.
 - `apps/server/app/store.py`: confirmation request ids and tool-call
-  cancellation persistence.
+  cancellation persistence, plus session-scoped chat job state.
 - `apps/server/app/tools.py`: allowlisted tools, cancellable `ask_agent`
   requests, `ask_bob` compatibility alias, confirmation records, and
   cancellation checks. Audit logs for free-text tool traffic persist metadata
   rather than raw prompts, transcript windows, agent answers, or confirmation
   summaries.
+- `apps/server/app/chat_jobs.py`: opt-in text chat job lifecycle for #47. It
+  runs slow chat requests in the background, maps outcomes to
+  `queued`/`thinking`/`needs_permission`/`complete`/`cancelled`/`failed`,
+  persists refresh-safe state, and routes cancellation through the existing
+  tool cancellation path.
 - `apps/server/app/adapters.py`: mock/local Hermes adapters, direct argv launch,
   safe toolset, readiness diagnostics, timeout/cancel/error handling, and
   malformed empty-output handling. Local Hermes uses quiet chat query mode so it
@@ -22,8 +27,10 @@
 - `apps/server/app/gemini.py`: mock and real Gemini token brokerage, including
   one-use constrained real Live tokens.
 - `apps/server/tests/test_backend.py`: auth, remote guard, token brokerage,
-  audit-log leakage, local Hermes adapter/harness contract, confirmation, and
-  cancellation coverage.
+  audit-log leakage, local Hermes adapter/harness contract, confirmation,
+  cancellation, and chat job lifecycle coverage.
+- `chat-job-contract.md`: request/response contract for #48's text fallback job
+  UI integration.
 
 ## Frontend
 

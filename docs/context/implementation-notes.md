@@ -40,6 +40,10 @@
   allowlist.
 - Backend supports cancellable agent-answer tool calls, `propose_action`
   confirmation records, and `/tools/cancel`.
+- Backend text chat keeps synchronous `/chat/text` as the default path. Callers
+  can opt into chat jobs with `job: true` or `X-HVC-Chat-Job: 1`; slow calls
+  return `202` with `/chat/jobs/{job_id}` status and cancellation while fast
+  calls keep the normal completed response body.
 - Canonical tool/state identifiers use `ask_agent`, `agent-thinking`,
   `agent-speaking`, and transcript role `agent`. The backend still accepts
   `ask_bob` as a compatibility alias for older clients.
@@ -70,6 +74,9 @@
 - Custom CSS is used instead of Tailwind to avoid generic dashboard aesthetics.
 - SQLite uses stdlib `sqlite3` instead of an ORM to keep the backend small and
   auditable.
+- Chat jobs persist only refresh-safe metadata plus session-scoped final
+  result/error data. Raw prompts, transcript windows, adapter diagnostics, PINs,
+  cookies, and tokens stay out of job storage and audit logs.
 - PIN auth is intentionally simple for a one-user private app, with server-side
   sessions and rate limits when enabled.
 - The real Gemini websocket/audio path is unit-tested, browser-wired, and has a

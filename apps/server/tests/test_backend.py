@@ -302,6 +302,25 @@ def test_invalid_tool_argument_log_omits_pydantic_input(tmp_path):
     assert secret_prefix not in logs
     assert "validation_error" in logs
 
+def test_chat_text_invalid_payload_uses_sanitized_tool_validation(tmp_path):
+    client = make_client(tmp_path)
+    secret = "chat-secret-do-not-return"
+    oversized_message = secret + ("x" * 9000)
+
+    oversized = client.post("/chat/text", json={"request_id": "text-secret", "message": oversized_message, "mode": "quick"})
+    assert oversized.status_code == 422
+    assert oversized.json() == {"detail": "Invalid tool arguments"}
+    assert secret not in oversized.text
+
+    bad_mode = client.post("/chat/text", json={"request_id": "text-mode", "message": f"please keep {secret} private", "mode": "action"})
+    assert bad_mode.status_code == 422
+    assert bad_mode.json() == {"detail": "Invalid tool arguments"}
+    assert secret not in bad_mode.text
+
+    logs = client.get("/logs").text
+    assert secret not in logs
+    assert "validation_error" in logs
+
 def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
     hermes.write_text("#!/bin/sh\nexit 0\n")

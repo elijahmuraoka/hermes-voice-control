@@ -115,7 +115,7 @@ async function main() {
   await assertPortAvailable("127.0.0.1", proxyPort, "proxy");
   if (shouldServe) assertFunnelNotPublic("before configuring Tailscale Serve");
   if (!shouldServe) assertLocalPortsNotServed([backendPort, proxyPort]);
-  const servePlan = shouldServe ? prepareServeChange(proxyPort) : null;
+  const servePlan = shouldServe ? prepareServeChange(proxyPort, backendPort) : null;
 
   if (!noBuild) {
     runChecked("pnpm", ["build"], { env: { ...process.env, VITE_API_BASE: "" } });
@@ -207,17 +207,37 @@ function detectTailscaleHostname() {
   }
 }
 
-function prepareServeChange(proxyPort) {
+function prepareServeChange(proxyPort, backendPort) {
   const desiredProxy = `http://127.0.0.1:${proxyPort}`;
   const { snapshotPath, status } = saveServeStatusSnapshot();
   const handlers = collectServeHandlers(status);
+  const selectedPorts = [backendPort, proxyPort];
   const webEntries = Object.keys(status?.Web ?? {}).length;
   const tcpEntries = Object.keys(status?.TCP ?? {}).length;
   const wasEmpty = handlers.length === 0 && webEntries === 0 && tcpEntries === 0;
+  const ownedHandlers = handlers.filter(isPrimaryHttpsRootHandler);
+  const staleHvcReferences = [
+    ...handlers
+      .filter((handler) => !isPrimaryHttpsRootHandler(handler))
+      .map((handler) => ({
+        label: `${handler.host}${handler.path}`,
+        target: handler.proxy,
+      })),
+    ...collectServeTcpTargets(status),
+  ].filter((reference) =>
+    selectedPorts.some((port) => isLocalTargetPort(reference.target, port)),
+  );
   const alreadyMatched =
-    handlers.length === 1 &&
-    handlers[0].path === "/" &&
-    handlers[0].proxy === desiredProxy;
+    ownedHandlers.length === 1 && ownedHandlers[0].proxy === desiredProxy;
+
+  if (staleHvcReferences.length > 0) {
+    const current = staleHvcReferences
+      .map((reference) => `${reference.label} -> ${reference.target}`)
+      .join(", ");
+    throw new Error(
+      `Refusing to run with stale Tailscale Serve references to selected HVC ports (${selectedPorts.join(", ")}): ${current}. Saved status snapshot to ${snapshotPath}. Remove or migrate stale HVC Serve routes explicitly before running --serve.`,
+    );
+  }
 
   if (!wasEmpty && !alreadyMatched) {
     const current = handlers.length
@@ -232,6 +252,14 @@ function prepareServeChange(proxyPort) {
 
   console.log(`Saved previous Tailscale Serve status: ${snapshotPath}`);
   return { snapshotPath, wasEmpty, alreadyMatched };
+}
+
+function isPrimaryHttpsRootHandler(handler) {
+  return handler.path === "/" && isDefaultHttpsHost(handler.host);
+}
+
+function isDefaultHttpsHost(host) {
+  return !/:\d+$/.test(host) || host.endsWith(":443");
 }
 
 function assertLocalPortsNotServed(ports) {

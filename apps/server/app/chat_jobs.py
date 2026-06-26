@@ -121,15 +121,21 @@ class ChatJobService:
             )
             result = self.tools.call(internal_req, session_hash, include_adapter_diagnostics=include_adapter_diagnostics)
             result["request_id"] = req.request_id
+            if self._preserve_cancelled_job(job_id, session_hash, req, running):
+                return
             stored_result = {key: value for key, value in result.items() if key != ADAPTER_DIAGNOSTICS_RESPONSE_KEY}
             state = "needs_permission" if result.get("status") == "pending_confirmation" else "complete"
-            self.store.update_chat_job_state(
+            updated = self.store.update_chat_job_state(
                 job_id,
                 session_hash,
                 state,
                 completed=state == "complete",
                 result=stored_result,
+                unless_cancelled=True,
             )
+            if updated and chat_job_cancelled(updated):
+                self._preserve_cancelled_job(job_id, session_hash, req, running)
+                return
             self.store.log(
                 "chat.job",
                 state,
@@ -140,34 +146,31 @@ class ChatJobService:
             )
             running.result = result
         except HTTPException as exc:
-            row = self.store.get_chat_job(job_id, session_hash)
-            if exc.status_code == 409 and row is not None and row["cancellation_requested"]:
-                self.store.update_chat_job_state(job_id, session_hash, "cancelled", cancelled=True)
-                self.store.log(
-                    "chat.job",
-                    "cancelled",
-                    {"job_id": job_id, "request_id": req.request_id, "state": "cancelled"},
-                    session_hash=session_hash,
-                    tool=req.tool,
-                    request_id=req.request_id,
-                )
-                running.exception = exc
-            else:
-                error = safe_http_error(exc)
-                self.store.update_chat_job_state(job_id, session_hash, "failed", completed=True, error=error)
-                self.store.log(
-                    "chat.job",
-                    "failed",
-                    {"job_id": job_id, "request_id": req.request_id, "state": "failed", "status_code": exc.status_code},
-                    session_hash=session_hash,
-                    tool=req.tool,
-                    request_id=req.request_id,
-                    error_code=str(error.get("code") or exc.status_code),
-                )
-                running.exception = exc
+            if self._preserve_cancelled_job(job_id, session_hash, req, running):
+                return
+            error = safe_http_error(exc)
+            updated = self.store.update_chat_job_state(job_id, session_hash, "failed", completed=True, error=error, unless_cancelled=True)
+            if updated and chat_job_cancelled(updated):
+                self._preserve_cancelled_job(job_id, session_hash, req, running)
+                return
+            self.store.log(
+                "chat.job",
+                "failed",
+                {"job_id": job_id, "request_id": req.request_id, "state": "failed", "status_code": exc.status_code},
+                session_hash=session_hash,
+                tool=req.tool,
+                request_id=req.request_id,
+                error_code=str(error.get("code") or exc.status_code),
+            )
+            running.exception = exc
         except Exception as exc:
+            if self._preserve_cancelled_job(job_id, session_hash, req, running):
+                return
             error = {"status_code": 500, "detail": "Internal server error", "code": "CHAT_JOB_FAILED"}
-            self.store.update_chat_job_state(job_id, session_hash, "failed", completed=True, error=error)
+            updated = self.store.update_chat_job_state(job_id, session_hash, "failed", completed=True, error=error, unless_cancelled=True)
+            if updated and chat_job_cancelled(updated):
+                self._preserve_cancelled_job(job_id, session_hash, req, running)
+                return
             self.store.log(
                 "chat.job",
                 "failed",
@@ -183,6 +186,28 @@ class ChatJobService:
             with self._lock:
                 self._running.pop(job_id, None)
 
+    def _preserve_cancelled_job(
+        self,
+        job_id: str,
+        session_hash: str,
+        req: ToolCallRequest,
+        running: RunningChatJob,
+    ) -> bool:
+        row = self.store.get_chat_job(job_id, session_hash)
+        if not row or not chat_job_cancelled(row):
+            return False
+        self.store.update_chat_job_state(job_id, session_hash, "cancelled", cancelled=True)
+        self.store.log(
+            "chat.job",
+            "cancelled",
+            {"job_id": job_id, "request_id": req.request_id, "state": "cancelled", "preserved_terminal_cancel": True},
+            session_hash=session_hash,
+            tool=req.tool,
+            request_id=req.request_id,
+        )
+        running.exception = HTTPException(status_code=409, detail="Tool call was cancelled")
+        return True
+
 
 def safe_http_error(exc: HTTPException) -> dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else "Request failed"
@@ -191,6 +216,10 @@ def safe_http_error(exc: HTTPException) -> dict[str, Any]:
 
 def chat_job_tool_request(req: ToolCallRequest, job_id: str) -> ToolCallRequest:
     return ToolCallRequest(request_id=internal_chat_job_request_id(job_id), tool=req.tool, arguments=req.arguments)
+
+
+def chat_job_cancelled(row: Any) -> bool:
+    return row["state"] == "cancelled" or bool(row["cancellation_requested"] or row["cancelled_at"])
 
 
 def public_chat_job(row: Any) -> dict[str, Any]:

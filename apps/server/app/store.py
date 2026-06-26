@@ -118,6 +118,7 @@ class Store:
         cancelled: bool = False,
         result: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
+        unless_cancelled: bool = False,
     ) -> sqlite3.Row | None:
         timestamp = now_iso()
         assignments = ["state=?", "updated_at=?"]
@@ -139,9 +140,12 @@ class Store:
             assignments.append("error_json=?")
             values.append(json.dumps(error, sort_keys=True))
         values.extend([job_id, session_hash])
+        where = "id=? AND session_hash=?"
+        if unless_cancelled:
+            where += " AND state!='cancelled' AND cancellation_requested=0 AND cancelled_at IS NULL"
         with self.connect() as conn:
             conn.execute(
-                f"UPDATE chat_jobs SET {', '.join(assignments)} WHERE id=? AND session_hash=?",
+                f"UPDATE chat_jobs SET {', '.join(assignments)} WHERE {where}",
                 values,
             )
             return conn.execute("SELECT * FROM chat_jobs WHERE id=? AND session_hash=?", (job_id, session_hash)).fetchone()

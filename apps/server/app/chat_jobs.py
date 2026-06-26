@@ -15,6 +15,10 @@ CHAT_JOB_STATES = ("queued", "thinking", "needs_permission", "complete", "cancel
 TERMINAL_CHAT_JOB_STATES = {"complete", "cancelled", "failed"}
 
 
+def internal_chat_job_request_id(job_id: str) -> str:
+    return f"chat-job:{job_id}"
+
+
 @dataclass
 class RunningChatJob:
     event: threading.Event = field(default_factory=threading.Event)
@@ -84,8 +88,8 @@ class ChatJobService:
             raise HTTPException(status_code=404, detail="Chat job not found")
         if row["state"] in TERMINAL_CHAT_JOB_STATES:
             return public_chat_job(row)
-        self.tools.cancel(ToolCancelRequest(request_ids=[row["request_id"]]), session_hash)
         cancelled = self.store.request_chat_job_cancel(job_id, session_hash)
+        self.tools.cancel(ToolCancelRequest(request_ids=[internal_chat_job_request_id(job_id)]), session_hash)
         self.store.log(
             "chat.job",
             "cancelled",
@@ -105,6 +109,7 @@ class ChatJobService:
         include_adapter_diagnostics: bool,
     ) -> None:
         try:
+            internal_req = chat_job_tool_request(req, job_id)
             self.store.update_chat_job_state(job_id, session_hash, "thinking", started=True)
             self.store.log(
                 "chat.job",
@@ -114,7 +119,8 @@ class ChatJobService:
                 tool=req.tool,
                 request_id=req.request_id,
             )
-            result = self.tools.call(req, session_hash, include_adapter_diagnostics=include_adapter_diagnostics)
+            result = self.tools.call(internal_req, session_hash, include_adapter_diagnostics=include_adapter_diagnostics)
+            result["request_id"] = req.request_id
             stored_result = {key: value for key, value in result.items() if key != ADAPTER_DIAGNOSTICS_RESPONSE_KEY}
             state = "needs_permission" if result.get("status") == "pending_confirmation" else "complete"
             self.store.update_chat_job_state(
@@ -181,6 +187,10 @@ class ChatJobService:
 def safe_http_error(exc: HTTPException) -> dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else "Request failed"
     return {"status_code": exc.status_code, "detail": detail, "code": exc.headers.get("X-Error-Code") if exc.headers else None}
+
+
+def chat_job_tool_request(req: ToolCallRequest, job_id: str) -> ToolCallRequest:
+    return ToolCallRequest(request_id=internal_chat_job_request_id(job_id), tool=req.tool, arguments=req.arguments)
 
 
 def public_chat_job(row: Any) -> dict[str, Any]:

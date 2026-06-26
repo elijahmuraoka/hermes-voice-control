@@ -4,6 +4,7 @@ import json
 import sys
 import sqlite3
 import subprocess
+import threading
 import time
 import types
 import pytest
@@ -492,6 +493,54 @@ def test_chat_text_job_cancel_signals_local_hermes_process(tmp_path, monkeypatch
     status = client.get(f"/chat/jobs/{job_id}")
     assert status.json()["cancelled"] is True
     assert "kill" not in events
+
+def test_chat_text_job_cancel_does_not_poison_reused_public_request_id(tmp_path):
+    class ReusedRequestAdapter(HermesAdapter):
+        def __init__(self):
+            self.started = 0
+            self.lock = threading.Lock()
+            self.release = threading.Event()
+            self.cancel_seen = threading.Event()
+
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+            with self.lock:
+                self.started += 1
+            while not self.release.is_set():
+                if should_cancel and should_cancel():
+                    self.cancel_seen.set()
+                    return AdapterResult(ok=False, error_code="HERMES_CANCELLED", safe_message="Tool call was cancelled.")
+                time.sleep(0.01)
+            return AdapterResult(ok=True, data={"speakable": f"done: {message}", "display": f"done: {message}", "mode": mode})
+
+    adapter = ReusedRequestAdapter()
+    client = make_client(tmp_path)
+    client.app.state.tools.adapter = adapter
+
+    first = client.post("/chat/text", json={"message": "one", "mode": "quick", "job": True, "interactive_budget_ms": 0})
+    second = client.post("/chat/text", json={"message": "two", "mode": "quick", "job": True, "interactive_budget_ms": 0})
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    first_job_id = first.json()["job_id"]
+    second_job_id = second.json()["job_id"]
+    assert first.json()["request_id"] == "text-chat"
+    assert second.json()["request_id"] == "text-chat"
+    wait_until(lambda: adapter.started == 2)
+
+    cancelled = client.post(f"/chat/jobs/{first_job_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["state"] == "cancelled"
+    wait_until(lambda: adapter.cancel_seen.is_set())
+
+    adapter.release.set()
+    second_status = wait_for_job_state(client, second_job_id, "complete")
+    assert second_status["request_id"] == "text-chat"
+    assert second_status["result"]["request_id"] == "text-chat"
+    assert second_status["result"]["result"]["speakable"] == "done: two"
+
+    later = client.post("/chat/text", json={"message": "later", "mode": "quick"})
+    assert later.status_code == 200
+    assert later.json()["request_id"] == "text-chat"
 
 def test_chat_text_job_failure_is_persisted_as_safe_metadata(tmp_path):
     class FailingAdapter(HermesAdapter):

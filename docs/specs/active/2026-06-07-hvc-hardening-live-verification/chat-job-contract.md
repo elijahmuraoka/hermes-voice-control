@@ -93,9 +93,14 @@ safe `error` object with `status_code`, `detail`, and `code`.
 ## Cancel
 
 `POST /chat/jobs/{job_id}/cancel` marks the job cancelled and inserts the
-underlying request id into the existing tool cancellation table. Running local
-Hermes calls observe that through the adapter `should_cancel` hook and terminate
-the subprocess when possible.
+job's internal tool request key into the existing tool cancellation table.
+Running local Hermes calls observe that through the adapter `should_cancel` hook
+and terminate the subprocess when possible.
+
+The public `request_id` remains the client-facing id in job status and completed
+responses. Internally, each job uses a per-job cancellation key derived from
+`job_id` so cancelling one default `text-chat` job does not cancel other
+in-flight jobs or poison later default text chat calls.
 
 ## Persistence and redaction
 

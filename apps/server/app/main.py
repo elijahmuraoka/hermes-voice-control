@@ -85,7 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_HEADER, CHAT_JOB_BUDGET_HEADER],
-        expose_headers=[ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_ID_HEADER],
+        expose_headers=[ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_ID_HEADER, "Location"],
     )
     def session_dep(request: Request) -> str:
         if not settings.require_pin:

@@ -89,6 +89,27 @@ def persisted_chat_job(tmp_path: Path, job_id: str) -> dict:
         row = conn.execute("SELECT state, result_json, error_json FROM chat_jobs WHERE id=?", (job_id,)).fetchone()
     assert row is not None
     return dict(row)
+def pause_cancel_before_store_update(client: TestClient) -> tuple[threading.Event, threading.Event]:
+    original_cancel = client.app.state.store.request_chat_job_cancel
+    cancel_ready = threading.Event()
+    release_cancel = threading.Event()
+
+    def paused_cancel(*args, **kwargs):
+        cancel_ready.set()
+        assert release_cancel.wait(2)
+        return original_cancel(*args, **kwargs)
+
+    client.app.state.store.request_chat_job_cancel = paused_cancel
+    return cancel_ready, release_cancel
+def post_cancel_in_thread(client: TestClient, job_id: str) -> tuple[dict, threading.Thread]:
+    result: dict = {}
+
+    def run_cancel():
+        result["response"] = client.post(f"/chat/jobs/{job_id}/cancel")
+
+    thread = threading.Thread(target=run_cancel)
+    thread.start()
+    return result, thread
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
 def test_readyz_reports_safe_runtime_posture(tmp_path):
@@ -485,6 +506,28 @@ def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(t
     completed = wait_for_job_state(refreshed, job_id, "complete")
     assert completed["result"]["result"]["speakable"] == "slow answer"
 
+def test_chat_text_job_slow_response_exposes_location_for_cors(tmp_path):
+    class SlowAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+            time.sleep(0.05)
+            return AdapterResult(ok=True, data={"speakable": "slow answer", "display": "slow answer", "mode": mode})
+
+    client = make_client(tmp_path)
+    client.app.state.tools.adapter = SlowAdapter()
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-cors", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+        headers={"Origin": "http://127.0.0.1:5173"},
+    )
+
+    assert started.status_code == 202
+    assert started.headers["location"] == f"/chat/jobs/{started.json()['job_id']}"
+    exposed = started.headers["access-control-expose-headers"].lower()
+    assert "location" in exposed
+    assert "x-hvc-chat-job-id" in exposed
+    wait_for_job_state(client, started.json()["job_id"], "complete")
+
 def test_chat_text_job_cancel_signals_local_hermes_process(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
     hermes.write_text("#!/bin/sh\nexit 0\n")
@@ -623,6 +666,79 @@ def test_chat_text_job_cancel_after_tool_failure_preserves_cancelled_state(tmp_p
     assert status["state"] == "cancelled"
     assert "error" not in status
     assert persisted_chat_job(tmp_path, job_id) == {"state": "cancelled", "result_json": None, "error_json": None}
+
+def test_chat_text_job_complete_wins_cancel_after_terminal_check(tmp_path):
+    release_adapter = threading.Event()
+
+    class ReleaseAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+            assert release_adapter.wait(2)
+            return AdapterResult(ok=True, data={"speakable": "finished", "display": "finished", "mode": mode})
+
+    client = make_client(tmp_path)
+    client.app.state.tools.adapter = ReleaseAdapter()
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-complete-wins", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    )
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    wait_for_job_state(client, job_id, "thinking")
+    cancel_ready, release_cancel = pause_cancel_before_store_update(client)
+    cancel_result, cancel_thread = post_cancel_in_thread(client, job_id)
+    wait_until(lambda: cancel_ready.is_set())
+
+    release_adapter.set()
+    completed = wait_for_job_state(client, job_id, "complete")
+    release_cancel.set()
+    cancel_thread.join(timeout=2)
+
+    assert cancel_thread.is_alive() is False
+    assert cancel_result["response"].status_code == 200
+    assert cancel_result["response"].json()["state"] == "complete"
+    assert cancel_result["response"].json()["result"]["result"]["speakable"] == "finished"
+    assert completed["result"]["result"]["speakable"] == "finished"
+    persisted = persisted_chat_job(tmp_path, job_id)
+    assert persisted["state"] == "complete"
+    assert persisted["result_json"] is not None
+    assert persisted["error_json"] is None
+
+def test_chat_text_job_failure_wins_cancel_after_terminal_check(tmp_path):
+    release_adapter = threading.Event()
+
+    class ReleaseFailingAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+            assert release_adapter.wait(2)
+            return AdapterResult(ok=False, error_code="HERMES_TEST_FAILURE", safe_message="The Hermes agent could not answer right now.")
+
+    client = make_client(tmp_path)
+    client.app.state.tools.adapter = ReleaseFailingAdapter()
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-failure-wins", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    )
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    wait_for_job_state(client, job_id, "thinking")
+    cancel_ready, release_cancel = pause_cancel_before_store_update(client)
+    cancel_result, cancel_thread = post_cancel_in_thread(client, job_id)
+    wait_until(lambda: cancel_ready.is_set())
+
+    release_adapter.set()
+    failed = wait_for_job_state(client, job_id, "failed")
+    release_cancel.set()
+    cancel_thread.join(timeout=2)
+
+    assert cancel_thread.is_alive() is False
+    assert cancel_result["response"].status_code == 200
+    assert cancel_result["response"].json()["state"] == "failed"
+    assert cancel_result["response"].json()["error"] == failed["error"]
+    persisted = persisted_chat_job(tmp_path, job_id)
+    assert persisted["state"] == "failed"
+    assert persisted["result_json"] is None
+    assert persisted["error_json"] is not None
 
 def test_chat_text_job_failure_is_persisted_as_safe_metadata(tmp_path):
     class FailingAdapter(HermesAdapter):

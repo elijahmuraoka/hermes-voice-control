@@ -89,6 +89,10 @@ class ChatJobService:
         if row["state"] in TERMINAL_CHAT_JOB_STATES:
             return public_chat_job(row)
         cancelled = self.store.request_chat_job_cancel(job_id, session_hash)
+        if cancelled is None:
+            raise HTTPException(status_code=404, detail="Chat job not found")
+        if cancelled["state"] in {"complete", "failed"}:
+            return public_chat_job(cancelled)
         self.tools.cancel(ToolCancelRequest(request_ids=[internal_chat_job_request_id(job_id)]), session_hash)
         self.store.log(
             "chat.job",

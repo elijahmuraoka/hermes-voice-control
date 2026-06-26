@@ -151,7 +151,17 @@ class Store:
             return conn.execute("SELECT * FROM chat_jobs WHERE id=? AND session_hash=?", (job_id, session_hash)).fetchone()
 
     def request_chat_job_cancel(self, job_id: str, session_hash: str) -> sqlite3.Row | None:
-        return self.update_chat_job_state(job_id, session_hash, "cancelled", cancelled=True)
+        timestamp = now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE chat_jobs
+                SET state='cancelled', updated_at=?, cancelled_at=COALESCE(cancelled_at, ?), cancellation_requested=1
+                WHERE id=? AND session_hash=? AND state NOT IN ('complete', 'failed', 'cancelled')
+                """,
+                (timestamp, timestamp, job_id, session_hash),
+            )
+            return conn.execute("SELECT * FROM chat_jobs WHERE id=? AND session_hash=?", (job_id, session_hash)).fetchone()
 
     def recent_logs(self, limit: int = 50) -> list[dict[str, Any]]:
         with self.connect() as conn:

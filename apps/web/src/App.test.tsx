@@ -19,7 +19,73 @@ const realtimeMock = vi.hoisted(() => ({
 
 let sessionAuthenticated = true;
 let chatAuthExpired = false;
-let chatNeverResolves = false;
+let chatPostMode: "fast" | "job" | "never" = "fast";
+let chatPollAuthExpired = false;
+let chatCancelAuthExpired = false;
+let chatJobCounter = 0;
+let chatJobIds: string[] = [];
+let chatTextBodies: unknown[] = [];
+
+type MockChatJobState =
+  | "queued"
+  | "thinking"
+  | "needs_permission"
+  | "complete"
+  | "cancelled"
+  | "failed";
+
+interface MockChatJobStatus {
+  job_id: string;
+  state: MockChatJobState;
+  cancelled?: boolean;
+  result?: {
+    status?: string;
+    request_id?: string;
+    result?: { speakable?: string; display?: string; mode?: string };
+  };
+  error?: { code?: string | null; detail?: string; status_code?: number };
+}
+
+const chatJobStatuses = new Map<string, MockChatJobStatus[]>();
+const chatCancelStatuses = new Map<string, MockChatJobStatus>();
+
+function chatJobStatus(
+  jobId: string,
+  state: MockChatJobState,
+  overrides: Partial<MockChatJobStatus> = {},
+): MockChatJobStatus {
+  return { job_id: jobId, state, ...overrides };
+}
+
+function completedChatJob(jobId: string, display: string): MockChatJobStatus {
+  return chatJobStatus(jobId, "complete", {
+    result: {
+      status: "completed",
+      request_id: jobId,
+      result: { speakable: display, display },
+    },
+  });
+}
+
+function nextChatJobStatus(jobId: string): MockChatJobStatus | null {
+  const statuses = chatJobStatuses.get(jobId);
+  if (!statuses || statuses.length === 0) return null;
+  if (statuses.length === 1) return statuses[0];
+  const next = statuses.shift();
+  return next ?? null;
+}
+
+function jobPollCallCount(jobId: string): number {
+  return (
+    fetch as unknown as { mock: { calls: Array<[unknown, RequestInit?]> } }
+  ).mock.calls.filter(([url]) => {
+    const requestUrl = String(url);
+    return (
+      requestUrl.includes(`/chat/jobs/${jobId}`) &&
+      !requestUrl.endsWith("/cancel")
+    );
+  }).length;
+}
 
 function createConnectGate() {
   let resolve!: () => void;
@@ -76,7 +142,15 @@ describe("App", () => {
     realtimeMock.emitInitialStatuses = true;
     sessionAuthenticated = true;
     chatAuthExpired = false;
-    chatNeverResolves = false;
+    chatPostMode = "fast";
+    chatPollAuthExpired = false;
+    chatCancelAuthExpired = false;
+    chatJobCounter = 0;
+    chatJobIds = [];
+    chatTextBodies = [];
+    chatJobStatuses.clear();
+    chatCancelStatuses.clear();
+    window.sessionStorage.clear();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -116,23 +190,75 @@ describe("App", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (requestUrl.includes("/chat/jobs/")) {
+          const parsedUrl = new URL(requestUrl, "http://hvc.test");
+          const parts = parsedUrl.pathname.split("/");
+          const jobId = decodeURIComponent(parts[3] ?? "");
+          if (parsedUrl.pathname.endsWith("/cancel")) {
+            if (chatCancelAuthExpired) {
+              return new Response(JSON.stringify({ detail: "Session expired" }), {
+                status: 401,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+            const status =
+              chatCancelStatuses.get(jobId) ??
+              chatJobStatus(jobId, "cancelled", { cancelled: true });
+            return new Response(JSON.stringify(status), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (chatPollAuthExpired) {
+            return new Response(JSON.stringify({ detail: "Session expired" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          const status = nextChatJobStatus(jobId);
+          if (!status) {
+            return new Response(JSON.stringify({ detail: "Chat job not found" }), {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify(status), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         if (requestUrl.includes("/chat/text")) {
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          chatTextBodies.push(body);
           if (chatAuthExpired) {
             return new Response(JSON.stringify({ detail: "Session expired" }), {
               status: 401,
               headers: { "Content-Type": "application/json" },
             });
           }
-          if (chatNeverResolves) {
+          if (chatPostMode === "never") {
             return new Promise<Response>((_resolve, reject) => {
               init?.signal?.addEventListener("abort", () =>
                 reject(new DOMException("Aborted", "AbortError")),
               );
             });
           }
+          if (chatPostMode === "job") {
+            const jobId = chatJobIds.shift() ?? `job-${++chatJobCounter}`;
+            const status =
+              nextChatJobStatus(jobId) ?? chatJobStatus(jobId, "queued");
+            return new Response(JSON.stringify(status), {
+              status: 202,
+              headers: {
+                "Content-Type": "application/json",
+                Location: `/chat/jobs/${jobId}`,
+                "X-HVC-Chat-Job-Id": jobId,
+              },
+            });
+          }
           return new Response(
             JSON.stringify({
-              status: "ok",
+              status: "completed",
               result: { speakable: "hello", display: "hello" },
             }),
             {
@@ -204,7 +330,7 @@ describe("App", () => {
     expect(realtimeMock.instances).toHaveLength(1);
   });
 
-  it("keeps text fallback available through the backend", async () => {
+  it("keeps typed chat available through the backend", async () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const input = screen.getByLabelText("Type a message to your Hermes agent");
@@ -219,36 +345,390 @@ describe("App", () => {
       expect.stringContaining("/chat/text"),
       expect.objectContaining({ method: "POST" }),
     );
+    expect(chatTextBodies[0]).toEqual(
+      expect.objectContaining({
+        job: true,
+        interactive_budget_ms: 0,
+        message: "hello",
+      }),
+    );
   });
 
-  it("cancels a slow text fallback and leaves the composer usable", async () => {
-    chatNeverResolves = true;
+  it("recovers when the initial typed chat job creation request never returns", async () => {
+    chatPostMode = "never";
     await renderUnlockedApp();
+    vi.useFakeTimers();
     const input = screen.getByLabelText("Type a message to your Hermes agent");
 
-    fireEvent.change(input, { target: { value: "slow request" } });
-    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "blackholed request" } });
     fireEvent.click(
       screen.getByRole("button", { name: /Send typed message/ }),
     );
 
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(input).toBeDisabled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15000);
+      await Promise.resolve();
     });
-    vi.useRealTimers();
 
-    await waitFor(() =>
-      expect(
-        screen.getByText(/took too long to answer, so I stopped/i),
-      ).toBeInTheDocument(),
-    );
-    expect(screen.getByText("Text request timed out.")).toBeInTheDocument();
+    expect(
+      screen.getByText(/could not start that background reply/i),
+    ).toBeInTheDocument();
     expect(input).not.toBeDisabled();
-    expect(fetch).toHaveBeenCalledWith(
+    expect(screen.queryByText(/shorter message/i)).not.toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalledWith(
       expect.stringContaining("/tools/cancel"),
+      expect.anything(),
+    );
+  });
+
+  it("shows slow typed chat as cancellable background work while voice stays usable", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-slow"];
+    chatJobStatuses.set("job-slow", [
+      chatJobStatus("job-slow", "queued"),
+      completedChatJob("job-slow", "slow answer"),
+    ]);
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+
+    fireEvent.change(input, { target: { value: "slow request" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText(/working on that in the background/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Cancel background reply/i }),
+    ).toBeInTheDocument();
+    expect(input).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /^Mute$/ }));
+    expect(screen.getByText("Mic paused")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("slow answer")).toBeInTheDocument();
+    expect(screen.queryByText(/shorter message/i)).not.toBeInTheDocument();
+  });
+
+  it("cancels a running background typed chat from the transcript", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-cancel"];
+    chatJobStatuses.set("job-cancel", [chatJobStatus("job-cancel", "thinking")]);
+    chatCancelStatuses.set(
+      "job-cancel",
+      chatJobStatus("job-cancel", "cancelled", { cancelled: true }),
+    );
+    await renderUnlockedApp();
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+
+    fireEvent.change(input, { target: { value: "cancel this" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/working on that in the background/i)).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancel background reply/i }));
+
+    await waitFor(() => expect(screen.getByText("Cancelled.")).toBeInTheDocument());
+    expect(screen.getByText("cancelled")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/chat/jobs/job-cancel/cancel"),
       expect.objectContaining({ method: "POST" }),
     );
+    expect(window.sessionStorage.getItem("hvc.pendingTextJobs.v1")).toBe("[]");
+  });
+
+  it("recovers pending background typed chat after refresh without storing prompt text", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-refresh"];
+    chatJobStatuses.set("job-refresh", [
+      chatJobStatus("job-refresh", "thinking"),
+      completedChatJob("job-refresh", "restored answer"),
+    ]);
+    const { unmount } = render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+
+    fireEvent.change(input, { target: { value: "private prompt text" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/working on that in the background/i)).toBeInTheDocument(),
+    );
+    const storedBeforeRefresh = window.sessionStorage.getItem(
+      "hvc.pendingTextJobs.v1",
+    );
+    expect(storedBeforeRefresh).toContain("job-refresh");
+    expect(storedBeforeRefresh).not.toContain("private prompt text");
+
+    unmount();
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText(/background reply from before the refresh/i),
+      ).toBeInTheDocument(),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("restored answer")).toBeInTheDocument(),
+    );
+    expect(window.sessionStorage.getItem("hvc.pendingTextJobs.v1")).toContain(
+      "job-refresh",
+    );
+  });
+
+  it("restores a completed background typed chat after refresh before TTL cleanup", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-complete-refresh"];
+    chatJobStatuses.set("job-complete-refresh", [
+      chatJobStatus("job-complete-refresh", "thinking"),
+      completedChatJob("job-complete-refresh", "completed before refresh"),
+    ]);
+    const { unmount } = render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    vi.useFakeTimers();
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+
+    fireEvent.change(input, { target: { value: "private prompt before refresh" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1400);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("completed before refresh")).toBeInTheDocument();
+    const storedAfterCompletion = window.sessionStorage.getItem(
+      "hvc.pendingTextJobs.v1",
+    );
+    expect(storedAfterCompletion).toContain("job-complete-refresh");
+    expect(storedAfterCompletion).not.toContain("private prompt before refresh");
+    expect(storedAfterCompletion).not.toContain("completed before refresh");
+
+    const pollsBeforeRefresh = jobPollCallCount("job-complete-refresh");
+    vi.useRealTimers();
+    unmount();
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("completed before refresh")).toBeInTheDocument(),
+    );
+    expect(jobPollCallCount("job-complete-refresh")).toBeGreaterThan(
+      pollsBeforeRefresh,
+    );
+    expect(window.sessionStorage.getItem("hvc.pendingTextJobs.v1")).toContain(
+      "job-complete-refresh",
+    );
+  });
+
+  it("keeps chat rendering when sessionStorage property access is blocked", async () => {
+    const originalSessionStorage = Object.getOwnPropertyDescriptor(
+      window,
+      "sessionStorage",
+    );
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Storage blocked", "SecurityError");
+      },
+    });
+    try {
+      chatPostMode = "job";
+      chatJobIds = ["job-storage-blocked"];
+      chatJobStatuses.set("job-storage-blocked", [
+        chatJobStatus("job-storage-blocked", "thinking"),
+        completedChatJob("job-storage-blocked", "storage-safe answer"),
+      ]);
+      await renderUnlockedApp();
+      vi.useFakeTimers();
+
+      fireEvent.change(
+        screen.getByLabelText("Type a message to your Hermes agent"),
+        { target: { value: "storage is blocked" } },
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: /Send typed message/ }),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByText(/working on that in the background/i),
+      ).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1400);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText("storage-safe answer")).toBeInTheDocument();
+      expect(screen.queryByText(/Text chat could not reach/i)).not.toBeInTheDocument();
+    } finally {
+      if (originalSessionStorage) {
+        Object.defineProperty(window, "sessionStorage", originalSessionStorage);
+      }
+    }
+  });
+
+  it("shows a natural permission-needed state without raw tool details", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-permission"];
+    chatJobStatuses.set("job-permission", [
+      chatJobStatus("job-permission", "thinking"),
+      chatJobStatus("job-permission", "needs_permission", {
+        result: {
+          status: "pending_confirmation",
+          result: {
+            display: "raw ask_agent tool payload should stay hidden",
+            speakable: "raw ask_agent tool payload should stay hidden",
+          },
+        },
+      }),
+    ]);
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByLabelText("Type a message to your Hermes agent"), {
+      target: { value: "needs approval" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1400);
+    });
+
+    expect(screen.getByText(/needs permission before it can continue/i)).toBeInTheDocument();
+    expect(screen.getByText("approval needed")).toBeInTheDocument();
+    expect(screen.queryByText(/ask_agent/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/raw.*payload/i)).not.toBeInTheDocument();
+  });
+
+  it("shows failed background typed chat with recovery copy", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-failed"];
+    chatJobStatuses.set("job-failed", [
+      chatJobStatus("job-failed", "thinking"),
+      chatJobStatus("job-failed", "failed", {
+        error: {
+          code: null,
+          detail: "The Hermes agent could not answer right now.",
+          status_code: 502,
+        },
+      }),
+    ]);
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByLabelText("Type a message to your Hermes agent"), {
+      target: { value: "please fail" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1400);
+    });
+
+    expect(
+      screen.getByText(/could not answer right now.*try again or keep using voice/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/shorter message/i)).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem("hvc.pendingTextJobs.v1")).toBe("[]");
+  });
+
+  it("keeps multiple background typed chat jobs from overwriting each other", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-one", "job-two"];
+    chatJobStatuses.set("job-one", [
+      chatJobStatus("job-one", "thinking"),
+      completedChatJob("job-one", "first answer"),
+    ]);
+    chatJobStatuses.set("job-two", [
+      chatJobStatus("job-two", "thinking"),
+      completedChatJob("job-two", "second answer"),
+    ]);
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    const send = screen.getByRole("button", { name: /Send typed message/ });
+
+    fireEvent.change(input, { target: { value: "first" } });
+    fireEvent.click(send);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.change(input, { target: { value: "second" } });
+    fireEvent.click(send);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText(/working on that in the background/i)).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("first answer")).toBeInTheDocument();
+    expect(screen.getByText("second answer")).toBeInTheDocument();
+    expect(screen.getByText("first")).toBeInTheDocument();
+    expect(screen.getByText("second")).toBeInTheDocument();
+  });
+
+  it("reopens unlock when background job polling loses auth", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-auth"];
+    chatJobStatuses.set("job-auth", [chatJobStatus("job-auth", "thinking")]);
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByLabelText("Type a message to your Hermes agent"), {
+      target: { value: "auth expires later" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    chatPollAuthExpired = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByLabelText("Private PIN")).toBeInTheDocument();
+    expect(
+      screen.getByText("Session expired. Enter your private PIN again."),
+    ).toBeInTheDocument();
   });
 
   it("does not resume hands-free capture just because the text composer blurs", async () => {

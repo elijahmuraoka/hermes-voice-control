@@ -1,4 +1,4 @@
-import type { TranscriptEntry } from "./types";
+import type { ChatJobStatus, TextChatResponse, TranscriptEntry } from "./types";
 import { apiBase } from "./config";
 
 export class ApiError extends Error {
@@ -10,16 +10,13 @@ export class ApiError extends Error {
   }
 }
 
-export class ApiTimeoutError extends Error {
-  constructor(
-    message: string,
-    readonly requestId: string,
-  ) {
+export class ApiRequestTimeoutError extends Error {
+  constructor(message: string) {
     super(message);
   }
 }
 
-const TEXT_FALLBACK_TIMEOUT_MS = 15000;
+const TEXT_JOB_CREATE_TIMEOUT_MS = 15000;
 const textRequestId = () =>
   `text-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
@@ -72,7 +69,7 @@ export async function cancelTools(requestIds: string[]) {
 export async function sendText(
   message: string,
   transcript: TranscriptEntry[],
-  timeoutMs = TEXT_FALLBACK_TIMEOUT_MS,
+  timeoutMs = TEXT_JOB_CREATE_TIMEOUT_MS,
 ) {
   const requestId = textRequestId();
   const controller = new AbortController();
@@ -82,10 +79,7 @@ export async function sendText(
     controller.abort();
   }, timeoutMs);
   try {
-    return await jsonFetch<{
-      status: string;
-      result: { speakable: string; display: string };
-    }>("/chat/text", {
+    return await jsonFetch<TextChatResponse>("/chat/text", {
       method: "POST",
       signal: controller.signal,
       body: JSON.stringify({
@@ -93,17 +87,30 @@ export async function sendText(
         message,
         mode: "quick",
         transcript_window: transcript.slice(-10),
+        job: true,
+        interactive_budget_ms: 0,
       }),
     });
   } catch (error) {
-    if (timedOut || (error instanceof DOMException && error.name === "AbortError")) {
-      void cancelTools([requestId]).catch(() => undefined);
-      throw new ApiTimeoutError("Text fallback timed out", requestId);
+    if (
+      timedOut ||
+      (error instanceof DOMException && error.name === "AbortError")
+    ) {
+      throw new ApiRequestTimeoutError("Text chat request did not start");
     }
     throw error;
   } finally {
     globalThis.clearTimeout(timeout);
   }
+}
+export async function getTextJob(jobId: string) {
+  return jsonFetch<ChatJobStatus>(`/chat/jobs/${encodeURIComponent(jobId)}`);
+}
+export async function cancelTextJob(jobId: string) {
+  return jsonFetch<ChatJobStatus>(
+    `/chat/jobs/${encodeURIComponent(jobId)}/cancel`,
+    { method: "POST" },
+  );
 }
 export async function getLogs() {
   return jsonFetch<{ items: unknown[] }>("/logs");

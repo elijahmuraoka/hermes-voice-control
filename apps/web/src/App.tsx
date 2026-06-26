@@ -14,7 +14,15 @@ import {
   MicOff,
   PhoneOff,
 } from "lucide-react";
-import { ApiError, ApiTimeoutError, getSession, login, sendText } from "./api";
+import {
+  ApiError,
+  ApiRequestTimeoutError,
+  cancelTextJob,
+  getSession,
+  getTextJob,
+  login,
+  sendText,
+} from "./api";
 import {
   createDefaultRealtimeVoiceSession,
   type RealtimeTranscriptEvent,
@@ -22,9 +30,19 @@ import {
   type RealtimeVoiceSession,
 } from "./realtime";
 import { initialVoiceState, voiceReducer } from "./stateMachine";
-import type { TranscriptEntry } from "./types";
+import type {
+  ChatJobStatus,
+  TextChatResponse,
+  TextChatResult,
+  TranscriptEntry,
+} from "./types";
 import { VoiceOrb } from "./components/VoiceOrb";
 import { TranscriptDrawer } from "./components/TranscriptDrawer";
+import {
+  readPendingTextJobs,
+  removePendingTextJob,
+  savePendingTextJob,
+} from "./chatJobStorage";
 import { agentName, agentNounLower } from "./config";
 import {
   createHvcDiagnosticsRecorder,
@@ -38,6 +56,7 @@ const HOLD_DELAY_MS = 220;
 const NO_SPEECH_TIMEOUT_MS = 3500;
 const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
 const TOOL_RESPONSE_TIMEOUT_MS = 95000;
+const TEXT_JOB_POLL_MS = 1400;
 
 type PressState = {
   pointerId: number | null;
@@ -59,6 +78,11 @@ type VoiceTurn = {
 };
 
 type TextFocusReturnMode = "none" | "restore-capture" | "paused" | "muted";
+
+type TextJobEntryMeta = {
+  entryId: string;
+  restored: boolean;
+};
 
 type AuthGateProps = {
   status: AuthState;
@@ -153,6 +177,9 @@ export default function App() {
   const [pin, setPin] = useState("");
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [cancellingTextJobs, setCancellingTextJobs] = useState<Set<string>>(
+    () => new Set(),
+  );
   const stateRef = useRef(state);
   const entriesRef = useRef(entries);
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
@@ -180,6 +207,8 @@ export default function App() {
   const heardUserDuringHoldRef = useRef(false);
   const textFocusReturnModeRef = useRef<TextFocusReturnMode>("none");
   const textFocusEpochRef = useRef(0);
+  const textJobEntriesRef = useRef(new Map<string, TextJobEntryMeta>());
+  const textJobPollTimersRef = useRef(new Map<string, number>());
   const initialPressState = useMemo(emptyPress, []);
   const pressRef = useRef<PressState>(initialPressState);
 
@@ -210,6 +239,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", visibility);
       clearPressTimer();
       clearVoiceTurnTimers();
+      clearTextJobPollTimers();
       currentEndingRef.current = true;
       currentSessionRef.current?.disconnect();
       currentSessionRef.current = null;
@@ -237,6 +267,11 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (authState !== "authenticated") return;
+    recoverPendingTextJobs();
+  }, [authState]);
+
   function clearPressTimer() {
     if (pressRef.current.timer !== null) {
       window.clearTimeout(pressRef.current.timer);
@@ -261,6 +296,224 @@ export default function App() {
   function clearVoiceTurnTimers() {
     clearNoSpeechTimer();
     clearResponseTimer();
+  }
+
+  function clearTextJobPollTimer(jobId: string) {
+    const timer = textJobPollTimersRef.current.get(jobId);
+    if (timer === undefined) return;
+    window.clearTimeout(timer);
+    textJobPollTimersRef.current.delete(jobId);
+  }
+
+  function clearTextJobPollTimers() {
+    for (const timer of textJobPollTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    textJobPollTimersRef.current.clear();
+  }
+
+  function markTextJobCancelling(jobId: string, cancelling: boolean) {
+    setCancellingTextJobs((current) => {
+      const next = new Set(current);
+      if (cancelling) next.add(jobId);
+      else next.delete(jobId);
+      return next;
+    });
+  }
+
+  function isChatJobStatus(response: TextChatResponse): response is ChatJobStatus {
+    return "job_id" in response && "state" in response;
+  }
+
+  function textFromChatResult(result?: TextChatResult): string {
+    const display = result?.result?.display?.trim();
+    if (display) return display;
+    const speakable = result?.result?.speakable?.trim();
+    if (speakable) return speakable;
+    return `${agentName} finished that reply.`;
+  }
+
+  function runningTextJobCopy(restored: boolean): string {
+    return restored
+      ? "Checking on a background reply from before the refresh. Voice stays available while it finishes."
+      : "I'm working on that in the background. You can keep using voice while it finishes.";
+  }
+
+  function failedTextJobCopy(status: ChatJobStatus): string {
+    const detail = status.error?.detail?.trim();
+    if (detail) return `${detail} You can try again or keep using voice.`;
+    return `${agentName} could not finish that background reply. You can try again or keep using voice.`;
+  }
+
+  function updateTextJobEntry(
+    jobId: string,
+    patch: Partial<Pick<TranscriptEntry, "text" | "status" | "restored">>,
+  ) {
+    const meta = textJobEntriesRef.current.get(jobId);
+    if (!meta) return;
+    setEntries((items) =>
+      items.map((entry) =>
+        entry.id === meta.entryId ? { ...entry, ...patch } : entry,
+      ),
+    );
+  }
+
+  function finishTextJob(
+    jobId: string,
+    { keepRecoveryId = false }: { keepRecoveryId?: boolean } = {},
+  ) {
+    clearTextJobPollTimer(jobId);
+    textJobEntriesRef.current.delete(jobId);
+    if (!keepRecoveryId) removePendingTextJob(jobId);
+    markTextJobCancelling(jobId, false);
+  }
+
+  function applyTextJobStatus(status: ChatJobStatus): boolean {
+    const meta = textJobEntriesRef.current.get(status.job_id);
+    if (!meta) return false;
+
+    if (status.state === "queued" || status.state === "thinking") {
+      updateTextJobEntry(status.job_id, {
+        status: "working",
+        text: runningTextJobCopy(meta.restored),
+      });
+      return true;
+    }
+
+    if (status.state === "complete") {
+      updateTextJobEntry(status.job_id, {
+        status: "complete",
+        text: textFromChatResult(status.result),
+        restored: false,
+      });
+      finishTextJob(status.job_id, { keepRecoveryId: true });
+      return false;
+    }
+
+    if (status.state === "needs_permission") {
+      updateTextJobEntry(status.job_id, {
+        status: "needs_permission",
+        text:
+          "Hermes needs permission before it can continue. Approve the request from your Hermes session, then send a new message when you are ready.",
+        restored: false,
+      });
+      finishTextJob(status.job_id);
+      return false;
+    }
+
+    if (status.state === "cancelled") {
+      updateTextJobEntry(status.job_id, {
+        status: "cancelled",
+        text: "Cancelled.",
+        restored: false,
+      });
+      finishTextJob(status.job_id);
+      return false;
+    }
+
+    updateTextJobEntry(status.job_id, {
+      status: "failed",
+      text: failedTextJobCopy(status),
+      restored: false,
+    });
+    finishTextJob(status.job_id);
+    return false;
+  }
+
+  function scheduleTextJobPoll(jobId: string, delayMs = TEXT_JOB_POLL_MS) {
+    if (!textJobEntriesRef.current.has(jobId)) return;
+    clearTextJobPollTimer(jobId);
+    const timer = window.setTimeout(() => {
+      textJobPollTimersRef.current.delete(jobId);
+      void pollTextJob(jobId);
+    }, delayMs);
+    textJobPollTimersRef.current.set(jobId, timer);
+  }
+
+  async function pollTextJob(jobId: string) {
+    if (!textJobEntriesRef.current.has(jobId)) return;
+    try {
+      const status = await getTextJob(jobId);
+      if (applyTextJobStatus(status)) scheduleTextJobPoll(jobId);
+    } catch (error) {
+      clearTextJobPollTimer(jobId);
+      if (isAuthFailure(error)) {
+        requireAuth("Session expired. Enter your private PIN again.");
+        dispatch({ type: "RECOVER" });
+        return;
+      }
+      if (error instanceof ApiError && error.status === 404) {
+        updateTextJobEntry(jobId, {
+          status: "failed",
+          text:
+            "That background reply is no longer available. Send a new message if you still need it.",
+          restored: false,
+        });
+        finishTextJob(jobId);
+        return;
+      }
+      updateTextJobEntry(jobId, {
+        status: "working",
+        text:
+          "I'm still checking that background reply. Voice stays available while I reconnect.",
+      });
+      scheduleTextJobPoll(jobId);
+    }
+  }
+
+  function trackTextJob(jobId: string, entryId: string, restored = false) {
+    textJobEntriesRef.current.set(jobId, { entryId, restored });
+    savePendingTextJob(jobId);
+    scheduleTextJobPoll(jobId);
+  }
+
+  function recoverPendingTextJobs() {
+    const pendingJobs = readPendingTextJobs();
+    for (const { jobId } of pendingJobs) {
+      if (textJobEntriesRef.current.has(jobId)) {
+        scheduleTextJobPoll(jobId, 0);
+        continue;
+      }
+      const entryId = uid();
+      textJobEntriesRef.current.set(jobId, { entryId, restored: true });
+      setEntries((items) => [
+        ...items,
+        {
+          id: entryId,
+          role: "agent",
+          text: runningTextJobCopy(true),
+          status: "working",
+          at: Date.now(),
+          jobId,
+          restored: true,
+        },
+      ]);
+      scheduleTextJobPoll(jobId, 0);
+    }
+  }
+
+  async function cancelBackgroundTextJob(jobId: string) {
+    if (!canUsePrivateSession()) return;
+    markTextJobCancelling(jobId, true);
+    try {
+      const status = await cancelTextJob(jobId);
+      if (applyTextJobStatus(status)) scheduleTextJobPoll(jobId);
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        clearTextJobPollTimer(jobId);
+        requireAuth("Session expired. Enter your private PIN again.");
+        dispatch({ type: "RECOVER" });
+        return;
+      }
+      updateTextJobEntry(jobId, {
+        status: "working",
+        text:
+          "I could not cancel that reply from here yet. I will keep checking it.",
+      });
+      scheduleTextJobPoll(jobId);
+    } finally {
+      markTextJobCancelling(jobId, false);
+    }
   }
 
   function clearPendingHoldActivation() {
@@ -928,6 +1181,10 @@ export default function App() {
   }
 
   function dispatchTextTurnFinished(returnMode: TextFocusReturnMode) {
+    if (returnMode === "none" && !sessionRef.current) {
+      dispatch({ type: "RECOVER" });
+      return;
+    }
     dispatch({
       type:
         returnMode === "paused"
@@ -964,7 +1221,6 @@ export default function App() {
     const submitFocusEpoch = textFocusEpochRef.current;
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
-    dispatch({ type: "THINK" });
     const user: TranscriptEntry = {
       id: uid(),
       role: "user",
@@ -975,12 +1231,30 @@ export default function App() {
     setEntries((items) => [...items, user]);
     try {
       const res = await sendText(text, entriesRef.current);
+      if (isChatJobStatus(res)) {
+        const entryId = uid();
+        setEntries((items) => [
+          ...items,
+          {
+            id: entryId,
+            role: "agent",
+            text: runningTextJobCopy(false),
+            status: "working",
+            at: Date.now(),
+            jobId: res.job_id,
+          },
+        ]);
+        trackTextJob(res.job_id, entryId);
+        applyTextJobStatus(res);
+        completeTextTurn(submitFocusEpoch);
+        return;
+      }
       setEntries((items) => [
         ...items,
         {
           id: uid(),
           role: "agent",
-          text: res.result.display,
+          text: textFromChatResult(res),
           status: "complete",
           at: Date.now(),
         },
@@ -995,19 +1269,19 @@ export default function App() {
         dispatch({ type: "RECOVER" });
         return;
       }
-      if (error instanceof ApiTimeoutError) {
+      if (error instanceof ApiRequestTimeoutError) {
         appendSystem(
-          `${agentName} took too long to answer, so I stopped that text request. Try again with a shorter message.`,
+          "I could not start that background reply. Check the connection, then try again or use voice.",
           "failed",
         );
-        dispatch({ type: "ERROR", error: "Text request timed out." });
+        dispatch({ type: "ERROR", error: "Text chat could not start." });
         return;
       }
       appendSystem(
-        `Text fallback could not reach ${agentNounLower}. The draft was not lost by the server because it never left this UI successfully.`,
+        `Text chat could not reach ${agentNounLower}. You can try again or use voice.`,
         "failed",
       );
-      dispatch({ type: "ERROR", error: "Text fallback failed." });
+      dispatch({ type: "ERROR", error: "Text chat failed." });
     }
   }
 
@@ -1044,6 +1318,8 @@ export default function App() {
         agentName={agentName}
         agentNoun={agentNounLower}
         onSubmit={submitText}
+        onCancelJob={cancelBackgroundTextJob}
+        cancellingJobIds={cancellingTextJobs}
         onFocus={focusText}
         onBlur={blurText}
         onToggle={() =>

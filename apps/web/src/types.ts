@@ -12,20 +12,61 @@ export type CallState =
   | "error";
 export type InputMode = "hands-free" | "hold-to-talk" | "text";
 export type DrawerState = "closed" | "peeking" | "open";
+export type TranscriptStatus =
+  | "draft"
+  | "sending"
+  | "sent"
+  | "streaming"
+  | "working"
+  | "complete"
+  | "needs_permission"
+  | "failed"
+  | "cancelled";
 export interface TranscriptEntry {
   id: string;
   role: "user" | "agent" | "system";
   text: string;
-  status:
-    | "draft"
-    | "sending"
-    | "sent"
-    | "streaming"
-    | "complete"
-    | "failed"
-    | "cancelled";
+  status: TranscriptStatus;
   at: number;
+  jobId?: string;
+  restored?: boolean;
 }
+export type ChatJobState =
+  | "queued"
+  | "thinking"
+  | "needs_permission"
+  | "complete"
+  | "cancelled"
+  | "failed";
+export interface TextAnswer {
+  speakable?: string;
+  display?: string;
+  mode?: string;
+}
+export interface TextChatResult {
+  request_id?: string;
+  status?: string;
+  result?: TextAnswer;
+}
+export interface ChatJobError {
+  code?: string | null;
+  detail?: string;
+  status_code?: number;
+}
+export interface ChatJobStatus {
+  job_id: string;
+  request_id?: string;
+  state: ChatJobState;
+  created_at?: string | null;
+  updated_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+  cancelled?: boolean;
+  result?: TextChatResult;
+  error?: ChatJobError;
+}
+export type TextChatResponse = TextChatResult | ChatJobStatus;
 export interface VoiceState {
   callState: CallState;
   inputMode: InputMode;

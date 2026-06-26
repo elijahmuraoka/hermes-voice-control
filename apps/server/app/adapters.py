@@ -3,6 +3,7 @@ from __future__ import annotations
 import os, shutil, subprocess, time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 SAFE_TOOLSET = "safe"
 DEFAULT_HERMES_TIMEOUT_SECONDS = 90
@@ -28,6 +29,7 @@ class AdapterResult:
     data: dict | None = None
     error_code: str | None = None
     safe_message: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 class HermesAdapter:
     def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
@@ -70,6 +72,7 @@ class LocalHermesAdapter(HermesAdapter):
             "configured_bin": self.hermes_bin,
             "resolved_bin": resolved_bin,
             "command": [resolved_bin or self.hermes_bin, "chat", "-Q", "-q", "<read-only prompt>", "--toolsets", SAFE_TOOLSET],
+            "command_mode": "quiet_chat_query",
             "read_only": True,
             "toolsets": [SAFE_TOOLSET],
             "timeout_seconds": self.timeout_seconds,
@@ -86,45 +89,141 @@ class LocalHermesAdapter(HermesAdapter):
             and any(line.startswith(HERMES_FAILURE_MARKERS[1]) for line in lines[1:])
         )
 
+    def _build_command(self, hermes_bin: str, prompt: str) -> list[str]:
+        return [hermes_bin, "chat", "-Q", "-q", prompt, "--toolsets", SAFE_TOOLSET]
+
+    def _new_trace(self) -> tuple[dict[str, Any], float]:
+        started = time.monotonic()
+        trace: dict[str, Any] = {
+            "adapter": "local_hermes",
+            "command_mode": "quiet_chat_query",
+            "timeout_seconds": self.timeout_seconds,
+            "phases": [],
+            "cleanup": {
+                "terminated": False,
+                "killed": False,
+                "communicated": False,
+                "return_code": None,
+            },
+            "output": {
+                "stdout_present": False,
+                "stderr_present": False,
+                "stdout_streaming": False,
+            },
+        }
+        return trace, started
+
+    def _mark_trace(self, trace: dict[str, Any], started: float, name: str) -> None:
+        trace["phases"].append({"name": name, "elapsed_ms": round((time.monotonic() - started) * 1000)})
+
+    def _finish_trace(self, trace: dict[str, Any], started: float, error_code: str | None = None) -> dict[str, Any]:
+        trace["duration_ms"] = round((time.monotonic() - started) * 1000)
+        if error_code:
+            trace["error_code"] = error_code
+        return trace
+
     def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
+        trace, trace_started = self._new_trace()
+        self._mark_trace(trace, trace_started, "request_start")
         hermes_bin = self._resolve_hermes_bin()
         if not hermes_bin:
-            return AdapterResult(ok=False, error_code="HERMES_NOT_FOUND", safe_message="Local Hermes binary was not found.")
+            self._mark_trace(trace, trace_started, "binary_missing")
+            return AdapterResult(
+                ok=False,
+                error_code="HERMES_NOT_FOUND",
+                safe_message="Local Hermes binary was not found.",
+                diagnostics=self._finish_trace(trace, trace_started, "HERMES_NOT_FOUND"),
+            )
+        self._mark_trace(trace, trace_started, "binary_resolved")
         prompt = self._build_prompt(message, mode)
         try:
+            self._mark_trace(trace, trace_started, "process_spawn_start")
             proc = subprocess.Popen(
-                [hermes_bin, "chat", "-Q", "-q", prompt, "--toolsets", SAFE_TOOLSET],
+                self._build_command(hermes_bin, prompt),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 shell=False,
                 text=True,
             )
+            self._mark_trace(trace, trace_started, "process_spawned")
             deadline = time.monotonic() + self.timeout_seconds
             while proc.poll() is None:
                 if should_cancel and should_cancel():
+                    self._mark_trace(trace, trace_started, "cancellation_requested")
                     proc.terminate()
+                    trace["cleanup"]["terminated"] = True
                     try:
                         proc.communicate(timeout=2)
+                        trace["cleanup"]["communicated"] = True
                     except subprocess.TimeoutExpired:
                         proc.kill()
+                        trace["cleanup"]["killed"] = True
                         proc.communicate()
-                    return AdapterResult(ok=False, error_code="HERMES_CANCELLED", safe_message="Tool call was cancelled.")
+                        trace["cleanup"]["communicated"] = True
+                    trace["cleanup"]["return_code"] = proc.returncode
+                    self._mark_trace(trace, trace_started, "process_cancelled")
+                    return AdapterResult(
+                        ok=False,
+                        error_code="HERMES_CANCELLED",
+                        safe_message="Tool call was cancelled.",
+                        diagnostics=self._finish_trace(trace, trace_started, "HERMES_CANCELLED"),
+                    )
                 if time.monotonic() >= deadline:
+                    self._mark_trace(trace, trace_started, "timeout_reached")
                     proc.kill()
-                    proc.communicate()
-                    return AdapterResult(ok=False, error_code="HERMES_TIMEOUT", safe_message="The Hermes agent took too long to answer.")
+                    trace["cleanup"]["killed"] = True
+                    stdout, stderr = proc.communicate()
+                    trace["cleanup"]["communicated"] = True
+                    trace["cleanup"]["return_code"] = proc.returncode
+                    trace["output"]["stdout_present"] = bool(stdout.strip())
+                    trace["output"]["stderr_present"] = bool(stderr.strip())
+                    self._mark_trace(trace, trace_started, "process_killed")
+                    return AdapterResult(
+                        ok=False,
+                        error_code="HERMES_TIMEOUT",
+                        safe_message="The Hermes agent took too long to answer.",
+                        diagnostics=self._finish_trace(trace, trace_started, "HERMES_TIMEOUT"),
+                    )
                 time.sleep(0.1)
+            self._mark_trace(trace, trace_started, "process_exited")
             stdout, _stderr = proc.communicate()
+            trace["cleanup"]["communicated"] = True
+            trace["cleanup"]["return_code"] = proc.returncode
+            trace["output"]["stdout_present"] = bool(stdout.strip())
+            trace["output"]["stderr_present"] = bool(_stderr.strip())
+            self._mark_trace(trace, trace_started, "stdio_collected")
         except OSError:
-            return AdapterResult(ok=False, error_code="HERMES_NOT_EXECUTABLE", safe_message="Local Hermes could not be executed.")
+            self._mark_trace(trace, trace_started, "process_spawn_failed")
+            return AdapterResult(
+                ok=False,
+                error_code="HERMES_NOT_EXECUTABLE",
+                safe_message="Local Hermes could not be executed.",
+                diagnostics=self._finish_trace(trace, trace_started, "HERMES_NOT_EXECUTABLE"),
+            )
         if proc.returncode != 0:
-            return AdapterResult(ok=False, error_code="HERMES_ERROR", safe_message="The Hermes agent could not answer right now.")
+            return AdapterResult(
+                ok=False,
+                error_code="HERMES_ERROR",
+                safe_message="The Hermes agent could not answer right now.",
+                diagnostics=self._finish_trace(trace, trace_started, "HERMES_ERROR"),
+            )
         output = stdout.strip()
         if not output:
-            return AdapterResult(ok=False, error_code="HERMES_MALFORMED_OUTPUT", safe_message="Local Hermes returned an empty response.")
+            return AdapterResult(
+                ok=False,
+                error_code="HERMES_MALFORMED_OUTPUT",
+                safe_message="Local Hermes returned an empty response.",
+                diagnostics=self._finish_trace(trace, trace_started, "HERMES_MALFORMED_OUTPUT"),
+            )
         if self._looks_like_cli_failure(output):
-            return AdapterResult(ok=False, error_code="HERMES_AGENT_FAILURE", safe_message="Local Hermes returned a CLI failure instead of an agent answer.")
-        return AdapterResult(ok=True, data={"speakable": output, "display": output, "mode": mode})
+            return AdapterResult(
+                ok=False,
+                error_code="HERMES_AGENT_FAILURE",
+                safe_message="Local Hermes returned a CLI failure instead of an agent answer.",
+                diagnostics=self._finish_trace(trace, trace_started, "HERMES_AGENT_FAILURE"),
+            )
+        self._mark_trace(trace, trace_started, "completion")
+        return AdapterResult(ok=True, data={"speakable": output, "display": output, "mode": mode}, diagnostics=self._finish_trace(trace, trace_started))
 
 def build_adapter(kind: str, hermes_bin: str, timeout_seconds: int = DEFAULT_HERMES_TIMEOUT_SECONDS, agent_name: str = DEFAULT_AGENT_NAME) -> HermesAdapter:
     return LocalHermesAdapter(hermes_bin, timeout_seconds=timeout_seconds, agent_name=agent_name) if kind == "local" else MockHermesAdapter(agent_name=agent_name)

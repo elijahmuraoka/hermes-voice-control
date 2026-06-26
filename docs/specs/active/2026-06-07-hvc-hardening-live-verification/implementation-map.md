@@ -17,9 +17,8 @@
   summaries.
 - `apps/server/app/adapters.py`: mock/local Hermes adapters, direct argv launch,
   safe toolset, readiness diagnostics, timeout/cancel/error handling, and
-  malformed empty-output handling. Local Hermes uses quiet query mode so stdout
-  is already the speakable/display answer while CLI provider failures still fail
-  closed.
+  malformed empty-output handling. Local Hermes uses quiet chat query mode so it
+  keeps final-answer stdout without bypassing Hermes approval semantics.
 - `apps/server/app/gemini.py`: mock and real Gemini token brokerage, including
   one-use constrained real Live tokens.
 - `apps/server/tests/test_backend.py`: auth, remote guard, token brokerage,

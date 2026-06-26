@@ -9,7 +9,7 @@ from .config import LOCAL_CLIENT_HOSTS, Settings
 from .gemini import build_broker
 from .security import AuthManager
 from .store import Store
-from .tools import ToolCallRequest, ToolCancelRequest, ToolService
+from .tools import ADAPTER_DIAGNOSTICS_HEADER, ADAPTER_DIAGNOSTICS_RESPONSE_KEY, ToolCallRequest, ToolCancelRequest, ToolService, adapter_diagnostics_headers
 
 class PinRequest(BaseModel):
     pin: str
@@ -32,6 +32,10 @@ def host_header_is_local(request: Request) -> bool:
         hostname = host.rsplit(":", 1)[0]
     return hostname in LOCAL_HOST_HEADERS
 
+
+def wants_adapter_diagnostics(request: Request) -> bool:
+    return request.headers.get(ADAPTER_DIAGNOSTICS_HEADER, "").strip().lower() in {"1", "true", "yes", "on"}
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.assert_safe_bind()
@@ -47,7 +51,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Hermes Voice Control", version="0.1.0")
     app.state.settings = settings
     app.state.store = store
-    app.add_middleware(CORSMiddleware, allow_origins=list(settings.frontend_origins), allow_credentials=True, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "X-Request-ID"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.frontend_origins),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER],
+        expose_headers=[ADAPTER_DIAGNOSTICS_HEADER],
+    )
     def session_dep(request: Request) -> str:
         if not settings.require_pin:
             client_host = request.client.host if request.client else "local"
@@ -60,7 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(Exception)
     async def safe_exception_handler(request: Request, exc: Exception):
         if isinstance(exc, HTTPException):
-            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
         store.log("error.unhandled", "failed", {"path": request.url.path, "error": str(exc) if settings.debug_errors else "redacted"}, error_code="UNHANDLED")
         return JSONResponse(status_code=500, content={"detail": "Internal server error", "code": "INTERNAL_ERROR"})
     @app.get("/healthz")
@@ -129,12 +140,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/tools/cancel")
     def cancel_tool(req: ToolCancelRequest, session_hash: str = Depends(session_dep)): return tools.cancel(req, session_hash)
     @app.post("/chat/text")
-    def chat_text(payload: TextMessage, session_hash: str = Depends(session_dep)):
+    def chat_text(payload: TextMessage, request: Request, response: Response, session_hash: str = Depends(session_dep)):
         request_id = (payload.request_id or "").strip() or "text-chat"
         if len(request_id) > 120:
             request_id = "text-chat"
         req = ToolCallRequest(request_id=request_id, tool="ask_agent", arguments={"message": payload.message, "mode": payload.mode, "transcript_window": payload.transcript_window})
-        return tools.call(req, session_hash)
+        result = tools.call(req, session_hash, include_adapter_diagnostics=wants_adapter_diagnostics(request))
+        diagnostics = result.pop(ADAPTER_DIAGNOSTICS_RESPONSE_KEY, None)
+        for name, value in adapter_diagnostics_headers(diagnostics).items():
+            if name == ADAPTER_DIAGNOSTICS_HEADER:
+                response.headers[name] = value
+        return result
     @app.get("/confirmations")
     def confirmations(session_hash: str = Depends(session_dep)): return {"items": tools.pending_confirmations(session_hash)}
     @app.post("/confirmations/{confirmation_id}/approve")

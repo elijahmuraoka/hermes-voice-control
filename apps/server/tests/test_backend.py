@@ -1,5 +1,6 @@
 from pathlib import Path
 import importlib.util
+import json
 import sys
 import sqlite3
 import subprocess
@@ -30,14 +31,20 @@ def login(client: TestClient) -> str:
     assert token not in res.text
     return token
 
-def load_harness_module():
+def load_script_module(filename: str, module_name: str):
     repo_root = Path(__file__).resolve().parents[3]
-    harness_path = repo_root / "scripts" / "run-local-hermes-harness.py"
-    spec = importlib.util.spec_from_file_location("hvc_harness", harness_path)
+    script_path = repo_root / "scripts" / filename
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+def load_harness_module():
+    return load_script_module("run-local-hermes-harness.py", "hvc_harness")
+
+def load_text_latency_harness_module():
+    return load_script_module("run-live-text-latency-harness.py", "hvc_text_latency_harness")
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
 def test_readyz_reports_safe_runtime_posture(tmp_path):
@@ -64,6 +71,7 @@ def test_readyz_reports_missing_local_hermes_binary(tmp_path):
     assert body["checks"]["hermes"]["available"] is False
     assert body["checks"]["hermes"]["read_only"] is True
     assert body["checks"]["hermes"]["command"][-2:] == ["--toolsets", "safe"]
+    assert body["checks"]["hermes"]["command_mode"] == "quiet_chat_query"
 
 def test_readyz_rejects_directory_local_hermes_binary(tmp_path):
     hermes_dir = tmp_path / "hermes-dir"
@@ -321,6 +329,78 @@ def test_chat_text_invalid_payload_uses_sanitized_tool_validation(tmp_path):
     assert secret not in logs
     assert "validation_error" in logs
 
+def test_chat_text_diagnostics_are_opt_in_and_redacted(tmp_path, monkeypatch):
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\nexit 0\n")
+    hermes.chmod(0o755)
+
+    class FakeProc:
+        returncode = 0
+        def poll(self): return 0
+        def communicate(self, timeout=None): return ("safe answer", "")
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes))
+
+    normal = client.post("/chat/text", json={"request_id": "text-normal", "message": "hello", "mode": "quick"})
+    assert normal.status_code == 200
+    assert "x-hvc-adapter-diagnostics" not in normal.headers
+    assert "diagnostics" not in normal.json()
+
+    res = client.post(
+        "/chat/text",
+        json={"request_id": "text-diag", "message": "hello", "mode": "quick"},
+        headers={"Origin": "http://127.0.0.1:5173", "X-HVC-Adapter-Diagnostics": "1"},
+    )
+
+    assert res.status_code == 200
+    assert "x-hvc-adapter-diagnostics" in res.headers["access-control-expose-headers"].lower()
+    diagnostics = json.loads(res.headers["x-hvc-adapter-diagnostics"])
+    assert diagnostics["command_mode"] == "quiet_chat_query"
+    assert [phase["name"] for phase in diagnostics["phases"]] == [
+        "request_start",
+        "binary_resolved",
+        "process_spawn_start",
+        "process_spawned",
+        "process_exited",
+        "stdio_collected",
+        "completion",
+    ]
+    assert diagnostics["cleanup"]["communicated"] is True
+    assert "safe answer" not in json.dumps(diagnostics)
+    assert "diagnostics" not in res.json()
+
+def test_chat_text_diagnostics_header_is_cors_accessible(tmp_path):
+    res = make_client(tmp_path).options(
+        "/chat/text",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type,x-hvc-adapter-diagnostics",
+        },
+    )
+    assert res.status_code == 200
+    assert "x-hvc-adapter-diagnostics" in res.headers["access-control-allow-headers"].lower()
+
+def test_chat_text_failure_diagnostics_are_opt_in(tmp_path):
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(tmp_path / "missing-hermes"))
+
+    normal = client.post("/chat/text", json={"request_id": "text-missing-normal", "message": "hello", "mode": "quick"})
+    assert normal.status_code == 502
+    assert normal.json() == {"detail": "Local Hermes binary was not found."}
+    assert "x-hvc-adapter-diagnostics" not in normal.headers
+
+    opt_in = client.post(
+        "/chat/text",
+        json={"request_id": "text-missing-diag", "message": "hello", "mode": "quick"},
+        headers={"X-HVC-Adapter-Diagnostics": "1"},
+    )
+    assert opt_in.status_code == 502
+    diagnostics = json.loads(opt_in.headers["x-hvc-adapter-diagnostics"])
+    assert diagnostics["error_code"] == "HERMES_NOT_FOUND"
+    assert diagnostics["phases"][-1]["name"] == "binary_missing"
+    assert "hello" not in json.dumps(diagnostics)
+
 def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
     hermes.write_text("#!/bin/sh\nexit 0\n")
@@ -344,6 +424,7 @@ def test_local_hermes_adapter_uses_safe_toolset(tmp_path, monkeypatch):
     assert "send messages" in calls[0][0][4]
     assert calls[0][1]["shell"] is False
     assert calls[0][0][-2:] == ["--toolsets", "safe"]
+    assert result.diagnostics["command_mode"] == "quiet_chat_query"
 
 def test_local_hermes_adapter_ask_bob_uses_same_safe_bridge(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
@@ -381,6 +462,7 @@ def test_local_hermes_adapter_preserves_quiet_stdout_answer(tmp_path, monkeypatc
     assert result.ok is True
     assert result.data["speakable"] == quiet_output
     assert result.data["display"] == quiet_output
+    assert result.diagnostics["output"]["stderr_present"] is True
 
 def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
@@ -402,6 +484,8 @@ def test_local_hermes_adapter_terminates_on_cancel(tmp_path, monkeypatch):
     assert result.ok is False
     assert result.error_code == "HERMES_CANCELLED"
     assert events == ["terminate"]
+    assert result.diagnostics["cleanup"]["terminated"] is True
+    assert result.diagnostics["error_code"] == "HERMES_CANCELLED"
 
 def test_local_hermes_adapter_times_out(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
@@ -420,6 +504,8 @@ def test_local_hermes_adapter_times_out(tmp_path, monkeypatch):
     assert result.ok is False
     assert result.error_code == "HERMES_TIMEOUT"
     assert events == ["kill"]
+    assert result.diagnostics["cleanup"]["killed"] is True
+    assert result.diagnostics["output"]["stdout_present"] is True
 
 def test_local_hermes_adapter_rejects_empty_output(tmp_path, monkeypatch):
     hermes = tmp_path / "hermes"
@@ -517,6 +603,111 @@ def test_local_harness_reports_bad_timeout_after_opt_in(monkeypatch, capsys):
     assert module.main() == 2
     captured = capsys.readouterr()
     assert "HVC_HERMES_TIMEOUT_SECONDS must be an integer" in captured.out
+
+def test_text_latency_harness_refuses_without_opt_in(monkeypatch, capsys):
+    module = load_text_latency_harness_module()
+    monkeypatch.delenv("HVC_LIVE_TEXT_HARNESS", raising=False)
+    monkeypatch.setattr(module.sys, "argv", ["run-live-text-latency-harness.py"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "Set HVC_LIVE_TEXT_HARNESS=1" in captured.out
+
+def test_text_latency_harness_redacts_target_and_response_body():
+    module = load_text_latency_harness_module()
+    target = module.redacted_target("https://device.tailnet.ts.net/private")
+    assert target == {"scheme": "https", "host_kind": "private_network", "port_present": False, "path_present": True}
+
+    summary = module.summarize_body(
+        {
+            "status": "completed",
+            "request_id": "latency-1",
+            "result": {"speakable": "raw answer", "display": "raw answer"},
+        },
+        "latency-1",
+    )
+
+    assert summary["result_present"] is True
+    assert summary["speakable_chars"] == len("raw answer")
+    assert "raw answer" not in json.dumps(summary)
+
+def test_text_latency_harness_rejects_public_cleartext_http(monkeypatch, capsys):
+    module = load_text_latency_harness_module()
+    monkeypatch.setenv("HVC_LIVE_TEXT_HARNESS", "1")
+    monkeypatch.setattr(module.sys, "argv", ["run-live-text-latency-harness.py", "--base-url", "http://example.com:8765"])
+
+    assert module.main() == 2
+    captured = capsys.readouterr()
+    assert "must use https" in captured.out
+    assert "Traceback" not in captured.out
+
+def test_text_latency_harness_handles_missing_pin_file_without_posting_pin(tmp_path, monkeypatch, capsys):
+    module = load_text_latency_harness_module()
+    output = tmp_path / "evidence.json"
+    requests: list[str] = []
+
+    def fake_request_json(_opener, url, _method, _payload, _timeout_seconds, extra_headers=None):
+        requests.append(url)
+        assert extra_headers is None
+        return {"status": 401, "duration_ms": 1}
+
+    monkeypatch.setenv("HVC_LIVE_TEXT_HARNESS", "1")
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [
+            "run-live-text-latency-harness.py",
+            "--base-url",
+            "http://127.0.0.1:8765",
+            "--pin-file",
+            str(tmp_path / "missing-pin"),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert module.main() == 1
+    captured = capsys.readouterr()
+    assert "Configured PIN file could not be read." in captured.out
+    assert requests == ["http://127.0.0.1:8765/auth/session"]
+    evidence = json.loads(output.read_text(encoding="utf-8"))
+    assert evidence["auth"]["pin_file_error"] == "unreadable"
+    assert "missing-pin" not in json.dumps(evidence)
+
+def test_text_latency_harness_blocks_remote_pin_submission(tmp_path, monkeypatch, capsys):
+    module = load_text_latency_harness_module()
+    output = tmp_path / "evidence.json"
+    requests: list[str] = []
+
+    def fake_request_json(_opener, url, _method, _payload, _timeout_seconds, extra_headers=None):
+        requests.append(url)
+        assert extra_headers is None
+        return {"status": 401, "duration_ms": 1}
+
+    monkeypatch.setenv("HVC_LIVE_TEXT_HARNESS", "1")
+    monkeypatch.setenv("HVC_PIN", "secret-pin-that-must-not-post")
+    monkeypatch.delenv("HVC_LIVE_TEXT_ALLOW_REMOTE_PIN", raising=False)
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [
+            "run-live-text-latency-harness.py",
+            "--base-url",
+            "https://example.com",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert module.main() == 1
+    captured = capsys.readouterr()
+    assert "Automatic PIN login is disabled" in captured.out
+    assert requests == ["https://example.com/auth/session"]
+    evidence = json.loads(output.read_text(encoding="utf-8"))
+    assert evidence["auth"]["pin_submission"] == "blocked_remote_target"
+    assert "secret-pin-that-must-not-post" not in json.dumps(evidence)
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

@@ -39,6 +39,10 @@ TOOLS = {
     "propose_action": ToolDef("propose_action", "Record a proposed action for review. Approval records intent only and does not execute external actions.", "high", True),
 }
 
+ADAPTER_DIAGNOSTICS_HEADER = "X-HVC-Adapter-Diagnostics"
+ADAPTER_DIAGNOSTICS_RESPONSE_KEY = "_adapter_diagnostics"
+
+
 def safe_validation_errors(exc: ValidationError) -> list[dict[str, Any]]:
     return [
         {
@@ -49,8 +53,14 @@ def safe_validation_errors(exc: ValidationError) -> list[dict[str, Any]]:
         for error in exc.errors()
     ]
 
-def ask_agent_audit_payload(tool: str, args: AskAgentArgs, result_ok: bool, error_code: str | None) -> dict[str, Any]:
-    return {
+def adapter_diagnostics_headers(diagnostics: dict[str, Any] | None) -> dict[str, str]:
+    if not diagnostics:
+        return {}
+    return {ADAPTER_DIAGNOSTICS_HEADER: json.dumps(diagnostics, separators=(",", ":"), sort_keys=True)}
+
+
+def ask_agent_audit_payload(tool: str, args: AskAgentArgs, result_ok: bool, error_code: str | None, diagnostics: dict[str, Any] | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "tool": tool,
         "mode": args.mode,
         "message_chars": len(args.message),
@@ -58,6 +68,9 @@ def ask_agent_audit_payload(tool: str, args: AskAgentArgs, result_ok: bool, erro
         "result_present": result_ok,
         "error": error_code,
     }
+    if diagnostics:
+        payload["adapter_diagnostics"] = diagnostics
+    return payload
 
 class ToolService:
     def __init__(self, store: Store, adapter: HermesAdapter):
@@ -69,7 +82,7 @@ class ToolService:
         with self.store.connect() as conn:
             row = conn.execute("SELECT 1 FROM tool_call_cancellations WHERE session_hash=? AND request_id=?", (session_hash, request_id)).fetchone()
         return row is not None
-    def call(self, req: ToolCallRequest, session_hash: str) -> dict[str, Any]:
+    def call(self, req: ToolCallRequest, session_hash: str, include_adapter_diagnostics: bool = False) -> dict[str, Any]:
         if self._is_cancelled(req.request_id, session_hash):
             self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
             raise HTTPException(status_code=409, detail="Tool call was cancelled")
@@ -87,10 +100,17 @@ class ToolService:
             if self._is_cancelled(req.request_id, session_hash):
                 self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id, "suppressed_after_adapter": True}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
                 raise HTTPException(status_code=409, detail="Tool call was cancelled")
-            self.store.log("tool.call", "completed" if result.ok else "failed", ask_agent_audit_payload(req.tool, args, result.ok, result.error_code), session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code=result.error_code)
+            self.store.log("tool.call", "completed" if result.ok else "failed", ask_agent_audit_payload(req.tool, args, result.ok, result.error_code, result.diagnostics), session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code=result.error_code)
             if not result.ok:
-                raise HTTPException(status_code=502, detail=result.safe_message or "Tool failed")
-            return {"status": "completed", "result": result.data, "request_id": req.request_id}
+                raise HTTPException(
+                    status_code=502,
+                    detail=result.safe_message or "Tool failed",
+                    headers=adapter_diagnostics_headers(result.diagnostics) if include_adapter_diagnostics else None,
+                )
+            response = {"status": "completed", "result": result.data, "request_id": req.request_id}
+            if include_adapter_diagnostics and result.diagnostics:
+                response[ADAPTER_DIAGNOSTICS_RESPONSE_KEY] = result.diagnostics
+            return response
         if req.tool == "propose_action":
             try:
                 args = ProposedActionArgs.model_validate(req.arguments)

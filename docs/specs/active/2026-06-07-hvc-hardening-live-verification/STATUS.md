@@ -97,9 +97,10 @@
 - The 2026-06-08 local harness run resolved `/opt/homebrew/bin/hermes` and
   exercised `ask_agent`, `ask_bob`, and no-action probes through the read-only
   safe command. The refreshed run passed with `blocker: null`.
-- The local adapter now invokes Hermes in quiet query mode so stdout contains
-  only the final speakable answer before returning it to the browser or harness
-  evidence, while CLI provider failures still surface as controlled errors.
+- The local adapter now emits opt-in redacted diagnostics around the
+  approval-preserving quiet chat query path
+  (`hermes chat -Q -q <prompt> --toolsets safe`), while CLI provider failures
+  still surface as controlled errors.
 - Real Gemini Live smoke passed against a loopback backend started with the
   `real-gemini` optional dependency. The redacted evidence is in
   `evidence/gemini-live-smoke-latest.json` and confirms real mode, the

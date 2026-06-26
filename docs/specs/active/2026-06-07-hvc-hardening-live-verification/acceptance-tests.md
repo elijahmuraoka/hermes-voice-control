@@ -99,12 +99,13 @@ node scripts/e2e-real-gemini-live.mjs
   prompt/no-action semantics.
 - 2026-06-08: live real-Hermes evidence is written by the opt-in harness to
   `docs/specs/active/2026-06-07-hvc-hardening-live-verification/evidence/hermes-bridge-harness-latest.json`.
-- 2026-06-08: local harness run resolved `/opt/homebrew/bin/hermes` and invoked
-  `hermes chat -Q -q <read-only prompt> --toolsets safe`. The refreshed run
-  passed `ask_agent`, `ask_bob`, and no-action probes with `blocker: null`.
-- 2026-06-08: local adapter output now uses Hermes quiet query mode so stdout is
-  already the final answer text; browser and harness evidence do not receive
-  terminal banners, prompt echoes, or resume metadata.
+- 2026-06-08: local harness run resolved `/opt/homebrew/bin/hermes` and
+  exercised `ask_agent`, `ask_bob`, and no-action probes with `blocker: null`.
+- 2026-06-26: local adapter diagnostics now verify Hermes quiet chat query mode
+  (`hermes chat -Q -q <read-only prompt> --toolsets safe`) so the bridge keeps
+  final-answer stdout without bypassing Hermes approval semantics. Live proof
+  that this path stays under the browser timeout budget is tracked by the
+  opt-in text latency harness.
 - 2026-06-08: issue #16 verification passed `pnpm env:check`, `pnpm verify`
   (web: 4 files / 27 tests; backend: 46 tests with one Starlette/httpx
   deprecation warning), `tomoji docs index --verify --json`,

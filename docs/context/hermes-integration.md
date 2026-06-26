@@ -35,9 +35,9 @@ hermes chat -Q -q <prompt> --toolsets safe
 
 Timeouts, cancellation, process launch failures, empty output, and Hermes CLI
 failure transcripts are surfaced as controlled errors so the browser does not
-hang behind or misreport a failed local Hermes bridge. The `-Q` quiet flag keeps
-stdout to the final answer text so the browser does not speak terminal banners,
-prompt echoes, or session metadata.
+hang behind or misreport a failed local Hermes bridge. The quiet chat query path
+preserves Hermes approval semantics while keeping stdout limited to the final
+answer text for the bridge.
 
 `/readyz` includes local-adapter diagnostics when `HVC_HERMES_ADAPTER=local`,
 including whether the configured binary resolves, the read-only command shape,
@@ -84,3 +84,18 @@ It probes:
 Cancellation, timeout, malformed/empty output, and binary-resolution behavior
 are covered by backend tests with fake local Hermes processes so CI does not
 depend on a developer's local credentials or runtime state.
+
+## Live text latency harness
+
+The typed fallback path can be measured against an already-running local or
+private HVC server without printing raw Hermes response content:
+
+```bash
+HVC_LIVE_TEXT_HARNESS=1 pnpm hermes:text-latency -- --base-url http://127.0.0.1:8765
+```
+
+Use `HVC_PIN` or `HVC_PIN_FILE` when the target requires PIN auth. The harness
+sends `X-HVC-Adapter-Diagnostics: 1`, writes redacted evidence to
+`.private/evidence/live-text-latency-latest.json` by default, and records
+response length, HTTP status, adapter phase timings, client timeout, and
+cancellation status only.

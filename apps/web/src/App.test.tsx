@@ -26,6 +26,46 @@ let chatJobCounter = 0;
 let chatJobIds: string[] = [];
 let chatTextBodies: unknown[] = [];
 
+interface MockSpeechUtterance {
+  text: string;
+  rate: number;
+  pitch: number;
+  volume: number;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+}
+
+interface SpeechSynthesisTestMock {
+  speak: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
+  utterances: MockSpeechUtterance[];
+  finish: (index?: number) => void;
+  setPending: (pending: boolean) => void;
+  setSpeaking: (speaking: boolean) => void;
+}
+
+interface TestVoiceSession {
+  callbacks: {
+    onStatus?: (status: "agent-speaking" | "turn-complete") => void;
+    onTranscript?: (event: {
+      role: "user" | "agent";
+      text: string;
+      final: boolean;
+    }) => void;
+    onToolCall?: (call: {
+      id: string;
+      name: string;
+      args: Record<string, unknown>;
+    }) => void;
+    onToolResponse?: (response: {
+      id: string;
+      name: string;
+      response: Record<string, unknown>;
+    }) => void;
+  };
+  setMicrophoneEnabled: ReturnType<typeof vi.fn>;
+}
+
 type MockChatJobState =
   | "queued"
   | "thinking"
@@ -57,12 +97,16 @@ function chatJobStatus(
   return { job_id: jobId, state, ...overrides };
 }
 
-function completedChatJob(jobId: string, display: string): MockChatJobStatus {
+function completedChatJob(
+  jobId: string,
+  display: string,
+  speakable = display,
+): MockChatJobStatus {
   return chatJobStatus(jobId, "complete", {
     result: {
       status: "completed",
       request_id: jobId,
-      result: { speakable: display, display },
+      result: { speakable, display },
     },
   });
 }
@@ -85,6 +129,84 @@ function jobPollCallCount(jobId: string): number {
       !requestUrl.endsWith("/cancel")
     );
   }).length;
+}
+
+function installSpeechSynthesisMock({
+  speaking = false,
+  pending = false,
+}: { speaking?: boolean; pending?: boolean } = {}): SpeechSynthesisTestMock {
+  const utterances: MockSpeechUtterance[] = [];
+  const state = { speaking, pending };
+  const speak = vi.fn((utterance: MockSpeechUtterance) => {
+    utterances.push(utterance);
+    state.speaking = true;
+  });
+  const cancel = vi.fn();
+  const speechSynthesis = {
+    speak,
+    cancel,
+    get speaking() {
+      return state.speaking;
+    },
+    get pending() {
+      return state.pending;
+    },
+  };
+  class MockSpeechSynthesisUtterance implements MockSpeechUtterance {
+    text: string;
+    rate = 1;
+    pitch = 1;
+    volume = 1;
+    onend: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+
+    constructor(text: string) {
+      this.text = text;
+    }
+  }
+
+  vi.stubGlobal("speechSynthesis", speechSynthesis);
+  vi.stubGlobal("SpeechSynthesisUtterance", MockSpeechSynthesisUtterance);
+
+  return {
+    speak,
+    cancel,
+    utterances,
+    finish(index = 0) {
+      state.speaking = false;
+      utterances[index]?.onend?.();
+    },
+    setPending(pending: boolean) {
+      state.pending = pending;
+    },
+    setSpeaking(speaking: boolean) {
+      state.speaking = speaking;
+    },
+  };
+}
+
+function createStorageMock(): Storage {
+  const items = new Map<string, string>();
+  return {
+    get length() {
+      return items.size;
+    },
+    clear() {
+      items.clear();
+    },
+    getItem(key: string) {
+      return items.get(key) ?? null;
+    },
+    key(index: number) {
+      return Array.from(items.keys())[index] ?? null;
+    },
+    removeItem(key: string) {
+      items.delete(key);
+    },
+    setItem(key: string, value: string) {
+      items.set(key, value);
+    },
+  };
 }
 
 function createConnectGate() {
@@ -150,7 +272,12 @@ describe("App", () => {
     chatTextBodies = [];
     chatJobStatuses.clear();
     chatCancelStatuses.clear();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: createStorageMock(),
+    });
     window.sessionStorage.clear();
+    window.localStorage.clear();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -287,6 +414,48 @@ describe("App", () => {
     );
   }
 
+  async function startListeningVoice(): Promise<TestVoiceSession> {
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    return realtimeMock.instances[0] as TestVoiceSession;
+  }
+
+  async function startBackgroundTextJob(
+    jobId: string,
+    answer = "background answer",
+    speakable = answer,
+  ) {
+    chatPostMode = "job";
+    chatJobIds = [jobId];
+    chatJobStatuses.set(jobId, [
+      chatJobStatus(jobId, "thinking"),
+      completedChatJob(jobId, answer, speakable),
+    ]);
+    fireEvent.change(screen.getByLabelText("Type a message to your Hermes agent"), {
+      target: { value: `request ${jobId}` },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText(/working on that in the background/i),
+    ).toBeInTheDocument();
+  }
+
+  async function completeBackgroundTextJobPoll() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400);
+      await Promise.resolve();
+    });
+  }
+
   it("renders premium voice surface and transcript toggle", async () => {
     await renderUnlockedApp();
     expect(screen.getByText("Hermes Agent")).toBeInTheDocument();
@@ -294,6 +463,24 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: /Toggle transcript/ }),
     ).toBeInTheDocument();
+  });
+
+  it("keeps primary voice controls first in keyboard order", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+
+    await user.tab();
+    expect(screen.getByLabelText(/Voice orb/)).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: /^Mute$/ })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: /^End$/ })).toHaveFocus();
+    await user.tab();
+    expect(
+      screen.getByRole("button", {
+        name: /Turn off spoken completion notices/i,
+      }),
+    ).toHaveFocus();
   });
 
   it("does not show default PIN or interrupt controls", async () => {
@@ -701,6 +888,578 @@ describe("App", () => {
     expect(screen.getByText("second answer")).toBeInTheDocument();
     expect(screen.getByText("first")).toBeInTheDocument();
     expect(screen.getByText("second")).toBeInTheDocument();
+  });
+
+  it("speaks a fresh background completion once when voice is safely listening", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+    const privateSpeakable = "The porch lights are on, and this stays in text.";
+
+    await startBackgroundTextJob(
+      "job-spoken",
+      "transcript stays complete",
+      privateSpeakable,
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("transcript stays complete")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(speech.utterances[0].text).toBe("Done. Background reply is ready.");
+    expect(speech.utterances[0].text).not.toContain("porch lights");
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    speech.finish();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4200);
+      await Promise.resolve();
+    });
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restore the microphone while spoken completion audio is still active", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-long",
+      "long spoken transcript complete",
+      "Long spoken completion summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("long spoken transcript complete")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+      await Promise.resolve();
+    });
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    speech.setSpeaking(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
+    });
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("cancels a stalled spoken completion notice and recovers capture controls", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-stalled",
+      "stalled speech transcript complete",
+      "Stalled speech summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("stalled speech transcript complete")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    speech.setPending(true);
+    speech.setSpeaking(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10050);
+      await Promise.resolve();
+    });
+
+    expect(speech.cancel).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Mute$/ }));
+    expect(screen.getByText("Mic paused")).toBeInTheDocument();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Unmute$/ }));
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("keeps retrying mic restore after hard-stop until a pointer blocker clears", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-stalled-pointer",
+      "stalled pointer transcript complete",
+      "Stalled pointer summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("stalled pointer transcript complete")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    speech.setPending(true);
+    speech.setSpeaking(true);
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 6, button: 0 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(230);
+    });
+    expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10050);
+      await Promise.resolve();
+    });
+
+    expect(speech.cancel).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    fireEvent.pointerUp(orb, { pointerId: 6 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
+    });
+
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("retries spoken completion mic restore after a transient pointer blocker clears", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-pointer-blocked",
+      "pointer blocked transcript answer",
+      "Pointer blocked summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("pointer blocked transcript answer")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 4, button: 0 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(230);
+    });
+    expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
+
+    speech.finish();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+    });
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    fireEvent.pointerUp(orb, { pointerId: 4 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
+    });
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("does not let provider turn-complete restore capture during spoken completion audio", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-turn-complete",
+      "turn complete transcript answer",
+      "Turn complete summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("turn complete transcript answer")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    act(() => {
+      session.callbacks.onStatus?.("turn-complete");
+    });
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    speech.finish();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("does not start a fresh voice session while spoken completion audio is active", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-fresh-start",
+      "fresh start transcript answer",
+      "Fresh start summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("fresh start transcript answer")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /^End$/ }));
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 5, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 5 });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("does not let unmute or hold-to-talk enable capture during spoken completion audio", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-direct-controls",
+      "direct controls transcript answer",
+      "Direct controls summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("direct controls transcript answer")).toBeInTheDocument();
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Mute$/ }));
+    expect(screen.getByText("Mic paused")).toBeInTheDocument();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Unmute$/ }));
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 3, button: 0 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(230);
+    });
+    expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    fireEvent.pointerUp(orb, { pointerId: 3 });
+
+    speech.finish();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("does not speak when a background completion arrives while the composer remains focused after Enter submit", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    const user = userEvent.setup();
+    chatPostMode = "job";
+    chatJobIds = ["job-focused-enter"];
+    chatJobStatuses.set("job-focused-enter", [
+      chatJobStatus("job-focused-enter", "thinking"),
+      completedChatJob(
+        "job-focused-enter",
+        "focused composer transcript complete",
+        "Focused composer summary.",
+      ),
+    ]);
+
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    await user.type(input, "keep typing here{enter}");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(input).toHaveFocus();
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+    expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+
+    await waitFor(
+      () =>
+        expect(
+          screen.getByText("focused composer transcript complete"),
+        ).toBeInTheDocument(),
+      { timeout: 2200 },
+    );
+    expect(input).toHaveFocus();
+    expect(speech.speak).not.toHaveBeenCalled();
+  });
+
+  it("does not speak while a hands-free user turn is awaiting provider completion", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-hands-free-pending",
+      "hands-free-safe answer",
+      "Hands-free safe summary.",
+    );
+    act(() => {
+      session.callbacks.onTranscript?.({
+        role: "user",
+        text: "finish the kitchen lights",
+        final: true,
+      });
+    });
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("hands-free-safe answer")).toBeInTheDocument();
+    expect(speech.speak).not.toHaveBeenCalled();
+    expect(session.setMicrophoneEnabled).not.toHaveBeenLastCalledWith(false);
+  });
+
+  it("does not speak while a tool-backed hands-free voice request remains pending", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    vi.useFakeTimers();
+
+    act(() => {
+      session.callbacks.onTranscript?.({
+        role: "user",
+        text: "check the house",
+        final: true,
+      });
+      session.callbacks.onToolCall?.({
+        id: "tool-hands-free",
+        name: "ask_agent",
+        args: { message: "check the house" },
+      });
+      session.callbacks.onStatus?.("turn-complete");
+      session.callbacks.onToolResponse?.({
+        id: "tool-hands-free",
+        name: "ask_agent",
+        response: { status: "completed" },
+      });
+    });
+
+    await startBackgroundTextJob(
+      "job-hands-free-tool-pending",
+      "tool-backed transcript answer",
+      "Tool-backed summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("tool-backed transcript answer")).toBeInTheDocument();
+    expect(speech.speak).not.toHaveBeenCalled();
+  });
+
+  it("uses transcript only when no voice session is connected", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob("job-idle", "idle transcript answer");
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("idle transcript answer")).toBeInTheDocument();
+    expect(speech.speak).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "voice is muted",
+      async () => {
+        fireEvent.click(screen.getByRole("button", { name: /^Mute$/ }));
+        expect(screen.getByText("Mic paused")).toBeInTheDocument();
+      },
+    ],
+    [
+      "voice is paused",
+      async () => {
+        const orb = screen.getByLabelText(/Voice orb/);
+        fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+        fireEvent.pointerUp(orb, { pointerId: 2 });
+        expect(screen.getByText("Paused")).toBeInTheDocument();
+      },
+    ],
+    [
+      "the user is holding to talk",
+      async () => {
+        const orb = screen.getByLabelText(/Voice orb/);
+        fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(230);
+        });
+        expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+      },
+    ],
+    [
+      "the voice turn is waiting on the agent",
+      async () => {
+        const orb = screen.getByLabelText(/Voice orb/);
+        fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(230);
+        });
+        fireEvent.pointerUp(orb, { pointerId: 2 });
+        expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+      },
+    ],
+    [
+      "user speech is streaming",
+      async () => {
+        act(() => {
+          realtimeMock.instances[0].callbacks.onTranscript({
+            role: "user",
+            text: "still talking",
+            final: false,
+          });
+        });
+        expect(screen.getByLabelText("Live transcript")).toHaveTextContent(
+          "still talking",
+        );
+      },
+    ],
+    [
+      "the agent is already speaking",
+      async () => {
+        act(() => {
+          realtimeMock.instances[0].callbacks.onStatus("agent-speaking");
+        });
+        expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+      },
+    ],
+    [
+      "text input is active",
+      async () => {
+        fireEvent.focus(
+          screen.getByLabelText("Type a message to your Hermes agent"),
+        );
+        expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+      },
+    ],
+  ])("uses transcript only when %s", async (_name, makeUnsafe) => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(`job-unsafe-${String(_name).replaceAll(" ", "-")}`);
+    await makeUnsafe();
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("background answer")).toBeInTheDocument();
+    expect(speech.speak).not.toHaveBeenCalled();
+  });
+
+  it("persists the spoken completion toggle and leaves transcript completion intact", async () => {
+    const speech = installSpeechSynthesisMock();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /Turn off spoken completion notices/i,
+      }),
+    );
+    expect(
+      window.localStorage.getItem("hvc.spokenCompletionNotifications.v1"),
+    ).toBe("disabled");
+    expect(
+      screen.getByRole("button", {
+        name: /Turn on spoken completion notices/i,
+      }),
+    ).toBeInTheDocument();
+
+    unmount();
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /Turn on spoken completion notices/i,
+      }),
+    ).toBeInTheDocument();
+
+    await startListeningVoice();
+    vi.useFakeTimers();
+    await startBackgroundTextJob("job-toggle-off", "toggle transcript answer");
+    await completeBackgroundTextJobPoll();
+
+    expect(screen.getByText("toggle transcript answer")).toBeInTheDocument();
+    expect(speech.speak).not.toHaveBeenCalled();
+  });
+
+  it("keeps chat working when localStorage access is blocked", async () => {
+    const originalLocalStorage = Object.getOwnPropertyDescriptor(
+      window,
+      "localStorage",
+    );
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Storage blocked", "SecurityError");
+      },
+    });
+    try {
+      await renderUnlockedApp();
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /Turn off spoken completion notices/i,
+        }),
+      );
+      vi.useFakeTimers();
+
+      await startBackgroundTextJob("job-localstorage-blocked", "storage answer");
+      await completeBackgroundTextJobPoll();
+
+      expect(screen.getByText("storage answer")).toBeInTheDocument();
+    } finally {
+      if (originalLocalStorage) {
+        Object.defineProperty(window, "localStorage", originalLocalStorage);
+      }
+    }
+  });
+
+  it("does not speak restored background completions after refresh", async () => {
+    const speech = installSpeechSynthesisMock();
+    window.sessionStorage.setItem(
+      "hvc.pendingTextJobs.v1",
+      JSON.stringify([{ jobId: "job-restored-spoken", savedAt: Date.now() }]),
+    );
+    chatJobStatuses.set("job-restored-spoken", [
+      chatJobStatus("job-restored-spoken", "thinking"),
+      completedChatJob("job-restored-spoken", "restored spoken answer"),
+    ]);
+    render(<App />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/background reply from before the refresh/i),
+      ).toBeInTheDocument(),
+    );
+    await startListeningVoice();
+
+    await waitFor(
+      () =>
+        expect(screen.getByText("restored spoken answer")).toBeInTheDocument(),
+      { timeout: 2200 },
+    );
+    expect(speech.speak).not.toHaveBeenCalled();
   });
 
   it("reopens unlock when background job polling loses auth", async () => {

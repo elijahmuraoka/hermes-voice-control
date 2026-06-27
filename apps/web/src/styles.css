@@ -393,6 +393,10 @@ input {
   color: #ffb7a5;
 }
 
+.control-row .completion-notice-toggle[aria-pressed="false"] {
+  color: rgba(246, 240, 232, 0.62);
+}
+
 .transcript {
   position: relative;
   height: calc(100dvh - 44px);

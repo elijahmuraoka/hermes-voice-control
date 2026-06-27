@@ -13,6 +13,8 @@ import {
   Mic,
   MicOff,
   PhoneOff,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import {
   ApiError,
@@ -43,6 +45,10 @@ import {
   removePendingTextJob,
   savePendingTextJob,
 } from "./chatJobStorage";
+import {
+  readSpokenCompletionNotificationsEnabled,
+  saveSpokenCompletionNotificationsEnabled,
+} from "./completionNotificationPreference";
 import { agentName, agentNounLower } from "./config";
 import {
   createHvcDiagnosticsRecorder,
@@ -57,6 +63,10 @@ const NO_SPEECH_TIMEOUT_MS = 3500;
 const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
 const TOOL_RESPONSE_TIMEOUT_MS = 95000;
 const TEXT_JOB_POLL_MS = 1400;
+const SPOKEN_COMPLETION_NOTICE_TEXT = "Done. Background reply is ready.";
+const SPOKEN_COMPLETION_RESTORE_DELAY_MS = 2500;
+const SPOKEN_COMPLETION_RESTORE_CHECK_MS = 250;
+const SPOKEN_COMPLETION_MAX_DURATION_MS = 10000;
 
 type PressState = {
   pointerId: number | null;
@@ -180,6 +190,10 @@ export default function App() {
   const [cancellingTextJobs, setCancellingTextJobs] = useState<Set<string>>(
     () => new Set(),
   );
+  const [
+    spokenCompletionNotificationsEnabled,
+    setSpokenCompletionNotificationsEnabled,
+  ] = useState(readSpokenCompletionNotificationsEnabled);
   const stateRef = useRef(state);
   const entriesRef = useRef(entries);
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
@@ -207,8 +221,15 @@ export default function App() {
   const heardUserDuringHoldRef = useRef(false);
   const textFocusReturnModeRef = useRef<TextFocusReturnMode>("none");
   const textFocusEpochRef = useRef(0);
+  const textComposerFocusedRef = useRef(false);
   const textJobEntriesRef = useRef(new Map<string, TextJobEntryMeta>());
   const textJobPollTimersRef = useRef(new Map<string, number>());
+  const handsFreeTurnPendingRef = useRef(false);
+  const spokenCompletionNoticeActiveRef = useRef(false);
+  const ignoreStalledCompletionSpeechRef = useRef(false);
+  const spokenCompletionNotificationsEnabledRef = useRef(
+    spokenCompletionNotificationsEnabled,
+  );
   const initialPressState = useMemo(emptyPress, []);
   const pressRef = useRef<PressState>(initialPressState);
 
@@ -223,6 +244,11 @@ export default function App() {
   useEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
+
+  useEffect(() => {
+    spokenCompletionNotificationsEnabledRef.current =
+      spokenCompletionNotificationsEnabled;
+  }, [spokenCompletionNotificationsEnabled]);
 
   useEffect(() => {
     exposeHvcDiagnostics(diagnosticsRef.current);
@@ -296,6 +322,234 @@ export default function App() {
   function clearVoiceTurnTimers() {
     clearNoSpeechTimer();
     clearResponseTimer();
+  }
+
+  function clearHandsFreeTurnPending() {
+    handsFreeTurnPendingRef.current = false;
+  }
+
+  function markHandsFreeTurnPending(event: RealtimeTranscriptEvent) {
+    if (event.role !== "user") return;
+    const current = stateRef.current;
+    if (
+      voiceTurnRef.current.waiting ||
+      current.inputMode !== "hands-free" ||
+      current.callState === "hold-to-talk"
+    )
+      return;
+    handsFreeTurnPendingRef.current = true;
+  }
+
+  function isTextComposerFocused(): boolean {
+    if (typeof document !== "undefined") {
+      const activeElement = document.activeElement;
+      if (
+        activeElement instanceof HTMLInputElement &&
+        activeElement.getAttribute("aria-label") ===
+          `Type a message to ${agentNounLower}`
+      )
+        return true;
+    }
+    return textComposerFocusedRef.current;
+  }
+
+  function canSpeakBackgroundCompletion(): boolean {
+    if (!spokenCompletionNotificationsEnabledRef.current) return false;
+    if (authState !== "authenticated") return false;
+    if (!sessionRef.current || !captureReadyRef.current) return false;
+    if (isTextComposerFocused()) return false;
+    if (spokenCompletionNoticeActiveRef.current || isCompletionSpeechActive())
+      return false;
+    const current = stateRef.current;
+    if (
+      current.callState !== "listening" ||
+      current.inputMode !== "hands-free" ||
+      current.isMuted
+    )
+      return false;
+    if (voiceTurnRef.current.waiting) return false;
+    if (handsFreeTurnPendingRef.current) return false;
+    if (toolCallsInFlightRef.current.size > 0) return false;
+    if (pressRef.current.pointerId !== null || pressRef.current.holding)
+      return false;
+    if (transcriptDraftsRef.current.user || transcriptDraftsRef.current.agent)
+      return false;
+    if (
+      typeof window === "undefined" ||
+      !("speechSynthesis" in window) ||
+      typeof window.speechSynthesis?.speak !== "function" ||
+      typeof window.SpeechSynthesisUtterance !== "function"
+    )
+      return false;
+    return true;
+  }
+
+  function isCompletionSpeechActive(): boolean {
+    if (
+      typeof window === "undefined" ||
+      !("speechSynthesis" in window) ||
+      !window.speechSynthesis
+    )
+      return false;
+    try {
+      return Boolean(
+        window.speechSynthesis.speaking || window.speechSynthesis.pending,
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  function isSpokenCompletionNoticeBlockingCapture(): boolean {
+    return (
+      spokenCompletionNoticeActiveRef.current ||
+      (!ignoreStalledCompletionSpeechRef.current && isCompletionSpeechActive())
+    );
+  }
+
+  function canEnableMicrophoneCapture(): boolean {
+    return !isSpokenCompletionNoticeBlockingCapture();
+  }
+
+  function shouldRestoreMicAfterCompletionNotice(
+    session: RealtimeVoiceSession,
+    { ignoreSpeechActive = false }: { ignoreSpeechActive?: boolean } = {},
+  ): boolean {
+    const current = stateRef.current;
+    return (
+      authState === "authenticated" &&
+      sessionRef.current === session &&
+      captureReadyRef.current &&
+      current.callState === "listening" &&
+      current.inputMode === "hands-free" &&
+      !current.isMuted &&
+      !voiceTurnRef.current.waiting &&
+      !handsFreeTurnPendingRef.current &&
+      pressRef.current.pointerId === null &&
+      !pressRef.current.holding &&
+      (ignoreSpeechActive || !isCompletionSpeechActive())
+    );
+  }
+
+  function shouldStopCompletionNoticeMicRestore(
+    session: RealtimeVoiceSession,
+  ): boolean {
+    const current = stateRef.current;
+    return (
+      authState !== "authenticated" ||
+      sessionRef.current !== session ||
+      !captureReadyRef.current ||
+      current.inputMode !== "hands-free" ||
+      current.isMuted ||
+      ["idle", "paused", "muted", "connecting", "error"].includes(
+        current.callState,
+      )
+    );
+  }
+
+  function speakBackgroundCompletionNotice(text: string) {
+    if (!canSpeakBackgroundCompletion()) return;
+    const session = sessionRef.current;
+    if (!session) return;
+
+    let restored = false;
+    let microphoneDisabled = false;
+    let restoreTimer: number | null = null;
+    let hardStopTimer: number | null = null;
+    const clearRestoreTimer = () => {
+      if (restoreTimer === null) return;
+      window.clearTimeout(restoreTimer);
+      restoreTimer = null;
+    };
+    const clearHardStopTimer = () => {
+      if (hardStopTimer === null) return;
+      window.clearTimeout(hardStopTimer);
+      hardStopTimer = null;
+    };
+    const clearCompletionNoticeTimers = () => {
+      clearRestoreTimer();
+      clearHardStopTimer();
+    };
+    const finishCompletionNotice = () => {
+      if (restored) return;
+      restored = true;
+      clearCompletionNoticeTimers();
+      spokenCompletionNoticeActiveRef.current = false;
+    };
+    const completeCompletionNotice = () => {
+      if (restored) return true;
+      const ignoreSpeechActive = ignoreStalledCompletionSpeechRef.current;
+      if (!ignoreSpeechActive && isCompletionSpeechActive()) return false;
+      if (!microphoneDisabled) {
+        finishCompletionNotice();
+        return true;
+      }
+      if (
+        shouldRestoreMicAfterCompletionNotice(session, {
+          ignoreSpeechActive,
+        })
+      ) {
+        session.setMicrophoneEnabled(true);
+        finishCompletionNotice();
+        return true;
+      }
+      if (shouldStopCompletionNoticeMicRestore(session)) {
+        finishCompletionNotice();
+        return true;
+      }
+      return false;
+    };
+    const forceStopStalledCompletionNotice = () => {
+      if (restored) return;
+      try {
+        window.speechSynthesis?.cancel?.();
+      } catch {
+        // Speech engines can throw while wedged; recovery still needs to continue.
+      }
+      ignoreStalledCompletionSpeechRef.current = true;
+      if (!completeCompletionNotice()) scheduleRestoreCheck();
+    };
+    const scheduleHardStop = () => {
+      clearHardStopTimer();
+      hardStopTimer = window.setTimeout(() => {
+        hardStopTimer = null;
+        forceStopStalledCompletionNotice();
+      }, SPOKEN_COMPLETION_MAX_DURATION_MS);
+    };
+    const scheduleRestoreCheck = (
+      delayMs = SPOKEN_COMPLETION_RESTORE_CHECK_MS,
+    ) => {
+      if (restored) return;
+      clearRestoreTimer();
+      restoreTimer = window.setTimeout(() => {
+        restoreTimer = null;
+        if (!completeCompletionNotice()) {
+          scheduleRestoreCheck();
+        }
+      }, delayMs);
+    };
+    const restoreAfterSpeechEvent = () => {
+      if (!completeCompletionNotice()) scheduleRestoreCheck();
+    };
+
+    try {
+      const utterance = new window.SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.volume = 0.86;
+      utterance.onend = restoreAfterSpeechEvent;
+      utterance.onerror = restoreAfterSpeechEvent;
+      ignoreStalledCompletionSpeechRef.current = false;
+      scheduleRestoreCheck(SPOKEN_COMPLETION_RESTORE_DELAY_MS);
+      scheduleHardStop();
+      spokenCompletionNoticeActiveRef.current = true;
+      session.setMicrophoneEnabled(false);
+      microphoneDisabled = true;
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      spokenCompletionNoticeActiveRef.current = false;
+      if (!completeCompletionNotice()) scheduleRestoreCheck();
+    }
   }
 
   function clearTextJobPollTimer(jobId: string) {
@@ -386,6 +640,9 @@ export default function App() {
         text: textFromChatResult(status.result),
         restored: false,
       });
+      if (!meta.restored) {
+        speakBackgroundCompletionNotice(SPOKEN_COMPLETION_NOTICE_TEXT);
+      }
       finishTextJob(status.job_id, { keepRecoveryId: true });
       return false;
     }
@@ -581,6 +838,7 @@ export default function App() {
     preservePendingHoldActivation = false,
   }: { preservePendingHoldActivation?: boolean } = {}) {
     captureReadyRef.current = false;
+    clearHandsFreeTurnPending();
     staleProviderTurnCompletesRef.current = 0;
     if (!preservePendingHoldActivation) clearPendingHoldActivation();
   }
@@ -599,6 +857,7 @@ export default function App() {
     force = false,
     resume = false,
   }: { force?: boolean; resume?: boolean } = {}) {
+    if (isSpokenCompletionNoticeBlockingCapture()) return;
     if (!force && stateRef.current.inputMode === "text") return;
     if (resume) sessionRef.current?.resume();
     sessionRef.current?.setHoldToTalk(false);
@@ -609,6 +868,7 @@ export default function App() {
     clearPressTimer();
     stopVoiceTurnWatch();
     resetHoldSpeechState();
+    clearHandsFreeTurnPending();
     textFocusReturnModeRef.current = "none";
     markCaptureNotReady();
     pressRef.current = emptyPress();
@@ -818,13 +1078,14 @@ export default function App() {
       staleProviderTurnCompletesRef.current = 0;
     }
     if (
-      turn.waiting &&
       !turn.heardAgent &&
-      toolCallsInFlightRef.current.size > 0
+      toolCallsInFlightRef.current.size > 0 &&
+      (turn.waiting || handsFreeTurnPendingRef.current)
     ) {
-      armResponseTimer(turn.id, TOOL_RESPONSE_TIMEOUT_MS);
+      if (turn.waiting) armResponseTimer(turn.id, TOOL_RESPONSE_TIMEOUT_MS);
       return;
     }
+    clearHandsFreeTurnPending();
     if (turn.waiting && !turn.heardAgent) {
       appendSystem(
         turn.heardUser
@@ -886,6 +1147,7 @@ export default function App() {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
         if (event.role === "agent" && shouldIgnoreStaleProviderCallback())
           return;
+        markHandsFreeTurnPending(event);
         markVoiceTurnHeard(event.role);
         appendTranscript(event);
       },
@@ -913,6 +1175,7 @@ export default function App() {
         }
         stopVoiceTurnWatch();
         resetHoldSpeechState();
+        clearHandsFreeTurnPending();
         appendSystem(
           error.message || "Realtime voice session reported an error.",
           "failed",
@@ -923,6 +1186,7 @@ export default function App() {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
         stopVoiceTurnWatch();
         resetHoldSpeechState();
+        clearHandsFreeTurnPending();
         markCaptureNotReady();
         sessionRef.current = null;
         endingRef.current = false;
@@ -932,12 +1196,15 @@ export default function App() {
 
   async function startCall() {
     if (!canUsePrivateSession()) return;
+    if (isSpokenCompletionNoticeBlockingCapture()) return;
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
     if (sessionRef.current) {
       textFocusReturnModeRef.current = "none";
       sessionRef.current.resume();
-      sessionRef.current.setMicrophoneEnabled(!stateRef.current.isMuted);
+      sessionRef.current.setMicrophoneEnabled(
+        !stateRef.current.isMuted && canEnableMicrophoneCapture(),
+      );
       dispatch({ type: "RESUME" });
       if (captureReadyRef.current) markCaptureReady();
       return;
@@ -988,17 +1255,22 @@ export default function App() {
     textFocusReturnModeRef.current = "none";
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
+    clearHandsFreeTurnPending();
     sessionRef.current?.setMicrophoneEnabled(false);
     sessionRef.current?.setHoldToTalk(false);
     dispatch({ type: "PAUSE" });
   }
 
   function resumeCall() {
+    if (!canEnableMicrophoneCapture()) return;
     textFocusReturnModeRef.current = "none";
     stopVoiceTurnWatch();
     resetHoldSpeechState();
+    clearHandsFreeTurnPending();
     sessionRef.current?.resume();
-    sessionRef.current?.setMicrophoneEnabled(!stateRef.current.isMuted);
+    sessionRef.current?.setMicrophoneEnabled(
+      !stateRef.current.isMuted && canEnableMicrophoneCapture(),
+    );
     dispatch({ type: "RESUME" });
   }
 
@@ -1006,6 +1278,7 @@ export default function App() {
     clearPressTimer();
     stopVoiceTurnWatch();
     resetHoldSpeechState();
+    clearHandsFreeTurnPending();
     textFocusReturnModeRef.current = "none";
     markCaptureNotReady();
     pressRef.current = emptyPress();
@@ -1041,11 +1314,13 @@ export default function App() {
     if (!canUsePrivateSession()) return;
     const press = pressRef.current;
     press.holding = true;
+    if (!canEnableMicrophoneCapture()) return false;
     const current = stateRef.current;
     if (current.inputMode === "text") return false;
 
     const activateHold = () => {
       if (press.released || pressRef.current !== press) return false;
+      if (!canEnableMicrophoneCapture()) return false;
       abandonPendingVoiceTurn();
       press.activated = true;
       resetHoldSpeechState();
@@ -1136,12 +1411,24 @@ export default function App() {
     const nextMuted = !stateRef.current.isMuted;
     textFocusReturnModeRef.current = "none";
     resetHoldSpeechState();
-    sessionRef.current?.setMicrophoneEnabled(!nextMuted);
+    sessionRef.current?.setMicrophoneEnabled(
+      !nextMuted && canEnableMicrophoneCapture(),
+    );
     dispatch({ type: nextMuted ? "MUTE" : "UNMUTE" });
+  }
+
+  function toggleSpokenCompletionNotifications() {
+    setSpokenCompletionNotificationsEnabled((enabled) => {
+      const next = !enabled;
+      spokenCompletionNotificationsEnabledRef.current = next;
+      saveSpokenCompletionNotificationsEnabled(next);
+      return next;
+    });
   }
 
   function focusText() {
     textFocusEpochRef.current += 1;
+    textComposerFocusedRef.current = true;
     const current = stateRef.current;
     if (
       current.inputMode !== "text" &&
@@ -1170,6 +1457,7 @@ export default function App() {
   }
 
   function blurText() {
+    textComposerFocusedRef.current = false;
     dispatch({ type: "BLUR_TEXT" });
   }
 
@@ -1309,6 +1597,25 @@ export default function App() {
           <button type="button" className="danger" onClick={endCall}>
             <PhoneOff />
             End
+          </button>
+          <button
+            type="button"
+            className="completion-notice-toggle"
+            onClick={toggleSpokenCompletionNotifications}
+            aria-pressed={spokenCompletionNotificationsEnabled}
+            aria-label={
+              spokenCompletionNotificationsEnabled
+                ? "Turn off spoken completion notices"
+                : "Turn on spoken completion notices"
+            }
+            title={
+              spokenCompletionNotificationsEnabled
+                ? "Spoken completion notices on"
+                : "Spoken completion notices off"
+            }
+          >
+            {spokenCompletionNotificationsEnabled ? <Volume2 /> : <VolumeX />}
+            Notify
           </button>
         </div>
       </section>

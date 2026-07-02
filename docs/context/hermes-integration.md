@@ -88,7 +88,10 @@ depend on a developer's local credentials or runtime state.
 ## Live text latency harness
 
 The typed fallback path can be measured against an already-running local or
-private HVC server without printing raw Hermes response content:
+private HVC server without printing raw Hermes response content. By default the
+harness uses the same background job flow as the browser: `/chat/text` should
+return a visible job quickly, then the harness polls `/chat/jobs/{id}` for the
+terminal result.
 
 ```bash
 HVC_LIVE_TEXT_HARNESS=1 pnpm hermes:text-latency -- --base-url http://127.0.0.1:8765
@@ -97,5 +100,9 @@ HVC_LIVE_TEXT_HARNESS=1 pnpm hermes:text-latency -- --base-url http://127.0.0.1:
 Use `HVC_PIN` or `HVC_PIN_FILE` when the target requires PIN auth. The harness
 sends `X-HVC-Adapter-Diagnostics: 1`, writes redacted evidence to
 `.private/evidence/live-text-latency-latest.json` by default, and records
-response length, HTTP status, adapter phase timings, client timeout, and
-cancellation status only.
+response length, HTTP status, job states, adapter phase timings, client
+timeout, and cancellation status only.
+
+For debugging the legacy synchronous path, add `--sync`. The production browser
+path should use the default job mode so slow Hermes responses stay visible and
+cancellable instead of dead-ending the text request.

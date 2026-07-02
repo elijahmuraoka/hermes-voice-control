@@ -75,8 +75,9 @@
 - SQLite uses stdlib `sqlite3` instead of an ORM to keep the backend small and
   auditable.
 - Chat jobs persist only refresh-safe metadata plus session-scoped final
-  result/error data. Raw prompts, transcript windows, adapter diagnostics, PINs,
-  cookies, and tokens stay out of job storage and audit logs.
+  result/error data. Raw prompts, transcript windows, PINs, cookies, and tokens
+  stay out of job storage and audit logs. Opt-in live verification may retain
+  redacted adapter timing diagnostics on the session-scoped job result/error.
 - PIN auth is intentionally simple for a one-user private app, with server-side
   sessions and rate limits when enabled.
 - The real Gemini websocket/audio path is unit-tested, browser-wired, and has a

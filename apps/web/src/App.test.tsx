@@ -648,15 +648,19 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
+    vi.useFakeTimers();
     const input = screen.getByLabelText("Type a message to your Hermes agent");
 
     fireEvent.change(input, { target: { value: "private prompt text" } });
     fireEvent.click(
       screen.getByRole("button", { name: /Send typed message/ }),
     );
-    await waitFor(() =>
-      expect(screen.getByText(/working on that in the background/i)).toBeInTheDocument(),
-    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText(/working on that in the background/i),
+    ).toBeInTheDocument();
     const storedBeforeRefresh = window.sessionStorage.getItem(
       "hvc.pendingTextJobs.v1",
     );
@@ -665,18 +669,21 @@ describe("App", () => {
 
     unmount();
     render(<App />);
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByText(/background reply from before the refresh/i),
-      ).toBeInTheDocument(),
-    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/background reply from before the refresh/i),
+    ).toBeInTheDocument();
 
-    await waitFor(() =>
-      expect(screen.getByText("restored answer")).toBeInTheDocument(),
-    );
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("restored answer")).toBeInTheDocument();
+    vi.useRealTimers();
     expect(window.sessionStorage.getItem("hvc.pendingTextJobs.v1")).toContain(
       "job-refresh",
     );

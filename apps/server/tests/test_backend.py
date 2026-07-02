@@ -510,14 +510,17 @@ def test_chat_text_job_fast_failure_returns_job_id_and_persisted_error(tmp_path)
     body = status.json()
     assert body["state"] == "failed"
     assert body["request_id"] == "job-fast-missing-hermes"
-    assert body["error"] == {"code": None, "detail": "Local Hermes binary was not found.", "status_code": 502}
+    assert body["error"]["code"] is None
+    assert body["error"]["detail"] == "Local Hermes binary was not found."
+    assert body["error"]["status_code"] == 502
+    assert body["error"]["diagnostics"]["error_code"] == "HERMES_NOT_FOUND"
+    assert body["error"]["diagnostics"]["phases"][-1]["name"] == "binary_missing"
+    assert "hello" not in json.dumps(body["error"]["diagnostics"])
     assert persisted_chat_job(tmp_path, job_id) == {
         "state": "failed",
         "result_json": None,
         "error_json": json.dumps(body["error"], sort_keys=True),
     }
-    assert "adapter" not in persisted_chat_job(tmp_path, job_id)["error_json"]
-    assert "phases" not in persisted_chat_job(tmp_path, job_id)["error_json"]
 
 def test_chat_text_job_fast_response_preserves_completed_body(tmp_path):
     client = make_client(tmp_path)
@@ -538,7 +541,11 @@ def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(t
     class SlowAdapter(HermesAdapter):
         def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
             time.sleep(0.08)
-            return AdapterResult(ok=True, data={"speakable": "slow answer", "display": "slow answer", "mode": mode})
+            return AdapterResult(
+                ok=True,
+                data={"speakable": "slow answer", "display": "slow answer", "mode": mode},
+                diagnostics={"adapter": "mock", "duration_ms": 100},
+            )
 
     client = make_pin_client(tmp_path)
     token = login(client)
@@ -547,6 +554,7 @@ def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(t
     started = client.post(
         "/chat/text",
         json={"request_id": "job-slow", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+        headers={"X-HVC-Adapter-Diagnostics": "1"},
     )
 
     assert started.status_code == 202
@@ -558,6 +566,7 @@ def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(t
     refreshed.cookies.set("hvc_session", token)
     completed = wait_for_job_state(refreshed, job_id, "complete")
     assert completed["result"]["result"]["speakable"] == "slow answer"
+    assert completed["result"]["diagnostics"] == {"adapter": "mock", "duration_ms": 100}
 
 def test_chat_text_job_slow_response_exposes_location_for_cors(tmp_path):
     class SlowAdapter(HermesAdapter):
@@ -1107,6 +1116,20 @@ def test_local_harness_reports_bad_timeout_after_opt_in(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "HVC_HERMES_TIMEOUT_SECONDS must be an integer" in captured.out
 
+def test_local_harness_blocker_counts_partial_timeouts():
+    module = load_harness_module()
+
+    blocker = module.summarize_blocker(
+        [
+            {"ok": False, "error_code": "HERMES_TIMEOUT"},
+            {"ok": True},
+            {"ok": True},
+        ],
+        30,
+    )
+
+    assert blocker == "1 of 3 live Hermes probes timed out after 30s."
+
 def test_text_latency_harness_refuses_without_opt_in(monkeypatch, capsys):
     module = load_text_latency_harness_module()
     monkeypatch.delenv("HVC_LIVE_TEXT_HARNESS", raising=False)
@@ -1211,6 +1234,128 @@ def test_text_latency_harness_blocks_remote_pin_submission(tmp_path, monkeypatch
     evidence = json.loads(output.read_text(encoding="utf-8"))
     assert evidence["auth"]["pin_submission"] == "blocked_remote_target"
     assert "secret-pin-that-must-not-post" not in json.dumps(evidence)
+
+def test_text_latency_harness_uses_background_job_path_and_redacts_result(tmp_path, monkeypatch, capsys):
+    module = load_text_latency_harness_module()
+    output = tmp_path / "evidence.json"
+    calls: list[dict] = []
+
+    def fake_request_json(_opener, url, method, payload, _timeout_seconds, extra_headers=None):
+        calls.append({"url": url, "method": method, "payload": payload, "extra_headers": extra_headers})
+        if url.endswith("/auth/session"):
+            return {"status": 401, "duration_ms": 1, "headers": {}, "body": b""}
+        if url.endswith("/auth/pin"):
+            assert payload == {"pin": "secret-pin-that-must-not-leak"}
+            return {"status": 200, "duration_ms": 1, "headers": {}, "body": b'{"ok":true}'}
+        if url.endswith("/chat/text"):
+            assert payload["job"] is True
+            assert payload["interactive_budget_ms"] == 0
+            body = {
+                "job_id": "job-123",
+                "request_id": payload["request_id"],
+                "state": "queued",
+            }
+            return {"status": 202, "duration_ms": 5, "headers": {}, "body": json.dumps(body).encode()}
+        if url.endswith("/chat/jobs/job-123"):
+            body = {
+                "job_id": "job-123",
+                "request_id": "latency-123",
+                "state": "complete",
+                "result": {
+                    "status": "completed",
+                    "request_id": "latency-123",
+                    "result": {"speakable": "raw answer", "display": "raw answer"},
+                    "diagnostics": {"adapter": "local_hermes", "duration_ms": 123, "phases": [{"name": "completion", "elapsed_ms": 123}]},
+                },
+            }
+            return {"status": 200, "duration_ms": 2, "headers": {}, "body": json.dumps(body).encode()}
+        raise AssertionError(f"unexpected request: {url}")
+
+    monkeypatch.setenv("HVC_LIVE_TEXT_HARNESS", "1")
+    monkeypatch.setenv("HVC_PIN", "secret-pin-that-must-not-leak")
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(
+        monotonic=module.time.monotonic,
+        time=lambda: 0.123,
+        sleep=lambda _seconds: None,
+    ))
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [
+            "run-live-text-latency-harness.py",
+            "--base-url",
+            "http://127.0.0.1:8765",
+            "--output",
+            str(output),
+            "--job-timeout-seconds",
+            "1",
+        ],
+    )
+
+    assert module.main() == 0
+    captured = capsys.readouterr()
+    assert '"ok": true' in captured.out
+    evidence = json.loads(output.read_text(encoding="utf-8"))
+    assert evidence["text_mode"] == "job"
+    assert evidence["chat"]["http_status"] == 202
+    assert evidence["blocker"] is None
+    assert evidence["job"]["body"]["state"] == "complete"
+    assert evidence["job"]["body"]["result"]["speakable_chars"] == len("raw answer")
+    assert evidence["job"]["body"]["adapter_diagnostics"]["duration_ms"] == 123
+    assert "raw answer" not in json.dumps(evidence)
+    assert "secret-pin-that-must-not-leak" not in json.dumps(evidence)
+    assert [call["url"] for call in calls] == [
+        "http://127.0.0.1:8765/auth/session",
+        "http://127.0.0.1:8765/auth/pin",
+        "http://127.0.0.1:8765/chat/text",
+        "http://127.0.0.1:8765/chat/jobs/job-123",
+    ]
+
+def test_text_latency_harness_handles_fast_job_completion_without_job_poll(tmp_path, monkeypatch, capsys):
+    module = load_text_latency_harness_module()
+    output = tmp_path / "evidence.json"
+
+    def fake_request_json(_opener, url, _method, payload, _timeout_seconds, extra_headers=None):
+        if url.endswith("/auth/session"):
+            return {"status": 200, "duration_ms": 1, "headers": {}, "body": b'{"authenticated":true}'}
+        if url.endswith("/chat/text"):
+            assert payload["job"] is True
+            assert payload["interactive_budget_ms"] == 1000
+            body = {
+                "status": "completed",
+                "request_id": payload["request_id"],
+                "result": {"speakable": "fast answer", "display": "fast answer"},
+            }
+            return {"status": 200, "duration_ms": 5, "headers": {"X-HVC-Chat-Job-Id": "job-fast"}, "body": json.dumps(body).encode()}
+        raise AssertionError(f"unexpected request: {url}")
+
+    monkeypatch.setenv("HVC_LIVE_TEXT_HARNESS", "1")
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [
+            "run-live-text-latency-harness.py",
+            "--base-url",
+            "http://127.0.0.1:8765",
+            "--interactive-budget-ms",
+            "1000",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert module.main() == 0
+    captured = capsys.readouterr()
+    assert '"ok": true' in captured.out
+    evidence = json.loads(output.read_text(encoding="utf-8"))
+    assert evidence["text_mode"] == "job"
+    assert evidence["chat"]["http_status"] == 200
+    assert evidence["chat"]["job_id_header_present"] is True
+    assert evidence["job"] is None
+    assert evidence["blocker"] is None
+    assert "fast answer" not in json.dumps(evidence)
 
 def test_confirmation_queue_exactly_once(tmp_path):
     client = make_client(tmp_path)

@@ -114,6 +114,7 @@ export class GeminiLiveSession {
 
     const setupModel = token.model ?? this.sessionOptions.model ?? this.options.model;
     const socket = this.webSocketFactory(buildGeminiLiveUrl(token.token));
+    socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.onopen = () => {
       this.sendJson(this.buildSetupMessage(setupModel));

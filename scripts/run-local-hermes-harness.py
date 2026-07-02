@@ -12,7 +12,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER_ROOT = ROOT / "apps" / "server"
-DEFAULT_OUTPUT = ROOT / "docs" / "specs" / "active" / "2026-06-07-hvc-hardening-live-verification" / "evidence" / "hermes-bridge-harness-latest.json"
+DEFAULT_OUTPUT = ROOT / ".private" / "evidence" / "hermes-bridge-harness-latest.json"
 sys.path.insert(0, str(SERVER_ROOT))
 
 from app.adapters import AdapterResult, LocalHermesAdapter  # noqa: E402

@@ -92,8 +92,9 @@
   malformed empty-output handling, configurable adapter timeout, fake-process
   contract coverage, and an opt-in real local Hermes harness.
 - The real local Hermes harness refuses accidental execution unless
-  `HVC_REAL_HERMES_HARNESS=1` is set and records redacted evidence under the
-  active spec bundle.
+  `HVC_REAL_HERMES_HARNESS=1` is set and records redacted evidence under
+  `.private/evidence/` by default. Public docs should keep only summary
+  evidence unless an operator intentionally provides a sanitized `--output`.
 - The 2026-06-08 local harness run resolved `/opt/homebrew/bin/hermes` and
   exercised `ask_agent`, `ask_bob`, and no-action probes through the read-only
   safe command. The refreshed run passed with `blocker: null`.

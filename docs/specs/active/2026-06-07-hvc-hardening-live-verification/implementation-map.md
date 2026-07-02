@@ -58,7 +58,8 @@
 - `scripts/validate-env.mjs`: fail-closed environment checks for private
   exposure, PIN strength, Gemini/local-Hermes prerequisites, and wildcard CORS.
 - `scripts/run-local-hermes-harness.py`: opt-in real local Hermes bridge harness
-  that records redacted read-only evidence when `HVC_REAL_HERMES_HARNESS=1`.
+  that records redacted read-only evidence under `.private/evidence/` when
+  `HVC_REAL_HERMES_HARNESS=1`.
 
 ## Release And Deployment Docs
 

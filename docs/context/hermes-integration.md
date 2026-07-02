@@ -68,11 +68,15 @@ HVC_REAL_HERMES_HARNESS=1 HVC_HERMES_ADAPTER=local HVC_HERMES_BIN=/opt/homebrew/
 ```
 
 The harness invokes the same `LocalHermesAdapter` contract as the backend and
-writes redacted evidence to:
+writes redacted local evidence to an ignored private path by default:
 
 ```text
-docs/specs/active/2026-06-07-hvc-hardening-live-verification/evidence/hermes-bridge-harness-latest.json
+.private/evidence/hermes-bridge-harness-latest.json
 ```
+
+Use `--output <path>` only when intentionally writing a sanitized artifact for
+review. Public docs and PRs should record summaries, timings, and pass/fail
+status rather than raw live Hermes responses.
 
 It probes:
 

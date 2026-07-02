@@ -1116,6 +1116,11 @@ def test_local_harness_reports_bad_timeout_after_opt_in(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "HVC_HERMES_TIMEOUT_SECONDS must be an integer" in captured.out
 
+def test_local_harness_defaults_to_private_evidence_path():
+    module = load_harness_module()
+
+    assert module.DEFAULT_OUTPUT == module.ROOT / ".private" / "evidence" / "hermes-bridge-harness-latest.json"
+
 def test_local_harness_blocker_counts_partial_timeouts():
     module = load_harness_module()
 

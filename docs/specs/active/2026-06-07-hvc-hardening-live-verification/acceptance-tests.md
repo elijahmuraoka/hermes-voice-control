@@ -98,7 +98,9 @@ node scripts/e2e-real-gemini-live.mjs
   malformed/empty output, local binary readiness, safe toolsets, and read-only
   prompt/no-action semantics.
 - 2026-06-08: live real-Hermes evidence is written by the opt-in harness to
-  `docs/specs/active/2026-06-07-hvc-hardening-live-verification/evidence/hermes-bridge-harness-latest.json`.
+  `.private/evidence/hermes-bridge-harness-latest.json` by default. Public
+  review artifacts should keep only sanitized summaries unless a reviewer asks
+  for an explicit `--output` artifact.
 - 2026-06-08: local harness run resolved `/opt/homebrew/bin/hermes` and
   exercised `ask_agent`, `ask_bob`, and no-action probes with `blocker: null`.
 - 2026-06-26: local adapter diagnostics now verify Hermes quiet chat query mode

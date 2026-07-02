@@ -78,6 +78,7 @@ export interface GeminiLiveSessionOptions {
 }
 
 export interface LiveWebSocket {
+  binaryType?: BinaryType;
   readyState: number;
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;

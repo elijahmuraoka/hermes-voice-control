@@ -14,13 +14,33 @@ export function toGeminiModelResource(model: string): string {
 export function parseServerMessage(
   data: unknown,
 ): Record<string, unknown> | null {
-  if (typeof data !== "string") return null;
+  const text = decodeServerMessageData(data);
+  if (!text) return null;
   try {
-    const parsed = JSON.parse(data) as unknown;
+    const parsed = JSON.parse(text) as unknown;
     return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+function decodeServerMessageData(data: unknown): string | null {
+  if (typeof data === "string") return data;
+  if (isArrayBufferLike(data)) return new TextDecoder().decode(data);
+  if (ArrayBuffer.isView(data)) {
+    return new TextDecoder().decode(
+      new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+    );
+  }
+  return null;
+}
+
+function isArrayBufferLike(value: unknown): value is ArrayBuffer {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    Object.prototype.toString.call(value) === "[object ArrayBuffer]"
+  );
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

@@ -8,6 +8,7 @@ import { buildGeminiLiveUrl, GeminiLiveSession } from "./geminiLive";
 import type { HvcDiagnosticsEvent } from "./diagnostics";
 
 class MockWebSocket {
+  binaryType?: BinaryType;
   readyState = 0;
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -23,6 +24,13 @@ class MockWebSocket {
   receive(payload: unknown) {
     this.onmessage?.(
       new MessageEvent("message", { data: JSON.stringify(payload) }),
+    );
+  }
+
+  receiveBinary(payload: unknown) {
+    const encoded = new TextEncoder().encode(JSON.stringify(payload));
+    this.onmessage?.(
+      new MessageEvent("message", { data: encoded.buffer }),
     );
   }
 
@@ -100,6 +108,7 @@ describe("GeminiLiveSession", () => {
     ws.open();
 
     expect(url).toBe(buildGeminiLiveUrl("ephemeral/token"));
+    expect(ws.binaryType).toBe("arraybuffer");
     expect(ws.sent[0]).toMatchObject({
       setup: {
         model: "models/gemini-2.5-flash-native-audio-latest",
@@ -109,6 +118,44 @@ describe("GeminiLiveSession", () => {
       },
     });
     expect(statuses).toEqual(["connecting", "connected"]);
+  });
+
+  it("decodes binary Gemini Live messages before handling setup completion", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const statuses: string[] = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: { onStatus: (status) => statuses.push(status) },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "ephemeral-token-secret",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        audio,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receiveBinary({ setupComplete: {} });
+    await Promise.resolve();
+    audio.emit({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" });
+
+    expect(statuses).toEqual([
+      "connecting",
+      "connected",
+      "setup-complete",
+      "listening",
+    ]);
+    expect(ws.sent.at(-1)).toEqual({
+      realtimeInput: {
+        mediaChunks: [{ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" }],
+      },
+    });
   });
 
   it("emits turn-complete separately from listening readiness", async () => {

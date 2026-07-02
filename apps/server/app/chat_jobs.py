@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .store import Store
-from .tools import ADAPTER_DIAGNOSTICS_RESPONSE_KEY, ToolCallRequest, ToolCancelRequest, ToolService
+from .tools import ADAPTER_DIAGNOSTICS_HEADER, ADAPTER_DIAGNOSTICS_RESPONSE_KEY, ToolCallRequest, ToolCancelRequest, ToolService
 
 CHAT_JOB_STATES = ("queued", "thinking", "needs_permission", "complete", "cancelled", "failed")
 TERMINAL_CHAT_JOB_STATES = {"complete", "cancelled", "failed"}
@@ -131,7 +131,7 @@ class ChatJobService:
             result["request_id"] = req.request_id
             if self._preserve_cancelled_job(job_id, session_hash, req, running):
                 return
-            stored_result = {key: value for key, value in result.items() if key != ADAPTER_DIAGNOSTICS_RESPONSE_KEY}
+            stored_result = chat_job_stored_result(result, include_adapter_diagnostics)
             state = "needs_permission" if result.get("status") == "pending_confirmation" else "complete"
             updated = self.store.update_chat_job_state(
                 job_id,
@@ -217,9 +217,38 @@ class ChatJobService:
         return True
 
 
+def chat_job_stored_result(result: dict[str, Any], include_adapter_diagnostics: bool) -> dict[str, Any]:
+    stored = {key: value for key, value in result.items() if key != ADAPTER_DIAGNOSTICS_RESPONSE_KEY}
+    diagnostics = result.get(ADAPTER_DIAGNOSTICS_RESPONSE_KEY)
+    if include_adapter_diagnostics and isinstance(diagnostics, dict):
+        stored["diagnostics"] = diagnostics
+    return stored
+
+
+def adapter_diagnostics_from_headers(headers: dict[str, str] | None) -> dict[str, Any] | None:
+    if not headers:
+        return None
+    value = None
+    for name, header_value in headers.items():
+        if name.lower() == ADAPTER_DIAGNOSTICS_HEADER.lower():
+            value = header_value
+            break
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def safe_http_error(exc: HTTPException) -> dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else "Request failed"
-    return {"status_code": exc.status_code, "detail": detail, "code": exc.headers.get("X-Error-Code") if exc.headers else None}
+    error = {"status_code": exc.status_code, "detail": detail, "code": exc.headers.get("X-Error-Code") if exc.headers else None}
+    diagnostics = adapter_diagnostics_from_headers(exc.headers)
+    if diagnostics:
+        error["diagnostics"] = diagnostics
+    return error
 
 
 def chat_job_tool_request(req: ToolCallRequest, job_id: str) -> ToolCallRequest:

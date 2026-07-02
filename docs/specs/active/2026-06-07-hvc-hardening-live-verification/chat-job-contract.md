@@ -108,6 +108,7 @@ SQLite persists `job_id`, `session_hash`, `request_id`, state, timestamps,
 cancellation status, and safe result/error metadata. It does not persist raw
 prompt text, transcript windows, PINs, cookies, or tokens. Completed final
 result text may be stored only as the session-scoped result that the
-authenticated UI needs after refresh. Adapter diagnostics are not stored as chat
-job result data; when explicitly requested, audit logs use the same redacted
-diagnostic metadata as the synchronous text path.
+authenticated UI needs after refresh. When explicitly requested with
+`X-HVC-Adapter-Diagnostics`, chat job status may also retain the same redacted
+adapter timing diagnostics as the synchronous text path so private live
+verification can distinguish queue/poll latency from Hermes execution latency.

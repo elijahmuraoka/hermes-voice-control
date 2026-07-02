@@ -97,6 +97,8 @@ def summarize_blocker(probes: list[dict[str, Any]], timeout_seconds: int) -> str
         return None
     error_codes = {probe.get("error_code") for probe in failed}
     if error_codes == {"HERMES_TIMEOUT"}:
+        if len(failed) != len(probes):
+            return f"{len(failed)} of {len(probes)} live Hermes probes timed out after {timeout_seconds}s."
         return f"All live Hermes probes timed out after {timeout_seconds}s."
     if error_codes == {"HERMES_MALFORMED_OUTPUT"}:
         return "Local Hermes returned empty output for every live probe."

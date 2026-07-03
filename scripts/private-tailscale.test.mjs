@@ -215,11 +215,228 @@ process.exit(1);
   }
 });
 
+test("smoke mode exits without long-lived runner messaging", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "hvc-private-tailscale-smoke-"));
+  const backendPort = await getAvailablePort();
+  const proxyPort = await getAvailablePort();
+  const fakeBin = join(tempDir, "bin");
+  const pinFile = join(tempDir, "pin.txt");
+
+  try {
+    writeFileSync(pinFile, "supersecretpin\n", { mode: 0o600 });
+    writeExecutable(
+      join(fakeBin, "pnpm"),
+      `#!/usr/bin/env node
+process.exit(0);
+`,
+    );
+    writeExecutable(
+      join(fakeBin, "tailscale"),
+      `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.join(" ") === "status --json") {
+  console.log(JSON.stringify({
+    Self: { DNSName: "bobs-mac-mini.tail764d71.ts.net." },
+  }));
+  process.exit(0);
+}
+if (args.join(" ") === "serve status --json") {
+  console.log(JSON.stringify({ Web: {}, TCP: {} }));
+  process.exit(0);
+}
+console.error("unexpected tailscale args: " + args.join(" "));
+process.exit(1);
+`,
+    );
+    writeExecutable(
+      join(fakeBin, "uv"),
+      `#!/usr/bin/env node
+import { createServer } from "node:http";
+
+const port = Number(process.env.HVC_PORT);
+const server = createServer((req, res) => {
+  if (req.url === "/readyz") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.url === "/auth/session" && !String(req.headers.cookie ?? "").includes("hvc_session=ok")) {
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ detail: "Authentication required" }));
+    return;
+  }
+  if (req.url === "/auth/session") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ authenticated: true }));
+    return;
+  }
+  if (req.url === "/auth/pin" && req.method === "POST") {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "set-cookie": "hvc_session=ok; HttpOnly; Secure; SameSite=Lax",
+      });
+      res.end(JSON.stringify({ authenticated: true }));
+    });
+    return;
+  }
+  res.writeHead(404, { "content-type": "application/json" });
+  res.end(JSON.stringify({ detail: "not found" }));
+});
+server.listen(port, "127.0.0.1");
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+`,
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        runnerScript,
+        "--smoke",
+        "--no-build",
+        `--backend-port=${backendPort}`,
+        `--proxy-port=${proxyPort}`,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HVC_PIN_FILE: pinFile,
+          PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        },
+        timeout: 10_000,
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Smoke completed without configuring Tailscale Serve/);
+    assert.doesNotMatch(result.stdout, /Private runner is holding/);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("long-lived mode fails when backend exits cleanly after readiness", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "hvc-private-tailscale-child-exit-"));
+  const backendPort = await getAvailablePort();
+  const proxyPort = await getAvailablePort();
+  const fakeBin = join(tempDir, "bin");
+  const pinFile = join(tempDir, "pin.txt");
+
+  try {
+    writeFileSync(pinFile, "supersecretpin\n", { mode: 0o600 });
+    writeExecutable(
+      join(fakeBin, "pnpm"),
+      `#!/usr/bin/env node
+process.exit(0);
+`,
+    );
+    writeExecutable(
+      join(fakeBin, "tailscale"),
+      `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.join(" ") === "status --json") {
+  console.log(JSON.stringify({
+    Self: { DNSName: "bobs-mac-mini.tail764d71.ts.net." },
+  }));
+  process.exit(0);
+}
+if (args.join(" ") === "serve status --json") {
+  console.log(JSON.stringify({ Web: {}, TCP: {} }));
+  process.exit(0);
+}
+console.error("unexpected tailscale args: " + args.join(" "));
+process.exit(1);
+`,
+    );
+    writeFakeBackend(fakeBin, { exitAfterReadyMs: 1_000 });
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        runnerScript,
+        "--local",
+        "--no-build",
+        `--backend-port=${backendPort}`,
+        `--proxy-port=${proxyPort}`,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HVC_PIN_FILE: pinFile,
+          PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        },
+        timeout: 10_000,
+      },
+    );
+
+    assert.equal(result.signal, null, result.stderr || result.stdout);
+    assert.notEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Private runner is holding/);
+    assert.match(result.stderr, /backend exited with 0/);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 function writeExecutable(path, contents) {
   const directory = dirname(path);
   if (!existsSync(directory)) mkdirSync(directory, { recursive: true });
   writeFileSync(path, contents, { mode: 0o700 });
   chmodSync(path, 0o700);
+}
+
+function writeFakeBackend(fakeBin, options = {}) {
+  const exitAfterReadyMs =
+    typeof options.exitAfterReadyMs === "number" ? options.exitAfterReadyMs : null;
+  const listenCallback =
+    exitAfterReadyMs === null
+      ? ""
+      : `, () => { setTimeout(() => process.exit(0), ${exitAfterReadyMs}); }`;
+  writeExecutable(
+    join(fakeBin, "uv"),
+    `#!/usr/bin/env node
+import { createServer } from "node:http";
+
+const port = Number(process.env.HVC_PORT);
+const server = createServer((req, res) => {
+  if (req.url === "/readyz") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.url === "/auth/session" && !String(req.headers.cookie ?? "").includes("hvc_session=ok")) {
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ detail: "Authentication required" }));
+    return;
+  }
+  if (req.url === "/auth/session") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ authenticated: true }));
+    return;
+  }
+  if (req.url === "/auth/pin" && req.method === "POST") {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "set-cookie": "hvc_session=ok; HttpOnly; Secure; SameSite=Lax",
+      });
+      res.end(JSON.stringify({ authenticated: true }));
+    });
+    return;
+  }
+  res.writeHead(404, { "content-type": "application/json" });
+  res.end(JSON.stringify({ detail: "not found" }));
+});
+server.listen(port, "127.0.0.1"${listenCallback});
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+`,
+  );
 }
 
 async function waitForRunner(child, markerFile) {
@@ -239,6 +456,9 @@ async function waitForRunner(child, markerFile) {
       15_000,
       () => stderr || stdout,
     );
+    await delay(750);
+    assert.equal(child.exitCode, null, stderr || stdout);
+    assert.equal(child.signalCode, null, stderr || stdout);
     return { stdout, stderr };
   } finally {
     child.kill("SIGTERM");
@@ -263,6 +483,10 @@ async function waitUntil(predicate, timeoutMs, describeFailure) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
   }
   throw new Error(`Timed out waiting for runner: ${describeFailure()}`);
+}
+
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 function getAvailablePort() {

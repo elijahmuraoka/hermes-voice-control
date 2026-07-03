@@ -180,7 +180,12 @@ async function main() {
     console.log("Smoke completed without configuring Tailscale Serve.");
   }
 
-  if (smoke) shutdown(0);
+  if (smoke) {
+    shutdown(0);
+    return;
+  }
+  console.log("Private runner is holding the backend and proxy open. Press Ctrl+C to stop.");
+  await waitUntilStopped();
 }
 
 function readPin() {
@@ -474,8 +479,12 @@ function start(name, command, commandArgs, options) {
   child.on("exit", (code, signal) => {
     if (shuttingDown) return;
     console.error(`${name} exited with ${signal ?? code}`);
-    shutdown(code ?? 1);
+    shutdown(1);
   });
+}
+
+function waitUntilStopped() {
+  return new Promise(() => {});
 }
 
 async function waitForHttp(url, expectedStatus) {

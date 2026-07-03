@@ -68,6 +68,7 @@ import "./styles.css";
 const uid = () => Math.random().toString(36).slice(2);
 const HOLD_DELAY_MS = 220;
 const NO_SPEECH_TIMEOUT_MS = 3500;
+const BASIC_HOLD_SPEECH_RESTART_LIMIT = 2;
 const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
 const TOOL_RESPONSE_TIMEOUT_MS = 95000;
 const TEXT_JOB_POLL_MS = 1400;
@@ -110,6 +111,9 @@ type SpeechCaptureState = {
   ended: boolean;
   finished: boolean;
   releaseRequested: boolean;
+  restartAttempts: number;
+  stopping: boolean;
+  aborting: boolean;
 };
 
 type AuthGateProps = {
@@ -292,7 +296,17 @@ export default function App() {
       clearPressTimer();
       clearVoiceTurnTimers();
       clearTextJobPollTimers();
-      speechCaptureRef.current?.recognition.abort();
+      const activeSpeechCapture = speechCaptureRef.current;
+      if (activeSpeechCapture) {
+        activeSpeechCapture.finished = true;
+        activeSpeechCapture.aborting = true;
+        speechCaptureRef.current = null;
+        try {
+          activeSpeechCapture.recognition.abort();
+        } catch {
+          // The browser may already have ended recognition during teardown.
+        }
+      }
       speechCaptureRef.current = null;
       currentEndingRef.current = true;
       currentSessionRef.current?.disconnect();
@@ -983,10 +997,55 @@ export default function App() {
     if (speechCaptureRef.current === capture) speechCaptureRef.current = null;
   }
 
+  function recognitionErrorMessage(error: string) {
+    if (error === "not-allowed" || error === "service-not-allowed")
+      return speechRecognitionPermissionMessage();
+    if (error === "audio-capture")
+      return "I could not reach a microphone in this browser. Check the input device, then try again or type in the transcript.";
+    if (error === "language-not-supported")
+      return "This browser does not support speech recognition for your current language. Switch to Live or type in the transcript.";
+    return "Browser speech recognition stopped before it understood you. Try again, switch to Live, or type in the transcript.";
+  }
+
+  function isBlockingSpeechRecognitionError(error: string) {
+    return (
+      error === "not-allowed" ||
+      error === "service-not-allowed" ||
+      error === "audio-capture" ||
+      error === "language-not-supported"
+    );
+  }
+
+  function restartSpeechCapture(capture: SpeechCaptureState) {
+    if (capture.restartAttempts >= BASIC_HOLD_SPEECH_RESTART_LIMIT)
+      return false;
+    capture.restartAttempts += 1;
+    capture.ended = false;
+    try {
+      capture.recognition.start();
+      return true;
+    } catch {
+      capture.ended = true;
+      return false;
+    }
+  }
+
+  function settleEndedSpeechCapture(capture: SpeechCaptureState) {
+    if (speechCaptureRef.current !== capture || capture.finished) return;
+    capture.ended = true;
+    if (capture.releaseRequested) {
+      finishSpeechCapture(capture);
+      return;
+    }
+    if (!speechCaptureText(capture) && !restartSpeechCapture(capture))
+      finishSpeechCapture(capture);
+  }
+
   function abortActiveSpeechCapture() {
     const capture = speechCaptureRef.current;
     if (!capture || capture.finished) return;
     capture.finished = true;
+    capture.aborting = true;
     clearSpeechCapture(capture);
     try {
       capture.recognition.abort();
@@ -1007,6 +1066,7 @@ export default function App() {
   function failSpeechCapture(capture: SpeechCaptureState, message: string) {
     if (capture.finished) return;
     capture.finished = true;
+    capture.aborting = true;
     clearSpeechCapture(capture);
     try {
       capture.recognition.abort();
@@ -1087,6 +1147,9 @@ export default function App() {
       ended: false,
       finished: false,
       releaseRequested: false,
+      restartAttempts: 0,
+      stopping: false,
+      aborting: false,
     };
     speechCaptureRef.current = capture;
 
@@ -1102,22 +1165,20 @@ export default function App() {
         .filter(Boolean)
         .join(" ");
       capture.interimText = next.interimText;
+      if (speechCaptureText(capture)) capture.restartAttempts = 0;
       updateSpeechCaptureEntry(capture, speechCaptureText(capture));
     };
     recognition.onerror = (event) => {
       if (speechCaptureRef.current !== capture || capture.finished) return;
+      if (event.error === "aborted" && (capture.stopping || capture.aborting))
+        return;
       if (event.error === "no-speech") return;
-      failSpeechCapture(
-        capture,
-        event.error === "not-allowed" || event.error === "service-not-allowed"
-          ? speechRecognitionPermissionMessage()
-          : "Speech recognition stopped before I could understand that. Try holding a little longer, switch to Live, or type it.",
-      );
+      if (!isBlockingSpeechRecognitionError(event.error)) return;
+      failSpeechCapture(capture, recognitionErrorMessage(event.error));
     };
     recognition.onend = () => {
       if (speechCaptureRef.current !== capture || capture.finished) return;
-      capture.ended = true;
-      if (capture.releaseRequested) finishSpeechCapture(capture);
+      settleEndedSpeechCapture(capture);
     };
 
     try {
@@ -1140,6 +1201,7 @@ export default function App() {
     if (!capture || capture.finished) return;
     if (cancel) {
       capture.finished = true;
+      capture.aborting = true;
       clearSpeechCapture(capture);
       try {
         capture.recognition.abort();
@@ -1164,6 +1226,7 @@ export default function App() {
       return;
     }
     try {
+      capture.stopping = true;
       capture.recognition.stop();
     } catch {
       finishSpeechCapture(capture);

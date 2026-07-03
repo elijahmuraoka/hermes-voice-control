@@ -796,6 +796,101 @@ describe("App", () => {
     expect(screen.getByText("finish this after release")).toBeInTheDocument();
   });
 
+  it("keeps listening when basic hold speech recognition ends silently before release", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Hold-to-talk could not hear you."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("does not hard-fail basic hold for recoverable speech recognition errors", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+
+    act(() => speech.instances[0].emitError("network"));
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Hold-to-talk could not hear you."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Speech recognition stopped before I could understand/i),
+    ).not.toBeInTheDocument();
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("settles basic hold when silent recognition cannot restart again", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+
+    await act(async () => {
+      speech.instances[0].onend?.();
+      speech.instances[0].onend?.();
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
   it("returns silent basic hold-to-talk turns to idle instead of fake listening", async () => {
     const speech = installSpeechRecognitionMock();
     await renderUnlockedApp();
@@ -833,6 +928,27 @@ describe("App", () => {
     expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
     expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("does not restart basic hold speech recognition during unmount cleanup", async () => {
+    const speech = installSpeechRecognitionMock();
+    const view = render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    vi.useRealTimers();
+
+    expect(speech.instances[0].abort).toHaveBeenCalledTimes(1);
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
   });
 
   it("keeps Live connected when basic hold speech recognition is unavailable", async () => {

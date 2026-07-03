@@ -44,6 +44,49 @@ interface SpeechSynthesisTestMock {
   setSpeaking: (speaking: boolean) => void;
 }
 
+interface MockSpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface MockSpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  item: (index: number) => MockSpeechRecognitionAlternative;
+  [index: number]: MockSpeechRecognitionAlternative | boolean | number | ((index: number) => MockSpeechRecognitionAlternative);
+}
+
+interface MockSpeechRecognitionResultList {
+  length: number;
+  item: (index: number) => MockSpeechRecognitionResult;
+  [index: number]: MockSpeechRecognitionResult | number | ((index: number) => MockSpeechRecognitionResult);
+}
+
+interface MockSpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: MockSpeechRecognitionResultList;
+}
+
+interface MockSpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message?: string;
+}
+
+interface MockSpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onresult: ((event: MockSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: MockSpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+  abort: ReturnType<typeof vi.fn>;
+  emitResult: (text: string, isFinal?: boolean) => void;
+  emitError: (error: string) => void;
+}
+
 interface TestVoiceSession {
   callbacks: {
     onStatus?: (status: "agent-speaking" | "turn-complete") => void;
@@ -63,6 +106,7 @@ interface TestVoiceSession {
       response: Record<string, unknown>;
     }) => void;
   };
+  disconnect: ReturnType<typeof vi.fn>;
   setMicrophoneEnabled: ReturnType<typeof vi.fn>;
 }
 
@@ -183,6 +227,74 @@ function installSpeechSynthesisMock({
       state.speaking = speaking;
     },
   };
+}
+
+function speechResult(
+  transcript: string,
+  isFinal: boolean,
+): MockSpeechRecognitionResult {
+  const alternative = { transcript, confidence: 0.9 };
+  return {
+    0: alternative,
+    isFinal,
+    length: 1,
+    item: () => alternative,
+  };
+}
+
+function speechResults(
+  result: MockSpeechRecognitionResult,
+): MockSpeechRecognitionResultList {
+  return {
+    0: result,
+    length: 1,
+    item: () => result,
+  };
+}
+
+function installSpeechRecognitionMock({
+  stopEnds = true,
+}: { stopEnds?: boolean } = {}): {
+  instances: MockSpeechRecognitionInstance[];
+} {
+  const instances: MockSpeechRecognitionInstance[] = [];
+
+  class MockSpeechRecognition implements MockSpeechRecognitionInstance {
+    continuous = false;
+    interimResults = false;
+    lang = "";
+    maxAlternatives = 0;
+    onresult: ((event: MockSpeechRecognitionEvent) => void) | null = null;
+    onerror: ((event: MockSpeechRecognitionErrorEvent) => void) | null = null;
+    onend: (() => void) | null = null;
+    start = vi.fn();
+    stop = vi.fn(() => {
+      if (stopEnds) this.onend?.();
+    });
+    abort = vi.fn(() => this.onend?.());
+
+    constructor() {
+      instances.push(this);
+    }
+
+    emitResult(text: string, isFinal = true) {
+      const event = new Event("result") as MockSpeechRecognitionEvent;
+      Object.defineProperties(event, {
+        resultIndex: { value: 0 },
+        results: { value: speechResults(speechResult(text, isFinal)) },
+      });
+      this.onresult?.(event);
+    }
+
+    emitError(error: string) {
+      const event = new Event("error") as MockSpeechRecognitionErrorEvent;
+      Object.defineProperty(event, "error", { value: error });
+      this.onerror?.(event);
+    }
+  }
+
+  vi.stubGlobal("webkitSpeechRecognition", MockSpeechRecognition);
+  return { instances };
 }
 
 function createStorageMock(): Storage {
@@ -414,6 +526,11 @@ describe("App", () => {
     );
   }
 
+  function switchToBasicHoldMode() {
+    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+  }
+
   async function startListeningVoice(): Promise<TestVoiceSession> {
     const orb = screen.getByLabelText(/Voice orb/);
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -474,7 +591,7 @@ describe("App", () => {
     await user.tab();
     expect(screen.getByRole("button", { name: /^Mute$/ })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: /^End$/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Hold$/ })).toHaveFocus();
     await user.tab();
     expect(
       screen.getByRole("button", {
@@ -539,6 +656,216 @@ describe("App", () => {
         message: "hello",
       }),
     );
+  });
+
+  it("uses basic hold-to-talk speech recognition after explicit mode switch", async () => {
+    const speech = installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Mute$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Hold$/ })).toBeInTheDocument();
+
+    switchToBasicHoldMode();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Mute$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Live$/ })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Basic Hold uses this browser's speech recognition/i),
+    ).toBeInTheDocument();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    vi.useRealTimers();
+
+    expect(speech.instances).toHaveLength(1);
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+
+    act(() => speech.instances[0].emitResult("turn on the lights", false));
+    expect(screen.getByLabelText("Live transcript")).toHaveTextContent(
+      "turn on the lights",
+    );
+
+    act(() => speech.instances[0].emitResult("turn on the lights please", true));
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(chatTextBodies[0]).toEqual(
+        expect.objectContaining({
+          job: true,
+          interactive_budget_ms: 0,
+          message: "turn on the lights please",
+        }),
+      ),
+    );
+    expect(screen.getByText("turn on the lights please")).toBeInTheDocument();
+    expect(screen.getByText("hello")).toBeInTheDocument();
+    expect(realtimeMock.instances).toHaveLength(0);
+  });
+
+  it("keeps normal pointer release from being cancelled by lost pointer capture", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    act(() => speech.instances[0].emitResult("hello from hold", true));
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    fireEvent.lostPointerCapture(orb, { pointerId: 1 });
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(chatTextBodies[0]).toEqual(
+        expect.objectContaining({ message: "hello from hold" }),
+      ),
+    );
+    expect(speech.instances[0].stop).toHaveBeenCalledTimes(1);
+    expect(speech.instances[0].abort).not.toHaveBeenCalled();
+    expect(screen.getByText("hello from hold")).toBeInTheDocument();
+  });
+
+  it("does not replace a released basic hold capture before the browser ends it", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    act(() => speech.instances[0].emitResult("first quick turn", true));
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    expect(speech.instances).toHaveLength(1);
+
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(chatTextBodies[0]).toEqual(
+        expect.objectContaining({ message: "first quick turn" }),
+      ),
+    );
+    expect(screen.getByText("first quick turn")).toBeInTheDocument();
+  });
+
+  it("waits for release when browser speech recognition ends early", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    act(() => speech.instances[0].emitResult("finish this after release", true));
+
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    expect(chatTextBodies).toHaveLength(0);
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(chatTextBodies[0]).toEqual(
+        expect.objectContaining({ message: "finish this after release" }),
+      ),
+    );
+    expect(speech.instances[0].stop).not.toHaveBeenCalled();
+    expect(screen.getByText("finish this after release")).toBeInTheDocument();
+  });
+
+  it("returns silent basic hold-to-talk turns to idle instead of fake listening", async () => {
+    const speech = installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    expect(speech.instances[0].stop).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("returns cancelled basic hold-to-talk turns to idle instead of fake listening", async () => {
+    const speech = installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+
+    fireEvent.pointerCancel(orb, { pointerId: 1 });
+
+    expect(speech.instances[0].abort).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("keeps Live connected when basic hold speech recognition is unavailable", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
+
+    expect(session.disconnect).not.toHaveBeenCalled();
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Hold$/ })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Basic hold-to-talk needs browser speech recognition/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not start basic hold speech recognition while completion audio is active", async () => {
+    const speech = installSpeechSynthesisMock();
+    const recognition = installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    speech.setSpeaking(true);
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+
+    expect(recognition.instances).toHaveLength(0);
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
   });
 
   it("recovers when the initial typed chat job creation request never returns", async () => {
@@ -1106,8 +1433,9 @@ describe("App", () => {
 
   it("does not start a fresh voice session while spoken completion audio is active", async () => {
     const speech = installSpeechSynthesisMock();
+    installSpeechRecognitionMock();
     await renderUnlockedApp();
-    await startListeningVoice();
+    const session = await startListeningVoice();
     vi.useFakeTimers();
 
     await startBackgroundTextJob(
@@ -1121,22 +1449,16 @@ describe("App", () => {
     expect(speech.speak).toHaveBeenCalledTimes(1);
     expect(realtimeMock.instances).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: /^End$/ }));
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
-
-    const orb = screen.getByLabelText(/Voice orb/);
-    fireEvent.pointerDown(orb, { pointerId: 5, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 5 });
-    await act(async () => {
-      await Promise.resolve();
-    });
+    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
 
     expect(realtimeMock.instances).toHaveLength(1);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(session.disconnect).not.toHaveBeenCalled();
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
   });
 
   it("does not let unmute or hold-to-talk enable capture during spoken completion audio", async () => {
     const speech = installSpeechSynthesisMock();
+    const recognition = installSpeechRecognitionMock();
     await renderUnlockedApp();
     const session = await startListeningVoice();
     vi.useFakeTimers();
@@ -1159,6 +1481,11 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Unmute$/ }));
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+    expect(session.disconnect).not.toHaveBeenCalled();
+    expect(recognition.instances).toHaveLength(0);
 
     const orb = screen.getByLabelText(/Voice orb/);
     fireEvent.pointerDown(orb, { pointerId: 3, button: 0 });
@@ -1495,6 +1822,46 @@ describe("App", () => {
     expect(
       screen.getByText("Session expired. Enter your private PIN again."),
     ).toBeInTheDocument();
+  });
+
+  it("aborts active basic speech recognition when background job auth expires", async () => {
+    const speech = installSpeechRecognitionMock();
+    chatPostMode = "job";
+    chatJobIds = ["job-auth-hold"];
+    chatJobStatuses.set("job-auth-hold", [
+      chatJobStatus("job-auth-hold", "thinking"),
+    ]);
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByLabelText("Type a message to your Hermes agent"), {
+      target: { value: "auth expires while holding" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    expect(speech.instances).toHaveLength(1);
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+
+    chatPollAuthExpired = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByLabelText("Private PIN")).toBeInTheDocument();
+    expect(speech.instances[0].abort).toHaveBeenCalledTimes(1);
+    act(() => speech.instances[0].emitResult("stale speech", true));
+    expect(chatTextBodies).toHaveLength(1);
+    expect(screen.queryByText("stale speech")).not.toBeInTheDocument();
   });
 
   it("does not resume hands-free capture just because the text composer blurs", async () => {
@@ -1875,6 +2242,7 @@ describe("App", () => {
 
   it("ignores stale session diagnostics and close callbacks after a new call starts", async () => {
     const user = userEvent.setup();
+    installSpeechRecognitionMock();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
@@ -1885,7 +2253,8 @@ describe("App", () => {
     );
     const first = realtimeMock.instances[0];
 
-    await user.click(screen.getByRole("button", { name: /End/ }));
+    await user.click(screen.getByRole("button", { name: /^Hold$/ }));
+    await user.click(screen.getByRole("button", { name: /^Live$/ }));
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     fireEvent.pointerUp(orb, { pointerId: 2 });
     await waitFor(() => expect(realtimeMock.instances).toHaveLength(2));
@@ -1911,7 +2280,7 @@ describe("App", () => {
     expect(JSON.stringify(snapshot)).not.toContain("stale session");
     expect(JSON.stringify(snapshot)).toContain("current session");
 
-    await user.click(screen.getByRole("button", { name: /End/ }));
+    await user.click(screen.getByRole("button", { name: /^Hold$/ }));
     expect(second.disconnect).toHaveBeenCalledTimes(1);
   });
 
@@ -2688,8 +3057,9 @@ describe("App", () => {
     );
   });
 
-  it("End disconnects the realtime session and returns to idle", async () => {
+  it("Hold mode switch disconnects the realtime session and returns to idle", async () => {
     const user = userEvent.setup();
+    installSpeechRecognitionMock();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
 
@@ -2699,9 +3069,9 @@ describe("App", () => {
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
 
-    await user.click(screen.getByRole("button", { name: /End/ }));
+    await user.click(screen.getByRole("button", { name: /^Hold$/ }));
 
     expect(realtimeMock.instances[0].disconnect).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
   });
 });

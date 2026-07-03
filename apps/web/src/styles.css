@@ -393,6 +393,11 @@ input {
   color: #ffb7a5;
 }
 
+.control-row .mode-toggle {
+  border-color: rgba(214, 179, 106, 0.34);
+  background: rgba(214, 179, 106, 0.12);
+}
+
 .control-row .completion-notice-toggle[aria-pressed="false"] {
   color: rgba(246, 240, 232, 0.62);
 }

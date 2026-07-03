@@ -143,8 +143,14 @@ Live requires a Gemini API key in the backend environment:
 ```bash
 HVC_GEMINI_MODE=real
 HVC_GEMINI_MODEL=gemini-2.5-flash-native-audio-latest
+HVC_GEMINI_VOICE_NAME=Charon
 GEMINI_API_KEY=...
 ```
+
+`HVC_GEMINI_VOICE_NAME` selects the prebuilt Gemini voice used for Live audio.
+`Charon` is the default because it is a clean, informative voice for a private
+operator agent. Set another supported prebuilt voice name if your Hermes agent
+should sound different.
 
 Then start the backend and web app as above.
 
@@ -250,6 +256,7 @@ chmod 600 .private/deployment/hvc-pin.txt
 cat > .private/deployment/launchd.env <<'EOF'
 HVC_PIN_FILE=.private/deployment/hvc-pin.txt
 HVC_GEMINI_MODE=real
+HVC_GEMINI_VOICE_NAME=Charon
 GEMINI_API_KEY=<redacted>
 HVC_HERMES_ADAPTER=local
 HVC_HERMES_BIN=/opt/homebrew/bin/hermes

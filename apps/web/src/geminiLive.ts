@@ -53,6 +53,17 @@ export type {
 } from "./gemini-live/types";
 export { buildGeminiLiveUrl } from "./gemini-live/protocol";
 
+function buildDefaultGenerationConfig(voiceName: string): Record<string, unknown> {
+  return {
+    responseModalities: ["AUDIO"],
+    speechConfig: {
+      voiceConfig: {
+        prebuiltVoiceConfig: { voiceName },
+      },
+    },
+  };
+}
+
 export class GeminiLiveSession {
   private readonly options: Required<Pick<GeminiLiveSessionOptions, "model">>;
   private readonly sessionOptions: GeminiLiveSessionOptions;
@@ -110,14 +121,20 @@ export class GeminiLiveSession {
       expires_at: token.expires_at,
       mode: token.mode,
       model: token.model,
+      voice_name: token.voice_name ?? token.voiceName,
     });
 
     const setupModel = token.model ?? this.sessionOptions.model ?? this.options.model;
+    const setupVoiceName =
+      token.voice_name ??
+      token.voiceName ??
+      this.sessionOptions.voiceName ??
+      "Charon";
     const socket = this.webSocketFactory(buildGeminiLiveUrl(token.token));
     socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.onopen = () => {
-      this.sendJson(this.buildSetupMessage(setupModel));
+      this.sendJson(this.buildSetupMessage(setupModel, setupVoiceName));
       this.emitStatus("connected");
     };
     socket.onmessage = (event) => void this.handleMessage(event);
@@ -197,12 +214,15 @@ export class GeminiLiveSession {
     });
   }
 
-  private buildSetupMessage(model: string): Record<string, unknown> {
+  private buildSetupMessage(
+    model: string,
+    voiceName: string,
+  ): Record<string, unknown> {
     const setup: Record<string, unknown> = {
       model: toGeminiModelResource(model),
-      generationConfig: this.sessionOptions.generationConfig ?? {
-        responseModalities: ["AUDIO"],
-      },
+      generationConfig:
+        this.sessionOptions.generationConfig ??
+        buildDefaultGenerationConfig(voiceName),
       tools: this.sessionOptions.tools ?? defaultTools(),
     };
 

@@ -112,7 +112,14 @@ describe("GeminiLiveSession", () => {
     expect(ws.sent[0]).toMatchObject({
       setup: {
         model: "models/gemini-2.5-flash-native-audio-latest",
-        generationConfig: { responseModalities: ["AUDIO"] },
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: "Charon" },
+            },
+          },
+        },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
       },
@@ -241,6 +248,7 @@ describe("GeminiLiveSession", () => {
           expires_at: "2026-01-01T00:00:00Z",
           mode: "real",
           model: "gemini-custom-live",
+          voice_name: "Orus",
         }),
         webSocketFactory: () => ws,
         audio: new MockAudio(),
@@ -254,9 +262,19 @@ describe("GeminiLiveSession", () => {
       expires_at: "2026-01-01T00:00:00Z",
       mode: "real",
       model: "gemini-custom-live",
+      voice_name: "Orus",
     });
     expect(ws.sent[0]).toMatchObject({
-      setup: { model: "models/gemini-custom-live" },
+      setup: {
+        model: "models/gemini-custom-live",
+        generationConfig: {
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: "Orus" },
+            },
+          },
+        },
+      },
     });
   });
 

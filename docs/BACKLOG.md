@@ -55,7 +55,9 @@ Open work not yet scoped into its own spec.
 
 ## Product Decisions
 
-- [ ] Choose the default Gemini voice/personality once real audio is stable.
+- [x] Choose the v1 default Gemini voice/personality guidance.
+  Default Live voice is configurable with `HVC_GEMINI_VOICE_NAME` and currently
+  defaults to `Charon`.
 - [x] Decide v1 action semantics: `LocalHermesAdapter` stays read-only and
   confirmation approval records intent only. A future executor would need its
   own design and issue.

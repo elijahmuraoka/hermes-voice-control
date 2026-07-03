@@ -155,6 +155,7 @@ adapter invokes only `hermes chat -Q -q <prompt> --toolsets safe`.
 ```bash
 export HVC_GEMINI_MODE=real
 export HVC_GEMINI_MODEL=gemini-2.5-flash-native-audio-latest
+export HVC_GEMINI_VOICE_NAME=Charon
 export GEMINI_API_KEY=<redacted>
 pnpm env:check
 cd apps/server && uv pip install -e '.[dev,real-gemini]'
@@ -267,6 +268,7 @@ chmod 600 .private/deployment/hvc-pin.txt
 cat > .private/deployment/launchd.env <<'EOF'
 HVC_PIN_FILE=.private/deployment/hvc-pin.txt
 HVC_GEMINI_MODE=real
+HVC_GEMINI_VOICE_NAME=Charon
 GEMINI_API_KEY=<redacted>
 HVC_HERMES_ADAPTER=local
 HVC_HERMES_BIN=/opt/homebrew/bin/hermes

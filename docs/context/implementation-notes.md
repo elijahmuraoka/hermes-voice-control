@@ -139,6 +139,7 @@
 
 ## Remaining gaps
 
-- Decide the default Gemini voice/personality guidance for Hermes agents once
-  real audio is enabled.
+- Validate real-time transcript rendering on physical operator browsers. The
+  Live setup requests Gemini input/output audio transcription, but provider
+  event timing and browser UI rendering still need live device evidence.
 - Do a final independent review after credentialed real Gemini Live smoke.

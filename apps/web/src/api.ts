@@ -58,6 +58,7 @@ export async function getGeminiToken() {
     expires_at: string;
     mode: string;
     model?: string | null;
+    voice_name?: string | null;
   }>("/gemini/ephemeral-token", { method: "POST" });
 }
 export async function cancelTools(requestIds: string[]) {

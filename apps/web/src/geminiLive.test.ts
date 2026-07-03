@@ -774,6 +774,397 @@ describe("GeminiLiveSession", () => {
     expect(audio.interrupted).toBe(1);
   });
 
+  it("suppresses model output until a backend tool response unlocks it", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const transcript = vi.fn();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const toolCaller = vi.fn(async () => ({
+      status: "completed",
+      result: { speakable: "tool answer", display: "tool answer" },
+    }));
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onTranscript: transcript,
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+        requireToolResponseForModelOutput: true,
+      },
+      {
+        tokenProvider: async () => ({
+          token: "t",
+          expires_at: "x",
+          mode: "mock",
+        }),
+        webSocketFactory: () => ws,
+        audio,
+        toolCaller,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      serverContent: {
+        inputTranscription: { text: "hello", finished: true },
+        outputTranscription: { text: "direct answer", finished: false },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "direct" } },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(transcript).toHaveBeenCalledWith({
+      role: "user",
+      text: "hello",
+      final: true,
+    });
+    expect(transcript).not.toHaveBeenCalledWith(
+      expect.objectContaining({ role: "model", text: "direct answer" }),
+    );
+    expect(audio.played).toEqual([]);
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "model_output_suppressed" }),
+      ]),
+    );
+
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-1", name: "ask_agent", args: { message: "hello" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "tool answer", finished: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "tool" } },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(toolCaller).toHaveBeenCalledWith(
+      {
+        id: "call-1",
+        name: "ask_agent",
+        args: { message: "hello" },
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(transcript).toHaveBeenCalledWith({
+      role: "model",
+      text: "tool answer",
+      final: true,
+    });
+    expect(audio.played).toEqual([{ base64: "tool", rate: 24000 }]);
+  });
+
+  it("does not unlock model output for non-answer tool responses", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const transcript = vi.fn();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const toolCaller = vi.fn(async () => ({
+      status: "pending_confirmation",
+      confirmation_id: "confirm-1",
+      summary: "Needs approval",
+    }));
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onTranscript: transcript,
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+        requireToolResponseForModelOutput: true,
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio,
+        toolCaller,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          {
+            id: "call-action",
+            name: "propose_action",
+            args: { summary: "Needs approval" },
+          },
+        ],
+      },
+    });
+    await Promise.resolve();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "I'll do that", finished: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "direct" } },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(toolCaller).toHaveBeenCalledWith(
+      {
+        id: "call-action",
+        name: "propose_action",
+        args: { summary: "Needs approval" },
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(transcript).not.toHaveBeenCalled();
+    expect(audio.played).toEqual([]);
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "model_output_suppressed" }),
+      ]),
+    );
+  });
+
+  it("does not unlock model output for failed ask_agent responses", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const transcript = vi.fn();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const toolCaller = vi.fn(async () => {
+      throw new Error("Hermes timed out");
+    });
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onTranscript: transcript,
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+        requireToolResponseForModelOutput: true,
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio,
+        toolCaller,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-failed", name: "ask_agent", args: { message: "hello" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "fallback model answer", finished: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "direct" } },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(ws.sent.at(-1)).toEqual({
+      toolResponse: {
+        functionResponses: [
+          {
+            id: "call-failed",
+            name: "ask_agent",
+            response: { error: "Hermes timed out" },
+          },
+        ],
+      },
+    });
+    expect(transcript).not.toHaveBeenCalled();
+    expect(audio.played).toEqual([]);
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "model_output_suppressed" }),
+      ]),
+    );
+  });
+
+  it("keeps an unlocked Hermes-backed answer open while finalizing input", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const transcript = vi.fn();
+    const toolCaller = vi.fn(async () => ({
+      status: "completed",
+      result: { speakable: "tool answer", display: "tool answer" },
+    }));
+    const session = new GeminiLiveSession(
+      {
+        callbacks: { onTranscript: transcript },
+        audio: { startCapture: false },
+        requireToolResponseForModelOutput: true,
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio,
+        toolCaller,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-1", name: "ask_agent", args: { message: "hello" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "first chunk", finished: false },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "one" } },
+          ],
+        },
+      },
+    });
+    await Promise.resolve();
+
+    session.finalizeInputTurn();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "second chunk", finished: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "two" } },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(transcript).toHaveBeenCalledWith({
+      role: "model",
+      text: "first chunk",
+      final: false,
+    });
+    expect(transcript).toHaveBeenCalledWith({
+      role: "model",
+      text: "second chunk",
+      final: true,
+    });
+    expect(audio.played).toEqual([
+      { base64: "one", rate: 24000 },
+      { base64: "two", rate: 24000 },
+    ]);
+  });
+
+  it("resets the model output unlock when interrupting before turn complete", async () => {
+    const ws = new MockWebSocket();
+    const audio = new MockAudio();
+    const transcript = vi.fn();
+    const diagnostics: HvcDiagnosticsEvent[] = [];
+    const toolCaller = vi.fn(async () => ({
+      status: "completed",
+      result: { speakable: "tool answer", display: "tool answer" },
+    }));
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onTranscript: transcript,
+          onDiagnosticsEvent: (event) => diagnostics.push(event),
+        },
+        audio: { startCapture: false },
+        requireToolResponseForModelOutput: true,
+      },
+      {
+        tokenProvider: async () => ({ token: "t", expires_at: "x", mode: "mock" }),
+        webSocketFactory: () => ws,
+        audio,
+        toolCaller,
+      },
+    );
+
+    await session.connect();
+    ws.open();
+    ws.receive({
+      toolCall: {
+        functionCalls: [
+          { id: "call-1", name: "ask_agent", args: { message: "hello" } },
+        ],
+      },
+    });
+    await Promise.resolve();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "tool answer", finished: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "tool" } },
+          ],
+        },
+      },
+    });
+    await Promise.resolve();
+
+    expect(transcript).toHaveBeenCalledWith({
+      role: "model",
+      text: "tool answer",
+      final: true,
+    });
+    expect(audio.played).toEqual([{ base64: "tool", rate: 24000 }]);
+
+    transcript.mockClear();
+    audio.played = [];
+    session.interrupt();
+    ws.receive({
+      serverContent: {
+        outputTranscription: { text: "direct follow-up", finished: true },
+        modelTurn: {
+          parts: [
+            { inlineData: { mimeType: "audio/pcm;rate=24000", data: "direct" } },
+          ],
+        },
+        turnComplete: true,
+      },
+    });
+    await Promise.resolve();
+
+    expect(transcript).not.toHaveBeenCalled();
+    expect(audio.played).toEqual([]);
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "model_output_suppressed" }),
+      ]),
+    );
+  });
+
   it("suppresses Gemini tool responses for canceled tool calls", async () => {
     const ws = new MockWebSocket();
     let resolveTool!: (value: unknown) => void;

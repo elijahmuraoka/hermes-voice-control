@@ -59,6 +59,8 @@ export interface RealtimeVoiceAudioConfig {
 export interface RealtimeVoiceSessionOptions {
   callbacks?: RealtimeVoiceCallbacks;
   audio?: RealtimeVoiceAudioConfig;
+  systemInstruction?: string;
+  requireToolResponseForModelOutput?: boolean;
 }
 
 export interface RealtimeVoiceSession {

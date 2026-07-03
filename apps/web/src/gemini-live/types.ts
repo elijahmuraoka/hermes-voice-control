@@ -75,6 +75,7 @@ export interface GeminiLiveSessionOptions {
   systemInstruction?: string;
   enableInputTranscription?: boolean;
   enableOutputTranscription?: boolean;
+  requireToolResponseForModelOutput?: boolean;
   tools?: GeminiToolDeclaration[];
   audio?: GeminiLiveAudioConfig;
   callbacks?: GeminiLiveCallbacks;

@@ -77,6 +77,17 @@ const SPOKEN_COMPLETION_RESTORE_DELAY_MS = 2500;
 const SPOKEN_COMPLETION_RESTORE_CHECK_MS = 250;
 const SPOKEN_COMPLETION_MAX_DURATION_MS = 10000;
 
+function buildLiveHermesSystemInstruction(currentAgentName: string): string {
+  return [
+    `You are the realtime voice transport for ${currentAgentName}.`,
+    "For every user request that needs an answer, call ask_agent with the user's latest words before giving a user-facing response.",
+    "Include recent transcript context when it helps the Hermes agent understand the request.",
+    `Do not answer from your own model knowledge as ${currentAgentName}.`,
+    "After ask_agent returns, speak the returned speakable answer naturally and do not mention tool calls.",
+    "If the request appears to require permission or external action, still call ask_agent so the configured Hermes agent can explain the next step.",
+  ].join(" ");
+}
+
 type PressState = {
   pointerId: number | null;
   timer: number | null;
@@ -1592,6 +1603,8 @@ export default function App() {
       const session = createDefaultRealtimeVoiceSession({
         callbacks: buildSessionCallbacks(sessionGeneration),
         audio: { startMuted: stateRef.current.isMuted },
+        systemInstruction: buildLiveHermesSystemInstruction(agentName),
+        requireToolResponseForModelOutput: true,
       });
       sessionRef.current = session;
       await session.connect();

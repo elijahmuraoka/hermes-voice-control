@@ -9,6 +9,7 @@ export type HvcDiagnosticsEventName =
   | "mic_start"
   | "provider_response_first"
   | "audio_playback_first"
+  | "model_output_suppressed"
   | "tool_call_request"
   | "tool_call_response"
   | "tool_call_cancellation"

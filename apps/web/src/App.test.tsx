@@ -331,6 +331,7 @@ function createConnectGate() {
 
 vi.mock("./realtime", () => {
   class MockRealtimeVoiceSession {
+    options: any;
     callbacks: any;
     connect = vi.fn(async () => {
       if (realtimeMock.connectError) throw realtimeMock.connectError;
@@ -354,6 +355,7 @@ vi.mock("./realtime", () => {
     interrupt = vi.fn(() => this.callbacks.onStatus?.("interrupted"));
 
     constructor(options: any) {
+      this.options = options;
       this.callbacks = options.callbacks;
       realtimeMock.instances.push(this);
     }
@@ -2246,6 +2248,15 @@ describe("App", () => {
     expect(screen.queryByText("test voice")).not.toBeInTheDocument();
     expect(realtimeMock.instances).toHaveLength(1);
     expect(realtimeMock.instances[0].connect).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances[0].options.systemInstruction).toContain(
+      "call ask_agent",
+    );
+    expect(realtimeMock.instances[0].options.systemInstruction).toContain(
+      "Do not answer from your own model knowledge",
+    );
+    expect(realtimeMock.instances[0].options.systemInstruction).toContain(
+      "Hermes Agent",
+    );
     expect(fetch).not.toHaveBeenCalledWith(
       expect.stringContaining("/gemini/ephemeral-token"),
       expect.anything(),

@@ -17,6 +17,8 @@ export interface GeminiEphemeralToken {
   expires_at: string;
   mode: string;
   model?: string | null;
+  voice_name?: string | null;
+  voiceName?: string | null;
 }
 
 export interface GeminiTranscriptEvent {
@@ -68,6 +70,7 @@ export interface GeminiToolDeclaration {
 
 export interface GeminiLiveSessionOptions {
   model?: string;
+  voiceName?: string;
   generationConfig?: Record<string, unknown>;
   systemInstruction?: string;
   enableInputTranscription?: boolean;

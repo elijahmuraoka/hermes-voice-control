@@ -200,7 +200,7 @@ function waitForOutcome(ws) {
 }
 
 async function main() {
-  const { token, mode, model } = await postJson("/gemini/ephemeral-token");
+  const { token, mode, model, voice_name: voiceName = "Charon" } = await postJson("/gemini/ephemeral-token");
   if (!token || mode !== "real")
     throw new Error(`expected real token, got mode=${mode}`);
   const setupModel = model ?? MODEL;
@@ -214,7 +214,14 @@ async function main() {
       JSON.stringify({
         setup: {
           model: toGeminiModelResource(setupModel),
-          generationConfig: { responseModalities: ["AUDIO"] },
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
+              },
+            },
+          },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           systemInstruction: {
@@ -257,6 +264,7 @@ async function main() {
         ok: true,
         mode,
         model: setupModel,
+        voiceName,
         setupComplete: true,
         outputAudio: outcome.outputAudio,
         outputTextChars: outcome.outputText.length,

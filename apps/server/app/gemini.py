@@ -10,6 +10,7 @@ class EphemeralToken:
     expires_at: datetime
     mode: str
     model: str | None = None
+    voice_name: str | None = None
 
 def google_genai_available() -> bool:
     try:
@@ -35,13 +36,20 @@ class GeminiTokenBroker:
 class MockGeminiTokenBroker(GeminiTokenBroker):
     mode = "mock"
     model = "gemini-2.5-flash-native-audio-latest"
+    voice_name = "Charon"
 
     @property
     def client_available(self) -> bool:
         return True
 
     def create_token(self) -> EphemeralToken:
-        return EphemeralToken("mock_gemini_ephemeral_" + secrets.token_urlsafe(18), datetime.now(UTC) + timedelta(minutes=5), "mock", self.model)
+        return EphemeralToken(
+            "mock_gemini_ephemeral_" + secrets.token_urlsafe(18),
+            datetime.now(UTC) + timedelta(minutes=5),
+            "mock",
+            self.model,
+            self.voice_name,
+        )
 
 class RealGeminiTokenBroker(GeminiTokenBroker):
     mode = "real"
@@ -49,6 +57,10 @@ class RealGeminiTokenBroker(GeminiTokenBroker):
     @property
     def model(self) -> str:
         return os.getenv("HVC_GEMINI_MODEL", "gemini-2.5-flash-native-audio-latest")
+
+    @property
+    def voice_name(self) -> str:
+        return os.getenv("HVC_GEMINI_VOICE_NAME", "Charon")
 
     @property
     def api_key_configured(self) -> bool:
@@ -69,11 +81,32 @@ class RealGeminiTokenBroker(GeminiTokenBroker):
         client = genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
         expires_at = datetime.now(UTC) + timedelta(minutes=10)
         new_session_expires = datetime.now(UTC) + timedelta(seconds=60)
-        token = client.auth_tokens.create(config={"uses": 1, "expire_time": expires_at.isoformat().replace("+00:00", "Z"), "new_session_expire_time": new_session_expires.isoformat().replace("+00:00", "Z"), "live_connect_constraints": {"model": self.model, "config": {"response_modalities": ["AUDIO"]}}})
+        live_config = {
+            "response_modalities": ["AUDIO"],
+            "speech_config": {
+                "voice_config": {
+                    "prebuilt_voice_config": {"voice_name": self.voice_name}
+                }
+            },
+        }
+        token = client.auth_tokens.create(
+            config={
+                "uses": 1,
+                "expire_time": expires_at.isoformat().replace("+00:00", "Z"),
+                "new_session_expire_time": new_session_expires.isoformat().replace("+00:00", "Z"),
+                "live_connect_constraints": {
+                    "model": self.model,
+                    "config": live_config,
+                },
+                # Empty means lock the non-null model/audio/voice fields while
+                # still allowing the browser to add transcription and tools.
+                "lock_additional_fields": [],
+            }
+        )
         name = getattr(token, "name", None)
         if not name:
             raise RuntimeError("Gemini did not return an ephemeral token")
-        return EphemeralToken(name, expires_at, "real", self.model)
+        return EphemeralToken(name, expires_at, "real", self.model, self.voice_name)
 
 def build_broker(mode: str) -> GeminiTokenBroker:
     return RealGeminiTokenBroker() if mode == "real" else MockGeminiTokenBroker()

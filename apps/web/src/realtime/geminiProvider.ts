@@ -84,6 +84,7 @@ function toGeminiCallbacks(
         expires_at: token.expires_at,
         mode: token.mode,
         model: token.model,
+        voice_name: token.voice_name,
         provider: PROVIDER_ID,
       }),
     onTranscript: (event) =>

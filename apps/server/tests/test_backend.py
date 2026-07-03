@@ -125,6 +125,7 @@ def test_readyz_reports_safe_runtime_posture(tmp_path):
     assert body["ok"] is True
     assert body["checks"]["database"] == "ok"
     assert body["checks"]["gemini_mode"] == "mock"
+    assert body["checks"]["gemini_voice_name"] == "Charon"
     assert body["checks"]["gemini_api_key_configured"] is False
     assert body["checks"]["gemini_client_available"] is True
     assert body["checks"]["hermes"] == {"kind": "mock", "available": True, "read_only": True}
@@ -279,6 +280,7 @@ def test_mock_gemini_token_not_logged_raw(tmp_path):
     body = res.json()
     gemini_token = body["token"]
     assert body["model"] == "gemini-2.5-flash-native-audio-latest"
+    assert body["voice_name"] == "Charon"
     logs = client.get("/logs").text
     assert gemini_token not in logs
     assert "tailscale-local" not in logs
@@ -323,17 +325,27 @@ def test_real_gemini_token_is_single_use_and_constrained(monkeypatch):
     monkeypatch.setitem(sys.modules, "google", fake_google)
     monkeypatch.setenv("GEMINI_API_KEY", "super-secret-gemini-key")
     monkeypatch.setenv("HVC_GEMINI_MODEL", "gemini-test-model")
+    monkeypatch.setenv("HVC_GEMINI_VOICE_NAME", "Orus")
     token = gemini_module.RealGeminiTokenBroker().create_token()
     assert token.token == "ephemeral-token-name"
     assert token.mode == "real"
     assert token.model == "gemini-test-model"
+    assert token.voice_name == "Orus"
     assert created["api_key"] == "super-secret-gemini-key"
     assert created["http_options"] == {"api_version": "v1alpha"}
     assert created["config"]["uses"] == 1
     assert created["config"]["live_connect_constraints"] == {
         "model": "gemini-test-model",
-        "config": {"response_modalities": ["AUDIO"]},
+        "config": {
+            "response_modalities": ["AUDIO"],
+            "speech_config": {
+                "voice_config": {
+                    "prebuilt_voice_config": {"voice_name": "Orus"}
+                }
+            },
+        },
     }
+    assert created["config"]["lock_additional_fields"] == []
     assert "super-secret-gemini-key" not in str(created["config"])
 
 def test_tool_allowlist_and_mock_agent(tmp_path):

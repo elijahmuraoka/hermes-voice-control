@@ -17,6 +17,7 @@ export interface RealtimeSessionTokenInfo {
   expires_at: string;
   mode: string;
   model?: string | null;
+  voice_name?: string | null;
   provider: RealtimeVoiceProviderId;
 }
 

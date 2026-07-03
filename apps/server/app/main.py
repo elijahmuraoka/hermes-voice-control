@@ -111,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "database": "unknown",
             "gemini_mode": broker.mode,
             "gemini_model": getattr(broker, "model", None),
+            "gemini_voice_name": getattr(broker, "voice_name", None),
             "gemini_api_key_configured": broker.api_key_configured,
             "gemini_client_available": gemini_client_available,
             "hermes_adapter": settings.hermes_adapter,
@@ -156,8 +157,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/gemini/ephemeral-token")
     def gemini_token(session_hash: str = Depends(session_dep)):
         token = broker.create_token()
-        store.log("gemini.token", "created", {"mode": token.mode, "token_issued": True, "expires_at": token.expires_at.isoformat()}, session_hash=session_hash)
-        return {"token": token.token, "expires_at": token.expires_at.isoformat(), "mode": token.mode, "model": token.model}
+        store.log("gemini.token", "created", {"mode": token.mode, "model": token.model, "voice_name": token.voice_name, "token_issued": True, "expires_at": token.expires_at.isoformat()}, session_hash=session_hash)
+        return {"token": token.token, "expires_at": token.expires_at.isoformat(), "mode": token.mode, "model": token.model, "voice_name": token.voice_name}
     @app.get("/gemini/status")
     def gemini_status(session_hash: str = Depends(session_dep)):
         return {"mode": broker.mode, "api_key_configured": broker.api_key_configured}

@@ -16,6 +16,13 @@ Phone/laptop browser over localhost or Tailscale
   -> speakable response or recorded confirmation proposal
 ```
 
+Live mode treats Gemini as the realtime audio transport, not the source of
+agent answers. The browser sends a session instruction that requires
+user-facing answers to go through the allowlisted `ask_agent` tool, and it
+suppresses model audio/text until a backend tool response has unlocked the turn.
+This keeps Live voice aligned with the same Hermes adapter path used by typed
+chat and Basic Hold.
+
 ## Components
 
 - `apps/web`: React voice UI, orb state machine, audio worklets, realtime

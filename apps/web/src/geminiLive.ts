@@ -86,6 +86,7 @@ export class GeminiLiveSession {
   private hasFirstAudioPlayback = false;
   private sessionClosed = false;
   private clientInitiatedClose = false;
+  private modelOutputUnlocked = false;
   private toolCallSequence = 0;
   private suppressedResponseTurns = 0;
   private readonly canceledToolCallIds = new Set<string>();
@@ -157,11 +158,13 @@ export class GeminiLiveSession {
   }
 
   interrupt(): void {
+    this.resetModelOutputGate();
     this.audio?.interrupt();
     this.emitStatus("interrupted");
   }
 
   abandonPendingResponse(): void {
+    this.resetModelOutputGate();
     this.suppressedResponseTurns += 1;
     this.cancelActiveToolCalls({ respondToProvider: true });
     this.audio?.interrupt();
@@ -193,6 +196,7 @@ export class GeminiLiveSession {
   disconnect(): void {
     this.cancelActiveToolCalls();
     this.endAudioStream();
+    this.resetModelOutputGate();
     const socket = this.socket;
     this.socket = undefined;
     if (socket) {
@@ -206,6 +210,7 @@ export class GeminiLiveSession {
 
   sendAudioChunk(chunk: PcmChunk): void {
     if (!this.shouldSendAudio()) return;
+    if (!this.audioStreamOpen) this.resetModelOutputGate();
     this.audioStreamOpen = true;
     this.sendJson({
       realtimeInput: {
@@ -348,13 +353,18 @@ export class GeminiLiveSession {
 
     this.emitTranscription(serverContent.inputTranscription, "user");
     this.emitTranscription(serverContent.input_transcription, "user");
-    this.emitTranscription(serverContent.outputTranscription, "model");
-    this.emitTranscription(serverContent.output_transcription, "model");
+    const allowModelOutput = this.canEmitModelOutput();
+    if (allowModelOutput) {
+      this.emitTranscription(serverContent.outputTranscription, "model");
+      this.emitTranscription(serverContent.output_transcription, "model");
+    } else if (hasModelOutput(serverContent)) {
+      this.emitDiagnostics("model_output_suppressed");
+    }
 
     const modelTurn = (serverContent.modelTurn ?? serverContent.model_turn) as
       | { parts?: Array<Record<string, unknown>> }
       | undefined;
-    for (const part of modelTurn?.parts ?? []) {
+    for (const part of allowModelOutput ? (modelTurn?.parts ?? []) : []) {
       const inlineData = (part.inlineData ?? part.inline_data) as
         | { mimeType?: string; mime_type?: string; data?: string }
         | undefined;
@@ -382,6 +392,7 @@ export class GeminiLiveSession {
     }
 
     if (turnComplete && !options.suppressTurnComplete) {
+      this.resetModelOutputGate();
       this.emitStatus("turn-complete");
       return true;
     }
@@ -390,6 +401,7 @@ export class GeminiLiveSession {
 
   private finishSuppressedResponseTurn(): void {
     if (this.suppressedResponseTurns > 0) this.suppressedResponseTurns -= 1;
+    this.resetModelOutputGate();
     this.emitStatus("turn-complete");
   }
 
@@ -512,6 +524,9 @@ export class GeminiLiveSession {
       this.callbacks.onToolResponse?.(response);
       this.toolCallSequences.delete(response.id);
     }
+    if (activeResponses.some(({ response }) => hasAgentAnswer(response))) {
+      this.unlockModelOutput();
+    }
     if (activeResponses.length > 0) {
       this.sendJson({
         toolResponse: {
@@ -583,6 +598,21 @@ export class GeminiLiveSession {
     this.emitDiagnostics("session_close", detail);
   }
 
+  private canEmitModelOutput(): boolean {
+    return (
+      !this.sessionOptions.requireToolResponseForModelOutput ||
+      this.modelOutputUnlocked
+    );
+  }
+
+  private unlockModelOutput(): void {
+    this.modelOutputUnlocked = true;
+  }
+
+  private resetModelOutputGate(): void {
+    this.modelOutputUnlocked = false;
+  }
+
   private recordFirstProviderResponse(
     message: Record<string, unknown>,
   ): void {
@@ -615,6 +645,28 @@ export class GeminiLiveSession {
     });
     for (const id of requestIds) this.toolCallSequences.delete(id);
   }
+}
+
+function hasModelOutput(serverContent: Record<string, unknown>): boolean {
+  if (serverContent.outputTranscription || serverContent.output_transcription)
+    return true;
+  const modelTurn = serverContent.modelTurn ?? serverContent.model_turn;
+  return (
+    isRecord(modelTurn) &&
+    Array.isArray(modelTurn.parts) &&
+    modelTurn.parts.length > 0
+  );
+}
+
+function hasAgentAnswer(response: GeminiFunctionResponse): boolean {
+  if (response.name !== "ask_agent" && response.name !== "ask_bob") return false;
+  if (response.response.status !== "completed") return false;
+  const result = response.response.result;
+  if (!isRecord(result)) return false;
+  return (
+    typeof result.speakable === "string" ||
+    typeof result.display === "string"
+  );
 }
 
 function providerEventType(message: Record<string, unknown>): string {

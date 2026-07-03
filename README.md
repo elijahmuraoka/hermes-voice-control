@@ -47,6 +47,12 @@ The browser is intentionally untrusted. It can request short-lived Gemini Live
 tokens and call a narrow backend tool surface, but it never receives the
 long-lived Gemini API key or direct access to local tools.
 
+In Live mode, Gemini is configured as the realtime audio transport. User-facing
+answers go through the backend `ask_agent` tool first; model audio/text is
+suppressed until a backend tool response unlocks the turn. The spoken response
+therefore comes from your configured Hermes agent path rather than from a
+freeform Gemini answer.
+
 ## Tech Stack
 
 - **Frontend:** React, TypeScript, Vite, Vitest.

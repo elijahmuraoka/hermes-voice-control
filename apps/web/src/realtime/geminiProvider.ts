@@ -38,6 +38,9 @@ class GeminiRealtimeVoiceSession implements RealtimeVoiceSession {
     this.session = new GeminiLiveSession({
       callbacks,
       audio: options.audio,
+      systemInstruction: options.systemInstruction,
+      requireToolResponseForModelOutput:
+        options.requireToolResponseForModelOutput,
     });
   }
 

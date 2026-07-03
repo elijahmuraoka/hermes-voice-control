@@ -5,9 +5,13 @@
 - Product name is `hermes-voice-control`; `hermes-voice-portal` remains
   planning-only.
 - The orb is both status indicator and primary input control.
-- Hands-free and hold-to-talk are complementary modes.
-- Tap starts, pauses, or resumes. Hold captures a longer thought. Holding while
-  the Hermes agent is speaking is the interrupt/barge-in gesture.
+- Live mode is the default realtime Gemini audio path.
+- Basic hold-to-talk is an explicit mode switch because browser speech
+  recognition can be implemented by the browser outside HVC's backend.
+- In basic mode, hold captures recognized speech and release submits the final
+  text through the same background chat job path as typed messages.
+- In Live mode, tap starts, pauses, or resumes. Hold captures a longer thought.
+  Holding while the Hermes agent is speaking is the interrupt/barge-in gesture.
 - No visible Interrupt button and no default PIN wall for direct localhost
   development. Tailscale Serve should use PIN/session auth.
 - Transcript drawer and its built-in text fallback composer are first-class.
@@ -21,6 +25,9 @@
 
 - Browser UI is wired to a provider-neutral realtime factory in
   `apps/web/src/realtime/`; Gemini remains the only registered v1 provider.
+- Browser basic hold-to-talk uses feature-detected speech recognition as an
+  opt-in dictation front end and routes the resulting text through `/chat/text`
+  jobs.
 - Browser receives only backend-issued Gemini ephemeral tokens, never long-lived
   Gemini/Google API keys.
 - Browser audio worklets capture PCM, resample to Gemini input requirements, and

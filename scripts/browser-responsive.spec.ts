@@ -82,6 +82,7 @@ for (const viewport of viewports) {
     await page.goto(APP_URL, { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
     const orbButton = page.getByRole("button", { name: /Voice orb:/ });
+    const holdButton = page.getByRole("button", { name: /^Hold$/ });
     const muteButton = page.getByRole("button", { name: /^Mute$/ });
     const endButton = page.getByRole("button", { name: /^End$/ });
     const textInput = page.getByLabel(`Type a message to ${AGENT_NOUN}`);
@@ -90,7 +91,9 @@ for (const viewport of viewports) {
     });
     await expect(orbButton).toBeVisible();
     await expect(muteButton).toBeVisible();
-    await expect(endButton).toBeVisible();
+    await expect(holdButton).toBeVisible();
+    await expect(endButton).toHaveCount(0);
+    await expect(page.getByText(`Tap to talk to ${AGENT_NAME}`)).toBeVisible();
     if (viewport.width <= DRAWER_BREAKPOINT) {
       await expect(textInput).toBeHidden();
     } else {
@@ -101,7 +104,7 @@ for (const viewport of viewports) {
     await page.keyboard.press("Tab");
     await expect(muteButton).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(endButton).toBeFocused();
+    await expect(holdButton).toBeFocused();
     await expect(page.getByText("Interrupt")).toHaveCount(0);
     await expect(page.getByText(/PIN/i)).toHaveCount(0);
     const overflow = await page.evaluate(
@@ -288,6 +291,95 @@ test("shows and clears the private PIN gate", async ({ page }) => {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
+test("basic Hold submits recognized speech after normal pointer release", async ({
+  page,
+}) => {
+  const chatRequests: unknown[] = [];
+
+  await page.addInitScript(() => {
+    const win = window as typeof window & {
+      SpeechRecognition?: new () => unknown;
+      webkitSpeechRecognition?: new () => unknown;
+    };
+    class MockSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      maxAlternatives = 0;
+      onresult: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onend: (() => void) | null = null;
+
+      start() {
+        window.setTimeout(() => {
+          const alternative = {
+            transcript: "browser smoke phrase",
+            confidence: 0.9,
+          };
+          const result = {
+            0: alternative,
+            isFinal: true,
+            length: 1,
+            item: () => alternative,
+          };
+          const results = { 0: result, length: 1, item: () => result };
+          const event = new Event("result");
+          Object.defineProperties(event, {
+            resultIndex: { value: 0 },
+            results: { value: results },
+          });
+          this.onresult?.(event);
+        }, 10);
+      }
+
+      stop() {
+        window.setTimeout(() => this.onend?.(), 60);
+      }
+
+      abort() {}
+    }
+    win.SpeechRecognition = MockSpeechRecognition;
+    win.webkitSpeechRecognition = MockSpeechRecognition;
+  });
+  await stubUnlockedSession(page);
+  await page.route("**/chat/text", async (route) => {
+    chatRequests.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "completed",
+        result: { display: "smoke ok", speakable: "smoke ok" },
+      }),
+    });
+  });
+
+  await page.goto(APP_URL, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: /^Hold$/ }).click();
+  await expect(
+    page.getByText(/Basic Hold uses this browser's speech recognition/i),
+  ).toBeVisible();
+
+  const orb = page.getByRole("button", { name: /Voice orb:/ });
+  const box = await orb.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(
+    (box?.x ?? 0) + (box?.width ?? 0) / 2,
+    (box?.y ?? 0) + (box?.height ?? 0) / 2,
+  );
+  await page.mouse.down();
+  await page.waitForTimeout(350);
+  await page.mouse.up();
+
+  await expect(page.getByText("smoke ok")).toBeVisible();
+  await expect(
+    page.getByRole("article").filter({ hasText: "browser smoke phrase" }),
+  ).toBeVisible();
+  expect(chatRequests).toEqual([
+    expect.objectContaining({ message: "browser smoke phrase", job: true }),
+  ]);
+});
+
 test.describe("real backend token flow", () => {
   test.skip(
     !RUN_TOKEN_FLOW,
@@ -314,7 +406,7 @@ test.describe("real backend token flow", () => {
       path: `${SCREENSHOT_DIR}/real-browser-connected.png`,
       fullPage: true,
     });
-    await page.getByRole("button", { name: /^End$/ }).click();
+    await page.getByRole("button", { name: /^Hold$/ }).click();
     const actionableErrors = consoleErrors.filter(
       (line) => !line.includes("AudioContext"),
     );

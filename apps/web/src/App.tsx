@@ -8,11 +8,12 @@ import {
   type PointerEvent,
 } from "react";
 import {
+  Hand,
   KeyRound,
   LoaderCircle,
   Mic,
   MicOff,
-  PhoneOff,
+  Radio,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -37,6 +38,7 @@ import type {
   TextChatResponse,
   TextChatResult,
   TranscriptEntry,
+  VoiceMode,
 } from "./types";
 import { VoiceOrb } from "./components/VoiceOrb";
 import { TranscriptDrawer } from "./components/TranscriptDrawer";
@@ -55,6 +57,12 @@ import {
   exposeHvcDiagnostics,
   type HvcDiagnosticsRecorder,
 } from "./diagnostics";
+import {
+  browserSupportsSpeechRecognition,
+  createSpeechRecognition,
+  readSpeechRecognitionTranscript,
+  type BrowserSpeechRecognition,
+} from "./speechRecognition";
 import "./styles.css";
 
 const uid = () => Math.random().toString(36).slice(2);
@@ -92,6 +100,16 @@ type TextFocusReturnMode = "none" | "restore-capture" | "paused" | "muted";
 type TextJobEntryMeta = {
   entryId: string;
   restored: boolean;
+};
+
+type SpeechCaptureState = {
+  recognition: BrowserSpeechRecognition;
+  entryId: string | null;
+  finalText: string;
+  interimText: string;
+  ended: boolean;
+  finished: boolean;
+  releaseRequested: boolean;
 };
 
 type AuthGateProps = {
@@ -183,6 +201,7 @@ function AuthGate({
 export default function App() {
   const [state, dispatch] = useReducer(voiceReducer, initialVoiceState);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>("live");
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [pin, setPin] = useState("");
   const [authError, setAuthError] = useState("");
@@ -195,8 +214,11 @@ export default function App() {
     setSpokenCompletionNotificationsEnabled,
   ] = useState(readSpokenCompletionNotificationsEnabled);
   const stateRef = useRef(state);
+  const voiceModeRef = useRef(voiceMode);
   const entriesRef = useRef(entries);
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
+  const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
+  const speechRecognitionDisclosureShownRef = useRef(false);
   const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
   const sessionGenerationRef = useRef(0);
   const connectingRef = useRef(false);
@@ -242,6 +264,10 @@ export default function App() {
   }, [state]);
 
   useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
+
+  useEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
 
@@ -266,6 +292,8 @@ export default function App() {
       clearPressTimer();
       clearVoiceTurnTimers();
       clearTextJobPollTimers();
+      speechCaptureRef.current?.recognition.abort();
+      speechCaptureRef.current = null;
       currentEndingRef.current = true;
       currentSessionRef.current?.disconnect();
       currentSessionRef.current = null;
@@ -867,6 +895,7 @@ export default function App() {
   function requireAuth(message = "Enter your private PIN to continue.") {
     clearPressTimer();
     stopVoiceTurnWatch();
+    abortActiveSpeechCapture();
     resetHoldSpeechState();
     clearHandsFreeTurnPending();
     textFocusReturnModeRef.current = "none";
@@ -888,6 +917,284 @@ export default function App() {
     if (authState === "authenticated") return true;
     if (authState === "needs-pin") requireAuth();
     return false;
+  }
+
+  function setVoiceModeImmediate(mode: VoiceMode) {
+    voiceModeRef.current = mode;
+    setVoiceMode(mode);
+  }
+
+  function speechRecognitionUnavailableMessage() {
+    return "Basic hold-to-talk needs browser speech recognition here. You can switch to Live mode or type in the transcript.";
+  }
+
+  function speechRecognitionPermissionMessage() {
+    return "Microphone permission was blocked. Allow microphone access for this site, then hold the orb again.";
+  }
+
+  function discloseBrowserSpeechRecognition() {
+    if (speechRecognitionDisclosureShownRef.current) return;
+    speechRecognitionDisclosureShownRef.current = true;
+    appendSystem(
+      "Basic Hold uses this browser's speech recognition before sending text to Hermes. Use Live for the realtime audio path.",
+    );
+  }
+
+  function speechCaptureText(capture: SpeechCaptureState): string {
+    return [capture.finalText, capture.interimText]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  }
+
+  function updateSpeechCaptureEntry(
+    capture: SpeechCaptureState,
+    text: string,
+    status: TranscriptEntry["status"] = "streaming",
+  ) {
+    const normalizedText = text.trim();
+    if (!normalizedText) return;
+    if (!capture.entryId) {
+      const entryId = uid();
+      capture.entryId = entryId;
+      setEntries((items) => [
+        ...items,
+        {
+          id: entryId,
+          role: "user",
+          text: normalizedText,
+          status,
+          at: Date.now(),
+        },
+      ]);
+      return;
+    }
+    setEntries((items) =>
+      items.map((entry) =>
+        entry.id === capture.entryId
+          ? { ...entry, text: normalizedText, status }
+          : entry,
+      ),
+    );
+  }
+
+  function clearSpeechCapture(capture: SpeechCaptureState) {
+    if (speechCaptureRef.current === capture) speechCaptureRef.current = null;
+  }
+
+  function abortActiveSpeechCapture() {
+    const capture = speechCaptureRef.current;
+    if (!capture || capture.finished) return;
+    capture.finished = true;
+    clearSpeechCapture(capture);
+    try {
+      capture.recognition.abort();
+    } catch {
+      // The browser may already have ended recognition.
+    }
+    if (capture.entryId) {
+      setEntries((items) =>
+        items.map((entry) =>
+          entry.id === capture.entryId
+            ? { ...entry, status: "cancelled" }
+            : entry,
+        ),
+      );
+    }
+  }
+
+  function failSpeechCapture(capture: SpeechCaptureState, message: string) {
+    if (capture.finished) return;
+    capture.finished = true;
+    clearSpeechCapture(capture);
+    try {
+      capture.recognition.abort();
+    } catch {
+      // The browser may already have ended recognition.
+    }
+    if (capture.entryId) {
+      setEntries((items) =>
+        items.map((entry) =>
+          entry.id === capture.entryId
+            ? { ...entry, status: "failed", text: speechCaptureText(capture) || message }
+            : entry,
+        ),
+      );
+    }
+    appendSystem(message, "failed");
+    dispatch({ type: "ERROR", error: "Hold-to-talk could not hear you." });
+  }
+
+  function finishSpeechCapture(capture: SpeechCaptureState) {
+    if (capture.finished) return;
+    capture.finished = true;
+    clearSpeechCapture(capture);
+    const text = speechCaptureText(capture);
+
+    if (!text) {
+      if (capture.entryId) {
+        setEntries((items) =>
+          items.map((entry) =>
+            entry.id === capture.entryId
+              ? { ...entry, status: "cancelled", text: "I didn't catch that." }
+              : entry,
+          ),
+        );
+      } else {
+        appendSystem("I didn't catch that.", "cancelled");
+      }
+      dispatch({ type: "RECOVER" });
+      return;
+    }
+
+    if (capture.entryId) {
+      setEntries((items) =>
+        items.map((entry) =>
+          entry.id === capture.entryId
+            ? { ...entry, text, status: "sent" }
+            : entry,
+        ),
+      );
+    }
+    dispatch({ type: "POINTER_UP" });
+    void submitText(text, { existingUserEntryId: capture.entryId ?? undefined });
+  }
+
+  function beginBasicHold(): boolean {
+    if (!canUsePrivateSession()) return false;
+    if (speechCaptureRef.current && !speechCaptureRef.current.finished)
+      return false;
+    const press = pressRef.current;
+    press.holding = true;
+    if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
+      press.holding = false;
+      return false;
+    }
+    const recognition = createSpeechRecognition();
+    if (!recognition) {
+      press.holding = false;
+      appendSystem(speechRecognitionUnavailableMessage(), "failed");
+      dispatch({ type: "ERROR", error: "Hold-to-talk is not available here." });
+      return false;
+    }
+
+    const capture: SpeechCaptureState = {
+      recognition,
+      entryId: null,
+      finalText: "",
+      interimText: "",
+      ended: false,
+      finished: false,
+      releaseRequested: false,
+    };
+    speechCaptureRef.current = capture;
+
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || "en-US";
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      if (speechCaptureRef.current !== capture || capture.finished) return;
+      const next = readSpeechRecognitionTranscript(event);
+      capture.finalText = [capture.finalText, next.finalText]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join(" ");
+      capture.interimText = next.interimText;
+      updateSpeechCaptureEntry(capture, speechCaptureText(capture));
+    };
+    recognition.onerror = (event) => {
+      if (speechCaptureRef.current !== capture || capture.finished) return;
+      if (event.error === "no-speech") return;
+      failSpeechCapture(
+        capture,
+        event.error === "not-allowed" || event.error === "service-not-allowed"
+          ? speechRecognitionPermissionMessage()
+          : "Speech recognition stopped before I could understand that. Try holding a little longer, switch to Live, or type it.",
+      );
+    };
+    recognition.onend = () => {
+      if (speechCaptureRef.current !== capture || capture.finished) return;
+      capture.ended = true;
+      if (capture.releaseRequested) finishSpeechCapture(capture);
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      failSpeechCapture(
+        capture,
+        "Speech recognition could not start in this browser. Switch to Live mode or type in the transcript.",
+      );
+      return false;
+    }
+
+    press.activated = true;
+    dispatch({ type: "POINTER_DOWN" });
+    return true;
+  }
+
+  function stopBasicHold({ cancel = false }: { cancel?: boolean } = {}) {
+    const capture = speechCaptureRef.current;
+    if (!capture || capture.finished) return;
+    if (cancel) {
+      capture.finished = true;
+      clearSpeechCapture(capture);
+      try {
+        capture.recognition.abort();
+      } catch {
+        // The browser may already have ended recognition.
+      }
+      if (capture.entryId) {
+        setEntries((items) =>
+          items.map((entry) =>
+            entry.id === capture.entryId
+              ? { ...entry, status: "cancelled" }
+              : entry,
+          ),
+        );
+      }
+      dispatch({ type: "RECOVER" });
+      return;
+    }
+    capture.releaseRequested = true;
+    if (capture.ended) {
+      finishSpeechCapture(capture);
+      return;
+    }
+    try {
+      capture.recognition.stop();
+    } catch {
+      finishSpeechCapture(capture);
+    }
+  }
+
+  function switchToLiveMode() {
+    if (!canUsePrivateSession()) return;
+    if (isSpokenCompletionNoticeBlockingCapture()) return;
+    stopBasicHold({ cancel: true });
+    setVoiceModeImmediate("live");
+    void startCall();
+  }
+
+  function switchToPushToTalkMode() {
+    if (isSpokenCompletionNoticeBlockingCapture()) return;
+    if (!browserSupportsSpeechRecognition()) {
+      appendSystem(speechRecognitionUnavailableMessage(), "failed");
+      return;
+    }
+    endCall();
+    setVoiceModeImmediate("push-to-talk");
+    discloseBrowserSpeechRecognition();
+  }
+
+  function toggleVoiceMode() {
+    if (voiceModeRef.current === "live") {
+      switchToPushToTalkMode();
+    } else {
+      switchToLiveMode();
+    }
   }
 
   async function handlePinSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1343,6 +1650,15 @@ export default function App() {
   }
 
   function cancelPress() {
+    if (voiceModeRef.current === "push-to-talk") {
+      if (pressRef.current.pointerId === null && !pressRef.current.holding)
+        return;
+      clearPressTimer();
+      stopBasicHold({ cancel: true });
+      pressRef.current = emptyPress();
+      clearPendingHoldActivation();
+      return;
+    }
     clearPressTimer();
     const press = pressRef.current;
     press.released = true;
@@ -1375,7 +1691,10 @@ export default function App() {
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pressRef.current = {
       pointerId: e.pointerId,
-      timer: window.setTimeout(beginHold, HOLD_DELAY_MS),
+      timer: window.setTimeout(
+        voiceModeRef.current === "push-to-talk" ? beginBasicHold : beginHold,
+        HOLD_DELAY_MS,
+      ),
       holding: false,
       activated: false,
       released: false,
@@ -1392,7 +1711,9 @@ export default function App() {
     const wasActivated = press.activated;
     pressRef.current = emptyPress();
     if (wasHolding) {
-      if (wasActivated) {
+      if (voiceModeRef.current === "push-to-talk") {
+        stopBasicHold();
+      } else if (wasActivated) {
         const expectsProviderTurnComplete =
           sessionRef.current?.finalizeInputTurn() ?? false;
         sessionRef.current?.setHoldToTalk(false);
@@ -1403,7 +1724,7 @@ export default function App() {
         clearPendingHoldActivation();
       }
     } else {
-      handleTap();
+      if (voiceModeRef.current === "live") handleTap();
     }
   }
 
@@ -1504,19 +1825,32 @@ export default function App() {
     dispatchTextTurnFinished(returnMode);
   }
 
-  async function submitText(text: string) {
+  async function submitText(
+    text: string,
+    { existingUserEntryId }: { existingUserEntryId?: string } = {},
+  ) {
     if (!canUsePrivateSession()) return;
     const submitFocusEpoch = textFocusEpochRef.current;
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
-    const user: TranscriptEntry = {
-      id: uid(),
-      role: "user",
-      text,
-      status: "sent",
-      at: Date.now(),
-    };
-    setEntries((items) => [...items, user]);
+    if (existingUserEntryId) {
+      setEntries((items) =>
+        items.map((entry) =>
+          entry.id === existingUserEntryId
+            ? { ...entry, text, status: "sent" }
+            : entry,
+        ),
+      );
+    } else {
+      const user: TranscriptEntry = {
+        id: uid(),
+        role: "user",
+        text,
+        status: "sent",
+        at: Date.now(),
+      };
+      setEntries((items) => [...items, user]);
+    }
     try {
       const res = await sendText(text, entriesRef.current);
       if (isChatJobStatus(res)) {
@@ -1584,39 +1918,53 @@ export default function App() {
         </header>
         <VoiceOrb
           state={state}
+          mode={voiceMode}
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           onPointerCancel={cancelPress}
           agentName={agentName}
         />
         <div className="control-row">
-          <button type="button" onClick={toggleMute}>
-            {state.isMuted ? <MicOff /> : <Mic />}
-            {state.isMuted ? "Unmute" : "Mute"}
-          </button>
-          <button type="button" className="danger" onClick={endCall}>
-            <PhoneOff />
-            End
-          </button>
+          {voiceMode === "live" ? (
+            <button type="button" onClick={toggleMute}>
+              {state.isMuted ? <MicOff /> : <Mic />}
+              {state.isMuted ? "Unmute" : "Mute"}
+            </button>
+          ) : null}
           <button
             type="button"
-            className="completion-notice-toggle"
-            onClick={toggleSpokenCompletionNotifications}
-            aria-pressed={spokenCompletionNotificationsEnabled}
-            aria-label={
-              spokenCompletionNotificationsEnabled
-                ? "Turn off spoken completion notices"
-                : "Turn on spoken completion notices"
-            }
+            className="mode-toggle"
+            onClick={toggleVoiceMode}
             title={
-              spokenCompletionNotificationsEnabled
-                ? "Spoken completion notices on"
-                : "Spoken completion notices off"
+              voiceMode === "live"
+                ? "Switch to hold-to-talk mode"
+                : "Switch to Live mode"
             }
           >
-            {spokenCompletionNotificationsEnabled ? <Volume2 /> : <VolumeX />}
-            Notify
+            {voiceMode === "live" ? <Hand /> : <Radio />}
+            {voiceMode === "live" ? "Hold" : "Live"}
           </button>
+          {voiceMode === "live" ? (
+            <button
+              type="button"
+              className="completion-notice-toggle"
+              onClick={toggleSpokenCompletionNotifications}
+              aria-pressed={spokenCompletionNotificationsEnabled}
+              aria-label={
+                spokenCompletionNotificationsEnabled
+                  ? "Turn off spoken completion notices"
+                  : "Turn on spoken completion notices"
+              }
+              title={
+                spokenCompletionNotificationsEnabled
+                  ? "Spoken completion notices on"
+                  : "Spoken completion notices off"
+              }
+            >
+              {spokenCompletionNotificationsEnabled ? <Volume2 /> : <VolumeX />}
+              Notify
+            </button>
+          ) : null}
         </div>
       </section>
       <TranscriptDrawer

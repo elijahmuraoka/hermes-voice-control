@@ -11,6 +11,7 @@ export type CallState =
   | "reconnecting"
   | "error";
 export type InputMode = "hands-free" | "hold-to-talk" | "text";
+export type VoiceMode = "push-to-talk" | "live";
 export type DrawerState = "closed" | "peeking" | "open";
 export type TranscriptStatus =
   | "draft"

@@ -58,17 +58,23 @@ export async function login(pin: string) {
   });
 }
 export async function getReadyz(): Promise<ReadyzResponse> {
-  const res = await fetch(`${apiBase}/readyz`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-  });
+  // /readyz/details carries the checks the connection chip needs but sits
+  // behind session auth; unauthenticated /readyz only reports the ok bit.
   const fallback: ReadyzResponse = { ok: false };
-  try {
-    const body = (await res.json()) as ReadyzResponse;
-    return res.ok ? body : { ...body, ok: false };
-  } catch {
-    return fallback;
-  }
+  const read = async (path: string): Promise<ReadyzResponse | null> => {
+    try {
+      const res = await fetch(`${apiBase}${path}`, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.status === 401 || res.status === 404) return null;
+      const body = (await res.json()) as ReadyzResponse;
+      return res.ok ? body : { ...body, ok: false };
+    } catch {
+      return null;
+    }
+  };
+  return (await read("/readyz/details")) ?? (await read("/readyz")) ?? fallback;
 }
 export async function getGeminiToken() {
   return jsonFetch<{

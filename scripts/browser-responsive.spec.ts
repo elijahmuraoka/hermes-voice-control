@@ -49,7 +49,16 @@ test.use({
 });
 
 async function stubUnlockedSession(page: Page) {
+  // Mirror production shapes: unauthenticated /readyz is minimal; the chip's
+  // checks come from /readyz/details behind session auth.
   await page.route("**/readyz", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+  await page.route("**/readyz/details", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -133,6 +142,13 @@ for (const viewport of viewports) {
     expect(orbBox?.height ?? 0).toBeGreaterThanOrEqual(140);
     const screenshotTarget = screenshotTargets[viewport.name];
     if (WRITE_SCREENSHOTS && screenshotTarget) {
+      // Committed README assets live under docs/assets/screenshots; write there
+      // so `pnpm screenshots:update` refreshes them, plus a copy in the test
+      // output dir for per-run evidence.
+      await page.screenshot({
+        path: `docs/assets/screenshots/${screenshotTarget}`,
+        fullPage: true,
+      });
       await page.screenshot({
         path: testInfo.outputPath(screenshotTarget),
         fullPage: true,

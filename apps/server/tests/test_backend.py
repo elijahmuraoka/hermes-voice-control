@@ -118,8 +118,27 @@ def post_cancel_in_thread(client: TestClient, job_id: str) -> tuple[dict, thread
     return result, thread
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
-def test_readyz_reports_safe_runtime_posture(tmp_path):
+def test_readyz_unauthenticated_is_minimal(tmp_path):
     res = make_client(tmp_path).get("/readyz")
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+    assert "checks" not in res.text
+def test_readyz_minimal_still_reports_failure_status(tmp_path):
+    client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(tmp_path / "missing-hermes"))
+    res = client.get("/readyz")
+    assert res.status_code == 503
+    assert res.json() == {"ok": False}
+def test_readyz_details_requires_auth_in_pin_mode(tmp_path):
+    client = make_pin_client(tmp_path)
+    assert client.get("/readyz").status_code == 200
+    res = client.get("/readyz/details")
+    assert res.status_code == 401
+    login(client)
+    res = client.get("/readyz/details")
+    assert res.status_code == 200
+    assert res.json()["checks"]["pin_required"] is True
+def test_readyz_reports_safe_runtime_posture(tmp_path):
+    res = make_client(tmp_path).get("/readyz/details")
     assert res.status_code == 200
     body = res.json()
     assert body["ok"] is True
@@ -135,7 +154,7 @@ def test_readyz_reports_safe_runtime_posture(tmp_path):
 
 def test_readyz_reports_missing_local_hermes_binary(tmp_path):
     client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(tmp_path / "missing-hermes"))
-    res = client.get("/readyz")
+    res = client.get("/readyz/details")
     assert res.status_code == 503
     body = res.json()
     assert body["ok"] is False
@@ -150,7 +169,7 @@ def test_readyz_rejects_directory_local_hermes_binary(tmp_path):
     hermes_dir.mkdir()
     hermes_dir.chmod(0o755)
     client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes_dir))
-    res = client.get("/readyz")
+    res = client.get("/readyz/details")
     assert res.status_code == 503
     body = res.json()
     assert body["ok"] is False
@@ -161,7 +180,7 @@ def test_readyz_reports_resolved_local_hermes_binary(tmp_path):
     hermes.write_text("#!/bin/sh\nexit 0\n")
     hermes.chmod(0o755)
     client = make_client(tmp_path, hermes_adapter="local", hermes_bin=str(hermes))
-    res = client.get("/readyz")
+    res = client.get("/readyz/details")
     assert res.status_code == 200
     body = res.json()
     assert body["ok"] is True
@@ -171,14 +190,14 @@ def test_readyz_reports_resolved_local_hermes_binary(tmp_path):
 def test_readyz_fails_real_gemini_without_key(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    res = make_real_gemini_client(tmp_path).get("/readyz")
+    res = make_real_gemini_client(tmp_path).get("/readyz/details")
     assert res.status_code == 503
     assert res.json()["ok"] is False
     assert res.json()["checks"]["gemini_mode"] == "real"
 def test_readyz_fails_real_gemini_without_client(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "super-secret-gemini-key")
     monkeypatch.setattr(gemini_module, "google_genai_available", lambda: False)
-    res = make_real_gemini_client(tmp_path).get("/readyz")
+    res = make_real_gemini_client(tmp_path).get("/readyz/details")
     assert res.status_code == 503
     assert res.json()["ok"] is False
     assert res.json()["checks"]["gemini_api_key_configured"] is True
@@ -188,7 +207,7 @@ def test_readyz_reports_database_connection_failure(tmp_path, monkeypatch):
     def fail_connect():
         raise sqlite3.OperationalError("cannot open database")
     monkeypatch.setattr(client.app.state.store, "connect", fail_connect)
-    res = client.get("/readyz")
+    res = client.get("/readyz/details")
     assert res.status_code == 503
     assert res.json()["ok"] is False
     assert res.json()["checks"]["database"] == "failed"

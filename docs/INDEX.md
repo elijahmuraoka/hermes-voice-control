@@ -30,6 +30,7 @@ Map of documentation for this repo. The `doc-maintenance` skill keeps this curre
 | Bundle | Spec |
 |---|---|
 | [specs/active/2026-06-07-hvc-hardening-live-verification/](./specs/active/2026-06-07-hvc-hardening-live-verification/) | Harden Hermes Voice Control for private Gemini Live use and document current verification |
+| [specs/active/2026-07-04-hvc-production-path/](./specs/active/2026-07-04-hvc-production-path/) | 2026-07-04-hvc-production-path |
 
 ### Spec bundle shape
 

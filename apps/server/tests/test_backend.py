@@ -139,6 +139,22 @@ def test_device_refresh_disabled_by_setting(tmp_path):
     assert not client.cookies.get("hvc_device")
     client.cookies.delete("hvc_session")
     assert client.get("/auth/session").status_code == 401
+def test_device_refresh_cookie_survives_jsonresponse_endpoints(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    client.cookies.delete("hvc_session")
+    res = client.post("/chat/text", json={"message": "hello", "job": True})
+    assert res.status_code in (200, 202)
+    assert "hvc_session" in res.headers.get("set-cookie", "")
+    job_id = res.headers["X-HVC-Chat-Job-Id"]
+    client.cookies.delete("hvc_session")
+    poll = client.get(f"/chat/jobs/{job_id}")
+    assert poll.status_code == 404  # job belongs to the refreshed session, not a re-refreshed one
+    res2 = client.post("/chat/text", json={"message": "again", "job": True})
+    assert not res2.headers.get("set-cookie")  # refreshed session B persisted; no re-mint
+    job2 = res2.headers["X-HVC-Chat-Job-Id"]
+    poll2 = client.get(f"/chat/jobs/{job2}")
+    assert poll2.status_code == 200  # same session reused across submit+poll
 def test_logout_revokes_device_token(tmp_path):
     client = make_pin_client(tmp_path)
     login(client)

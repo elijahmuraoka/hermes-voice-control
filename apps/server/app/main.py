@@ -87,7 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_HEADER, CHAT_JOB_BUDGET_HEADER],
         expose_headers=[ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_ID_HEADER, "Location"],
     )
-    def session_dep(request: Request, response: Response) -> str:
+    def session_dep(request: Request) -> str:
         if not settings.require_pin:
             client_host = request.client.host if request.client else "local"
             proxy_headers = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "tailscale-user-login", "tailscale-user-name")
@@ -104,9 +104,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not (settings.remember_device and device_token and auth.validate_device(device_token)):
                 raise
             session = auth.create_session()
-            auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
+            # Handlers that return JSONResponse directly bypass the injected
+            # response's headers, so the cookie is applied in middleware below.
+            request.state.pending_session_cookie = session
             store.log("auth.device", "refreshed", {"session_id": session.token_hash[:12]})
             return session.token_hash
+    @app.middleware("http")
+    async def apply_refreshed_session_cookie(request: Request, call_next):
+        result = await call_next(request)
+        pending = getattr(request.state, "pending_session_cookie", None)
+        if pending is not None:
+            AuthManager.set_cookie(result, pending.token, pending.expires_at, secure=settings.secure_cookies)
+        return result
     @app.exception_handler(Exception)
     async def safe_exception_handler(request: Request, exc: Exception):
         if isinstance(exc, HTTPException):

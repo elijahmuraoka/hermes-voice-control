@@ -127,6 +127,61 @@ input {
   text-wrap: balance;
 }
 
+.agent-connection {
+  max-width: 230px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(246, 240, 232, 0.12);
+  border-radius: 999px;
+  background: rgba(6, 6, 5, 0.38);
+  padding: 9px 13px 9px 10px;
+  color: rgba(246, 240, 232, 0.86);
+}
+
+.agent-connection > span {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 18px rgba(214, 179, 106, 0.42);
+}
+
+.agent-connection.state-connected > span {
+  background: var(--cyan);
+  box-shadow: 0 0 18px rgba(157, 232, 255, 0.44);
+}
+
+.agent-connection.state-degraded > span,
+.agent-connection.state-unavailable > span {
+  background: var(--ember);
+  box-shadow: 0 0 18px rgba(255, 143, 112, 0.36);
+}
+
+.agent-connection div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agent-connection strong,
+.agent-connection small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-connection strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.agent-connection small {
+  color: rgba(246, 240, 232, 0.54);
+  font-size: 11px;
+}
+
 .control-row button,
 .auth-card button,
 .transcript-composer button {
@@ -527,8 +582,13 @@ input {
 }
 
 .status-working .live-meta,
+.status-streaming.message-job .live-meta,
 .status-needs_permission .message-meta span:last-child {
   color: rgba(157, 232, 255, 0.9);
+}
+
+.status-streaming.message-job .live-meta::before {
+  background: var(--cyan);
 }
 
 .status-working .message-meta span:last-child {
@@ -783,6 +843,9 @@ input {
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
+  }
+  .agent-connection {
+    max-width: 100%;
   }
   .eyebrow {
     font-size: 11px;

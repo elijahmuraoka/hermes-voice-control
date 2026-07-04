@@ -1,4 +1,9 @@
-import type { ChatJobStatus, TextChatResponse, TranscriptEntry } from "./types";
+import type {
+  ChatJobStatus,
+  ReadyzResponse,
+  TextChatResponse,
+  TranscriptEntry,
+} from "./types";
 import { apiBase } from "./config";
 
 export class ApiError extends Error {
@@ -51,6 +56,19 @@ export async function login(pin: string) {
     method: "POST",
     body: JSON.stringify({ pin }),
   });
+}
+export async function getReadyz(): Promise<ReadyzResponse> {
+  const res = await fetch(`${apiBase}/readyz`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  });
+  const fallback: ReadyzResponse = { ok: false };
+  try {
+    const body = (await res.json()) as ReadyzResponse;
+    return res.ok ? body : { ...body, ok: false };
+  } catch {
+    return fallback;
+  }
 }
 export async function getGeminiToken() {
   return jsonFetch<{

@@ -14,12 +14,24 @@ interface Props {
   onBlur: () => void;
 }
 
-function statusLabel(status: TranscriptEntry["status"]) {
-  if (status === "streaming") return "live";
-  if (status === "working") return "working";
-  if (status === "needs_permission") return "approval needed";
-  if (status === "complete") return "";
-  return status;
+const ACTIVE_JOB_STATUSES = new Set<TranscriptEntry["status"]>([
+  "working",
+  "streaming",
+]);
+
+function elapsedSeconds(startedAt: number, now: number): number {
+  return Math.max(0, Math.floor((now - startedAt) / 1000));
+}
+
+function statusLabel(entry: TranscriptEntry, now: number) {
+  if (entry.jobId && ACTIVE_JOB_STATUSES.has(entry.status))
+    return `working ${elapsedSeconds(entry.at, now)}s`;
+  if (entry.status === "streaming")
+    return entry.role === "user" ? "hearing" : "streaming";
+  if (entry.status === "working") return "working";
+  if (entry.status === "needs_permission") return "approval needed";
+  if (entry.status === "complete") return "";
+  return entry.status;
 }
 
 export function TranscriptDrawer({
@@ -36,8 +48,12 @@ export function TranscriptDrawer({
 }: Props) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const latestEntry = entries.at(-1);
+  const hasActiveJob = entries.some(
+    (entry) => entry.jobId && ACTIVE_JOB_STATUSES.has(entry.status),
+  );
   const transcriptKey = useMemo(
     () => entries.map((entry) => `${entry.id}:${entry.status}:${entry.text}`).join("|"),
     [entries],
@@ -52,6 +68,13 @@ export function TranscriptDrawer({
       body.scrollTop = body.scrollHeight;
     }
   }, [transcriptKey]);
+
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveJob]);
 
   async function submit() {
     const text = draft.trim();
@@ -87,7 +110,9 @@ export function TranscriptDrawer({
           </div>
         ) : (
           entries.map((e) => {
-            const isCancellableJob = e.status === "working" && e.jobId;
+            const label = statusLabel(e, now);
+            const isCancellableJob =
+              e.jobId !== undefined && ACTIVE_JOB_STATUSES.has(e.status);
             const isCancelling =
               e.jobId !== undefined && cancellingJobIds.has(e.jobId);
             return (
@@ -105,9 +130,9 @@ export function TranscriptDrawer({
                         ? "You"
                         : "System"}
                   </span>
-                  {statusLabel(e.status) ? (
+                  {label ? (
                     <span className={e.status === "streaming" ? "live-meta" : ""}>
-                      {statusLabel(e.status)}
+                      {label}
                     </span>
                   ) : null}
                 </div>

@@ -21,6 +21,7 @@ import {
   ApiError,
   ApiRequestTimeoutError,
   cancelTextJob,
+  getReadyz,
   getSession,
   getTextJob,
   login,
@@ -35,6 +36,7 @@ import {
 import { initialVoiceState, voiceReducer } from "./stateMachine";
 import type {
   ChatJobStatus,
+  ReadyzResponse,
   TextChatResponse,
   TextChatResult,
   TranscriptEntry,
@@ -98,6 +100,14 @@ type PressState = {
 
 type AuthState = "checking" | "authenticated" | "needs-pin";
 
+type AgentConnectionState = "checking" | "connected" | "degraded" | "unavailable";
+
+type AgentConnection = {
+  state: AgentConnectionState;
+  label: string;
+  detail: string;
+};
+
 type VoiceTurn = {
   id: number;
   heardUser: boolean;
@@ -144,6 +154,37 @@ const emptyPress = (): PressState => ({
   activated: false,
   released: true,
 });
+
+const checkingAgentConnection: AgentConnection = {
+  state: "checking",
+  label: "Checking agent",
+  detail: "Verifying Hermes bridge",
+};
+
+function agentConnectionFromReadyz(readyz: ReadyzResponse): AgentConnection {
+  const hermes = readyz.checks?.hermes;
+  const adapter = readyz.checks?.hermes_adapter ?? hermes?.kind ?? "Hermes";
+  const adapterLabel = adapter === "api" ? "Hermes API" : adapter;
+  if (readyz.ok && hermes?.available !== false) {
+    return {
+      state: "connected",
+      label: "Agent connected",
+      detail: `${adapterLabel} bridge ready`,
+    };
+  }
+  if (readyz.ok) {
+    return {
+      state: "degraded",
+      label: "Agent degraded",
+      detail: `${adapterLabel} bridge unavailable`,
+    };
+  }
+  return {
+    state: "unavailable",
+    label: "Agent status unavailable",
+    detail: "Open transcript if a request stalls",
+  };
+}
 
 function isAuthFailure(error: unknown): boolean {
   if (error instanceof ApiError) return error.status === 401;
@@ -216,8 +257,11 @@ function AuthGate({
 export default function App() {
   const [state, dispatch] = useReducer(voiceReducer, initialVoiceState);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [voiceMode, setVoiceMode] = useState<VoiceMode>("live");
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>("push-to-talk");
   const [authState, setAuthState] = useState<AuthState>("checking");
+  const [agentConnection, setAgentConnection] = useState<AgentConnection>(
+    checkingAgentConnection,
+  );
   const [pin, setPin] = useState("");
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -349,6 +393,30 @@ export default function App() {
   useEffect(() => {
     if (authState !== "authenticated") return;
     recoverPendingTextJobs();
+  }, [authState]);
+
+  useEffect(() => {
+    if (authState !== "authenticated") {
+      setAgentConnection(checkingAgentConnection);
+      return;
+    }
+    let cancelled = false;
+    setAgentConnection(checkingAgentConnection);
+    getReadyz()
+      .then((readyz) => {
+        if (!cancelled) setAgentConnection(agentConnectionFromReadyz(readyz));
+      })
+      .catch(() => {
+        if (!cancelled)
+          setAgentConnection({
+            state: "unavailable",
+            label: "Agent status unavailable",
+            detail: "Open transcript if a request stalls",
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [authState]);
 
   function clearPressTimer() {
@@ -682,7 +750,7 @@ export default function App() {
     if (status.state === "queued" || status.state === "thinking") {
       const partialText = status.partial_text?.trim();
       updateTextJobEntry(status.job_id, {
-        status: "working",
+        status: partialText ? "streaming" : "working",
         text: partialText || runningTextJobCopy(meta.restored),
       });
       return true;
@@ -1992,6 +2060,16 @@ export default function App() {
             <span className="eyebrow">private voice control</span>
             <h1>{agentName}</h1>
           </div>
+          <div
+            className={`agent-connection state-${agentConnection.state}`}
+            aria-label={`Agent connection: ${agentConnection.label}`}
+          >
+            <span aria-hidden="true" />
+            <div>
+              <strong>{agentConnection.label}</strong>
+              <small>{agentConnection.detail}</small>
+            </div>
+          </div>
         </header>
         <VoiceOrb
           state={state}
@@ -2021,27 +2099,25 @@ export default function App() {
             {voiceMode === "live" ? <Hand /> : <Radio />}
             {voiceMode === "live" ? "Hold" : "Live"}
           </button>
-          {voiceMode === "live" ? (
-            <button
-              type="button"
-              className="completion-notice-toggle"
-              onClick={toggleSpokenCompletionNotifications}
-              aria-pressed={spokenCompletionNotificationsEnabled}
-              aria-label={
-                spokenCompletionNotificationsEnabled
-                  ? "Turn off spoken completion notices"
-                  : "Turn on spoken completion notices"
-              }
-              title={
-                spokenCompletionNotificationsEnabled
-                  ? "Spoken completion notices on"
-                  : "Spoken completion notices off"
-              }
-            >
-              {spokenCompletionNotificationsEnabled ? <Volume2 /> : <VolumeX />}
-              Notify
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="completion-notice-toggle"
+            onClick={toggleSpokenCompletionNotifications}
+            aria-pressed={spokenCompletionNotificationsEnabled}
+            aria-label={
+              spokenCompletionNotificationsEnabled
+                ? "Turn off spoken completion notices"
+                : "Turn on spoken completion notices"
+            }
+            title={
+              spokenCompletionNotificationsEnabled
+                ? "Spoken completion notices on"
+                : "Spoken completion notices off"
+            }
+          >
+            {spokenCompletionNotificationsEnabled ? <Volume2 /> : <VolumeX />}
+            Notify
+          </button>
         </div>
       </section>
       <TranscriptDrawer

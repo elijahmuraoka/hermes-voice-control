@@ -32,6 +32,18 @@ export interface TranscriptEntry {
   jobId?: string;
   restored?: boolean;
 }
+export interface HermesAdapterDiagnostics {
+  kind?: string;
+  available?: boolean;
+  command_mode?: string;
+}
+export interface ReadyzResponse {
+  ok: boolean;
+  checks?: {
+    hermes_adapter?: string;
+    hermes?: HermesAdapterDiagnostics;
+  };
+}
 export type ChatJobState =
   | "queued"
   | "thinking"

@@ -266,6 +266,20 @@ def test_hermes_timeout_bounds_enforced(tmp_path, timeout_seconds):
         )
 
 
+@pytest.mark.parametrize("api_url", ["wss://127.0.0.1:9119/api/ws", "ws://100.96.34.85:9119/api/ws"])
+def test_api_hermes_adapter_requires_loopback_ws_url(tmp_path, api_url):
+    with pytest.raises(RuntimeError, match="HVC_HERMES_API_URL"):
+        create_app(
+            Settings(
+                pin=TEST_PIN,
+                db_path=tmp_path / "bad-api-url.sqlite3",
+                hermes_adapter="api",
+                hermes_api_token="configured-token",
+                hermes_api_url=api_url,
+            )
+        )
+
+
 def test_env_hermes_timeout_bounds_enforced(tmp_path, monkeypatch):
     monkeypatch.setenv("HVC_DB_PATH", str(tmp_path / "env-timeout.sqlite3"))
     monkeypatch.setenv("HVC_HERMES_TIMEOUT_SECONDS", "0")
@@ -551,7 +565,7 @@ def test_chat_text_job_fast_response_preserves_completed_body(tmp_path):
 
 def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(tmp_path):
     class SlowAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             time.sleep(0.08)
             return AdapterResult(
                 ok=True,
@@ -580,9 +594,47 @@ def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(t
     assert completed["result"]["result"]["speakable"] == "slow answer"
     assert completed["result"]["diagnostics"] == {"adapter": "mock", "duration_ms": 100}
 
+def test_chat_text_job_exposes_partial_text_while_thinking(tmp_path):
+    release_adapter = threading.Event()
+
+    class StreamingAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
+            if on_partial:
+                on_partial("partial answer")
+            assert release_adapter.wait(2)
+            return AdapterResult(
+                ok=True,
+                data={"speakable": "final answer", "display": "final answer", "mode": mode},
+            )
+
+    client = make_client(tmp_path)
+    client.app.state.tools.adapter = StreamingAdapter()
+
+    started = client.post(
+        "/chat/text",
+        json={"request_id": "job-partial", "message": "hello", "mode": "quick", "job": True, "interactive_budget_ms": 0},
+    )
+
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+    partial = wait_until(
+        lambda: (
+            body
+            if (body := client.get(f"/chat/jobs/{job_id}").json()).get("partial_text") == "partial answer"
+            else None
+        )
+    )
+    assert partial["state"] == "thinking"
+    assert partial["partial_text"] == "partial answer"
+
+    release_adapter.set()
+    completed = wait_for_job_state(client, job_id, "complete")
+    assert "partial_text" not in completed
+    assert completed["result"]["result"]["display"] == "final answer"
+
 def test_chat_text_job_slow_response_exposes_location_for_cors(tmp_path):
     class SlowAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             time.sleep(0.05)
             return AdapterResult(ok=True, data={"speakable": "slow answer", "display": "slow answer", "mode": mode})
 
@@ -689,7 +741,7 @@ def test_chat_text_job_cancel_does_not_poison_reused_public_request_id(tmp_path)
             self.release = threading.Event()
             self.cancel_seen = threading.Event()
 
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             with self.lock:
                 self.started += 1
             while not self.release.is_set():
@@ -731,7 +783,7 @@ def test_chat_text_job_cancel_does_not_poison_reused_public_request_id(tmp_path)
 
 def test_chat_text_job_cancel_after_tool_return_preserves_cancelled_state(tmp_path):
     class FastAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             return AdapterResult(ok=True, data={"speakable": "late success", "display": "late success", "mode": mode})
 
     client = make_client(tmp_path)
@@ -759,7 +811,7 @@ def test_chat_text_job_cancel_after_tool_return_preserves_cancelled_state(tmp_pa
 
 def test_chat_text_job_cancel_after_tool_failure_preserves_cancelled_state(tmp_path):
     class FailingAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             return AdapterResult(ok=False, error_code="HERMES_TEST_FAILURE", safe_message="The Hermes agent could not answer right now.")
 
     client = make_client(tmp_path)
@@ -789,7 +841,7 @@ def test_chat_text_job_complete_wins_cancel_after_terminal_check(tmp_path):
     release_adapter = threading.Event()
 
     class ReleaseAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             assert release_adapter.wait(2)
             return AdapterResult(ok=True, data={"speakable": "finished", "display": "finished", "mode": mode})
 
@@ -826,7 +878,7 @@ def test_chat_text_job_failure_wins_cancel_after_terminal_check(tmp_path):
     release_adapter = threading.Event()
 
     class ReleaseFailingAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             assert release_adapter.wait(2)
             return AdapterResult(ok=False, error_code="HERMES_TEST_FAILURE", safe_message="The Hermes agent could not answer right now.")
 
@@ -860,7 +912,7 @@ def test_chat_text_job_failure_wins_cancel_after_terminal_check(tmp_path):
 
 def test_chat_text_job_failure_is_persisted_as_safe_metadata(tmp_path):
     class FailingAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             time.sleep(0.05)
             return AdapterResult(ok=False, error_code="HERMES_TEST_FAILURE", safe_message="The Hermes agent could not answer right now.")
 
@@ -893,7 +945,7 @@ def test_chat_text_job_status_is_session_scoped(tmp_path):
 
 def test_chat_text_job_persistence_omits_raw_prompt_transcript_and_logs(tmp_path):
     class SafeDelayedAdapter(HermesAdapter):
-        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
             time.sleep(0.05)
             return AdapterResult(ok=True, data={"speakable": "safe final", "display": "safe final", "mode": mode})
 

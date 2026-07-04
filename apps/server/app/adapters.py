@@ -4,6 +4,7 @@ import os, shutil, subprocess, time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from .store import Store
 
 SAFE_TOOLSET = "safe"
 DEFAULT_HERMES_TIMEOUT_SECONDS = 90
@@ -27,16 +28,40 @@ def agent_identity_prompt(agent_name: str) -> str:
 class AdapterResult:
     ok: bool
     data: dict | None = None
+    status: str = "completed"
     error_code: str | None = None
     safe_message: str | None = None
     diagnostics: dict[str, Any] | None = None
 
 class HermesAdapter:
-    def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
+    def ask_agent(
+        self,
+        message: str,
+        mode: str = "quick",
+        transcript_window: list[dict] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+        session_hash: str | None = None,
+        on_partial: Callable[[str], None] | None = None,
+    ) -> AdapterResult:
         raise NotImplementedError
 
-    def ask_bob(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
-        return self.ask_agent(message, mode=mode, transcript_window=transcript_window, should_cancel=should_cancel)
+    def ask_bob(
+        self,
+        message: str,
+        mode: str = "quick",
+        transcript_window: list[dict] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+        session_hash: str | None = None,
+        on_partial: Callable[[str], None] | None = None,
+    ) -> AdapterResult:
+        return self.ask_agent(
+            message,
+            mode=mode,
+            transcript_window=transcript_window,
+            should_cancel=should_cancel,
+            session_hash=session_hash,
+            on_partial=on_partial,
+        )
 
     def diagnostics(self) -> dict:
         return {"kind": "unknown", "available": False}
@@ -45,7 +70,15 @@ class MockHermesAdapter(HermesAdapter):
     def __init__(self, agent_name: str = DEFAULT_AGENT_NAME):
         self.agent_name = agent_name
 
-    def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
+    def ask_agent(
+        self,
+        message: str,
+        mode: str = "quick",
+        transcript_window: list[dict] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+        session_hash: str | None = None,
+        on_partial: Callable[[str], None] | None = None,
+    ) -> AdapterResult:
         text = message.strip() or "I heard silence."
         answer = f"Mock {self.agent_name} heard: {text}"
         return AdapterResult(ok=True, data={"speakable": answer, "display": answer, "mode": mode})
@@ -122,7 +155,15 @@ class LocalHermesAdapter(HermesAdapter):
             trace["error_code"] = error_code
         return trace
 
-    def ask_agent(self, message: str, mode: str = "quick", transcript_window: list[dict] | None = None, should_cancel: Callable[[], bool] | None = None) -> AdapterResult:
+    def ask_agent(
+        self,
+        message: str,
+        mode: str = "quick",
+        transcript_window: list[dict] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+        session_hash: str | None = None,
+        on_partial: Callable[[str], None] | None = None,
+    ) -> AdapterResult:
         trace, trace_started = self._new_trace()
         self._mark_trace(trace, trace_started, "request_start")
         hermes_bin = self._resolve_hermes_bin()
@@ -225,5 +266,27 @@ class LocalHermesAdapter(HermesAdapter):
         self._mark_trace(trace, trace_started, "completion")
         return AdapterResult(ok=True, data={"speakable": output, "display": output, "mode": mode}, diagnostics=self._finish_trace(trace, trace_started))
 
-def build_adapter(kind: str, hermes_bin: str, timeout_seconds: int = DEFAULT_HERMES_TIMEOUT_SECONDS, agent_name: str = DEFAULT_AGENT_NAME) -> HermesAdapter:
-    return LocalHermesAdapter(hermes_bin, timeout_seconds=timeout_seconds, agent_name=agent_name) if kind == "local" else MockHermesAdapter(agent_name=agent_name)
+def build_adapter(
+    kind: str,
+    hermes_bin: str,
+    timeout_seconds: int = DEFAULT_HERMES_TIMEOUT_SECONDS,
+    agent_name: str = DEFAULT_AGENT_NAME,
+    store: Store | None = None,
+    hermes_api_url: str = "",
+    hermes_api_token: str = "",
+    hermes_api_cwd: str = "",
+) -> HermesAdapter:
+    if kind == "local":
+        return LocalHermesAdapter(hermes_bin, timeout_seconds=timeout_seconds, agent_name=agent_name)
+    if kind == "api":
+        from .hermes_api import ApiHermesAdapter
+
+        return ApiHermesAdapter(
+            api_url=hermes_api_url,
+            token=hermes_api_token,
+            store=store,
+            timeout_seconds=timeout_seconds,
+            agent_name=agent_name,
+            cwd=hermes_api_cwd,
+        )
+    return MockHermesAdapter(agent_name=agent_name)

@@ -122,6 +122,7 @@ interface MockChatJobStatus {
   job_id: string;
   state: MockChatJobState;
   cancelled?: boolean;
+  partial_text?: string;
   result?: {
     status?: string;
     request_id?: string;
@@ -1050,6 +1051,42 @@ describe("App", () => {
 
     expect(screen.getByText("slow answer")).toBeInTheDocument();
     expect(screen.queryByText(/shorter message/i)).not.toBeInTheDocument();
+  });
+
+  it("shows streamed background chat text while the job is still running", async () => {
+    chatPostMode = "job";
+    chatJobIds = ["job-streaming"];
+    chatJobStatuses.set("job-streaming", [
+      chatJobStatus("job-streaming", "thinking", {
+        partial_text: "I am checking the latest Hermes context...",
+      }),
+      completedChatJob("job-streaming", "final streamed answer"),
+    ]);
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+
+    fireEvent.change(input, { target: { value: "stream this" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText("I am checking the latest Hermes context..."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Cancel background reply/i }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("final streamed answer")).toBeInTheDocument();
   });
 
   it("cancels a running background typed chat from the transcript", async () => {

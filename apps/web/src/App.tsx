@@ -680,9 +680,10 @@ export default function App() {
     if (!meta) return false;
 
     if (status.state === "queued" || status.state === "thinking") {
+      const partialText = status.partial_text?.trim();
       updateTextJobEntry(status.job_id, {
         status: "working",
-        text: runningTextJobCopy(meta.restored),
+        text: partialText || runningTextJobCopy(meta.restored),
       });
       return true;
     }

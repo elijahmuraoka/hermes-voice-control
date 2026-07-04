@@ -118,6 +118,35 @@ def post_cancel_in_thread(client: TestClient, job_id: str) -> tuple[dict, thread
     return result, thread
 def test_health_has_no_secrets(tmp_path):
     res = make_client(tmp_path).get("/healthz"); assert res.status_code == 200; assert res.json() == {"ok": True}
+def test_pin_unlock_sets_device_cookie(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    device = client.cookies.get("hvc_device")
+    assert device
+def test_device_cookie_refreshes_missing_session(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    device = client.cookies.get("hvc_device")
+    client.cookies.delete("hvc_session")
+    res = client.get("/auth/session")
+    assert res.status_code == 200
+    assert client.cookies.get("hvc_session")
+    assert client.cookies.get("hvc_device") == device
+def test_device_refresh_disabled_by_setting(tmp_path):
+    settings = Settings(pin=TEST_PIN, require_pin=True, remember_device=False, db_path=tmp_path / "test-nodev.sqlite3")
+    client = TestClient(create_app(settings))
+    login(client)
+    assert not client.cookies.get("hvc_device")
+    client.cookies.delete("hvc_session")
+    assert client.get("/auth/session").status_code == 401
+def test_logout_revokes_device_token(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    device = client.cookies.get("hvc_device")
+    assert client.post("/auth/logout").status_code == 200
+    client.cookies.clear()
+    client.cookies.set("hvc_device", device)
+    assert client.get("/auth/session").status_code == 401
 def test_readyz_reports_safe_runtime_posture(tmp_path):
     res = make_client(tmp_path).get("/readyz")
     assert res.status_code == 200

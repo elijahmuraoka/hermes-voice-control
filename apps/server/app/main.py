@@ -69,7 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.assert_safe_hermes()
     store = Store(settings.db_path)
     store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
-    auth = AuthManager(settings.pin, settings.session_ttl_seconds, store)
+    auth = AuthManager(settings.pin, settings.session_ttl_seconds, store, settings.device_ttl_seconds)
     broker = build_broker(settings.gemini_mode)
     adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin, settings.hermes_timeout_seconds, settings.agent_name)
     tools = ToolService(store, adapter)
@@ -87,7 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_HEADER, CHAT_JOB_BUDGET_HEADER],
         expose_headers=[ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_ID_HEADER, "Location"],
     )
-    def session_dep(request: Request) -> str:
+    def session_dep(request: Request, response: Response) -> str:
         if not settings.require_pin:
             client_host = request.client.host if request.client else "local"
             proxy_headers = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "tailscale-user-login", "tailscale-user-name")
@@ -95,7 +95,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if (client_host not in LOCAL_CLIENT_HOSTS or proxied or not host_header_is_local(request)) and not settings.allow_no_pin_remote:
                 raise HTTPException(status_code=401, detail="PIN auth is required for non-local clients")
             return "tailscale-local"
-        return auth.validate(authorization=request.headers.get("authorization"), hvc_session=request.cookies.get("hvc_session"))
+        try:
+            return auth.validate(authorization=request.headers.get("authorization"), hvc_session=request.cookies.get("hvc_session"))
+        except HTTPException:
+            # Remembered device: a valid long-lived device cookie re-mints the
+            # short-lived session so the PIN is only ever typed once per device.
+            device_token = request.cookies.get("hvc_device")
+            if not (settings.remember_device and device_token and auth.validate_device(device_token)):
+                raise
+            session = auth.create_session()
+            auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
+            store.log("auth.device", "refreshed", {"session_id": session.token_hash[:12]})
+            return session.token_hash
     @app.exception_handler(Exception)
     async def safe_exception_handler(request: Request, exc: Exception):
         if isinstance(exc, HTTPException):
@@ -144,12 +155,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid PIN")
         session = auth.create_session()
         auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
+        if settings.remember_device:
+            device = auth.create_device()
+            auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
         store.log("auth.pin", "success", {"session_id": session.token})
         return {"ok": True, "expires_at": session.expires_at.isoformat()}
     @app.post("/auth/logout")
-    def logout(request: Request, session_hash: str = Depends(session_dep)):
+    def logout(request: Request, response: Response, session_hash: str = Depends(session_dep)):
         token = request.cookies.get("hvc_session")
         if token: auth.revoke(token)
+        device_token = request.cookies.get("hvc_device")
+        if device_token:
+            auth.revoke_device(device_token)
+            response.delete_cookie("hvc_device")
+        response.delete_cookie("hvc_session")
         store.log("auth.logout", "success", session_hash=session_hash)
         return {"ok": True}
     @app.get("/auth/session")

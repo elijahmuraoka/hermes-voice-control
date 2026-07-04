@@ -88,7 +88,13 @@ class ToolService:
         except ValidationError as exc:
             self.store.log("tool.denied", "denied", {"tool": req.tool, "validation_error": safe_validation_errors(exc)}, session_hash=session_hash, tool=req.tool, request_id=req.request_id, error_code="INVALID_TOOL_ARGUMENTS")
             raise HTTPException(status_code=422, detail="Invalid tool arguments") from exc
-    def call(self, req: ToolCallRequest, session_hash: str, include_adapter_diagnostics: bool = False) -> dict[str, Any]:
+    def call(
+        self,
+        req: ToolCallRequest,
+        session_hash: str,
+        include_adapter_diagnostics: bool = False,
+        on_partial=None,
+    ) -> dict[str, Any]:
         if self._is_cancelled(req.request_id, session_hash):
             self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
             raise HTTPException(status_code=409, detail="Tool call was cancelled")
@@ -98,7 +104,14 @@ class ToolService:
             raise HTTPException(status_code=403, detail="Tool not allowed")
         if req.tool in {"ask_agent", "ask_bob"}:
             args = self.validate_ask_agent_args(req, session_hash)
-            result = self.adapter.ask_agent(args.message, mode=args.mode, transcript_window=args.transcript_window, should_cancel=lambda: self._is_cancelled(req.request_id, session_hash))
+            result = self.adapter.ask_agent(
+                args.message,
+                mode=args.mode,
+                transcript_window=args.transcript_window,
+                should_cancel=lambda: self._is_cancelled(req.request_id, session_hash),
+                session_hash=session_hash,
+                on_partial=on_partial,
+            )
             if self._is_cancelled(req.request_id, session_hash):
                 self.store.log("tool.cancelled", "cancelled", {"request_id": req.request_id, "suppressed_after_adapter": True}, session_hash=session_hash, tool=req.tool, request_id=req.request_id)
                 raise HTTPException(status_code=409, detail="Tool call was cancelled")
@@ -109,7 +122,7 @@ class ToolService:
                     detail=result.safe_message or "Tool failed",
                     headers=adapter_diagnostics_headers(result.diagnostics) if include_adapter_diagnostics else None,
                 )
-            response = {"status": "completed", "result": result.data, "request_id": req.request_id}
+            response = {"status": result.status, "result": result.data, "request_id": req.request_id}
             if include_adapter_diagnostics and result.diagnostics:
                 response[ADAPTER_DIAGNOSTICS_RESPONSE_KEY] = result.diagnostics
             return response

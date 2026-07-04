@@ -7,6 +7,8 @@ Adapters:
 
 - `MockHermesAdapter` — default; deterministic tests and local UX development.
 - `LocalHermesAdapter` — optional; invokes local Hermes only when `HVC_HERMES_ADAPTER=local`.
+- `ApiHermesAdapter` — optional; connects to a loopback `hermes serve` websocket
+  when `HVC_HERMES_ADAPTER=api`.
 
 The adapter is intentionally narrow: an `ask_agent` request becomes a speakable
 response. The backend still accepts `ask_bob` as a compatibility alias for older
@@ -22,6 +24,8 @@ Safety contract:
   Hermes/local action in v1.
 - `LocalHermesAdapter` invokes the configured Hermes binary only for
   agent-answer requests and frames the prompt as read-only.
+- `ApiHermesAdapter` never sends the Hermes dashboard token to the browser and
+  never auto-responds to `approval.request` events.
 
 ## Local adapter shape
 
@@ -49,6 +53,33 @@ Configure the timeout with:
 ```bash
 HVC_HERMES_TIMEOUT_SECONDS=90
 ```
+
+## Stateful API adapter shape
+
+The API adapter connects from the HVC backend to a local Hermes serve websocket:
+
+```bash
+HVC_HERMES_ADAPTER=api
+HVC_HERMES_API_URL=ws://127.0.0.1:9119/api/ws
+HVC_HERMES_API_TOKEN=<same-token-used-by-hermes-serve>
+```
+
+`HERMES_DASHBOARD_SESSION_TOKEN` can provide the token instead of
+`HVC_HERMES_API_TOKEN`. `HVC_HERMES_API_URL` must stay a loopback `ws://` URL;
+startup and `pnpm env:check` reject remote URLs so a dashboard token is not sent
+outside the local machine.
+
+On each private HVC session, the adapter creates or resumes a Hermes serve
+session, persists the returned `stored_session_id` in the HVC SQLite store, and
+submits prompts through `prompt.submit`. It streams `message.delta` text into
+the background chat job `partial_text` field so the transcript can show progress
+while the answer is still running. `session.interrupt` is used for cancellation
+or barge-in.
+
+If Hermes emits `approval.request`, HVC returns a `pending_confirmation` result
+and the chat job becomes `needs_permission`. The voice/browser path does not call
+`approval.respond`; the operator must handle approval in the desktop Hermes
+session.
 
 ## Safe real-Hermes harness
 

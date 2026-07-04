@@ -31,6 +31,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, session_hash TEXT NOT NULL, tool TEXT NOT NULL, request_id TEXT, arguments_json TEXT NOT NULL, summary TEXT NOT NULL, risk TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, approved_at TEXT, rejected_at TEXT, executed_at TEXT);
                 CREATE TABLE IF NOT EXISTS tool_call_cancellations (session_hash TEXT NOT NULL, request_id TEXT NOT NULL, canceled_at TEXT NOT NULL, PRIMARY KEY(session_hash, request_id));
                 CREATE TABLE IF NOT EXISTS chat_jobs (id TEXT PRIMARY KEY, session_hash TEXT NOT NULL, request_id TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, cancelled_at TEXT, cancellation_requested INTEGER NOT NULL DEFAULT 0, result_json TEXT, error_json TEXT);
+                CREATE TABLE IF NOT EXISTS hermes_api_sessions (session_hash TEXT PRIMARY KEY, stored_session_id TEXT NOT NULL, runtime_session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, session_hash TEXT, event_type TEXT NOT NULL, tool TEXT, request_id TEXT, status TEXT NOT NULL, redacted_payload TEXT NOT NULL, error_code TEXT);
                 CREATE TABLE IF NOT EXISTS readiness_checks (id INTEGER PRIMARY KEY CHECK (id = 1), checked_at TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
@@ -41,6 +42,9 @@ class Store:
             if "request_id" not in columns:
                 conn.execute("ALTER TABLE confirmations ADD COLUMN request_id TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_confirm_request ON confirmations(session_hash, request_id)")
+            chat_columns = {row["name"] for row in conn.execute("PRAGMA table_info(chat_jobs)")}
+            if "partial_text" not in chat_columns:
+                conn.execute("ALTER TABLE chat_jobs ADD COLUMN partial_text TEXT")
 
     def log(self, event_type: str, status: str, payload: dict[str, Any] | None = None, session_hash: str | None = None, tool: str | None = None, request_id: str | None = None, error_code: str | None = None) -> None:
         safe_payload = redact(payload or {})
@@ -151,6 +155,19 @@ class Store:
             )
             return conn.execute("SELECT * FROM chat_jobs WHERE id=? AND session_hash=?", (job_id, session_hash)).fetchone()
 
+    def update_chat_job_partial(self, job_id: str, session_hash: str, partial_text: str, *, max_chars: int = 12000) -> sqlite3.Row | None:
+        text = partial_text[-max_chars:]
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE chat_jobs
+                SET partial_text=?, updated_at=?
+                WHERE id=? AND session_hash=? AND state NOT IN ('complete', 'failed', 'cancelled') AND cancellation_requested=0 AND cancelled_at IS NULL
+                """,
+                (text, now_iso(), job_id, session_hash),
+            )
+            return conn.execute("SELECT * FROM chat_jobs WHERE id=? AND session_hash=?", (job_id, session_hash)).fetchone()
+
     def request_chat_job_cancel(self, job_id: str, session_hash: str) -> sqlite3.Row | None:
         timestamp = now_iso()
         with self.connect() as conn:
@@ -163,6 +180,25 @@ class Store:
                 (timestamp, timestamp, job_id, session_hash),
             )
             return conn.execute("SELECT * FROM chat_jobs WHERE id=? AND session_hash=?", (job_id, session_hash)).fetchone()
+
+    def get_hermes_api_session(self, session_hash: str) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute("SELECT * FROM hermes_api_sessions WHERE session_hash=?", (session_hash,)).fetchone()
+
+    def upsert_hermes_api_session(self, session_hash: str, stored_session_id: str, runtime_session_id: str | None) -> None:
+        timestamp = now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hermes_api_sessions(session_hash, stored_session_id, runtime_session_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_hash) DO UPDATE SET
+                    stored_session_id=excluded.stored_session_id,
+                    runtime_session_id=excluded.runtime_session_id,
+                    updated_at=excluded.updated_at
+                """,
+                (session_hash, stored_session_id, runtime_session_id, timestamp, timestamp),
+            )
 
     def recent_logs(self, limit: int = 50) -> list[dict[str, Any]]:
         with self.connect() as conn:

@@ -64,6 +64,7 @@ export interface ChatJobStatus {
   completed_at?: string | null;
   cancelled_at?: string | null;
   cancelled?: boolean;
+  partial_text?: string;
   result?: TextChatResult;
   error?: ChatJobError;
 }

@@ -25,6 +25,7 @@ let chatCancelAuthExpired = false;
 let chatJobCounter = 0;
 let chatJobIds: string[] = [];
 let chatTextBodies: unknown[] = [];
+let restoreNavigatorMediaDevices: (() => void) | null = null;
 
 interface MockSpeechUtterance {
   text: string;
@@ -298,6 +299,40 @@ function installSpeechRecognitionMock({
   return { instances };
 }
 
+function installGetUserMediaMock({
+  reject = false,
+}: { reject?: boolean } = {}): {
+  getUserMedia: ReturnType<typeof vi.fn>;
+  stopTrack: ReturnType<typeof vi.fn>;
+} {
+  const stopTrack = vi.fn();
+  const track = { stop: stopTrack } as unknown as MediaStreamTrack;
+  const stream = {
+    getTracks: () => [track],
+  } as unknown as MediaStream;
+  const getUserMedia = vi.fn(async () => {
+    if (reject) throw new DOMException("Permission denied", "NotAllowedError");
+    return stream;
+  });
+  const originalDescriptor = Object.getOwnPropertyDescriptor(
+    window.navigator,
+    "mediaDevices",
+  );
+  Object.defineProperty(window.navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia },
+  });
+  restoreNavigatorMediaDevices = () => {
+    if (originalDescriptor) {
+      Object.defineProperty(window.navigator, "mediaDevices", originalDescriptor);
+    } else {
+      Reflect.deleteProperty(window.navigator, "mediaDevices");
+    }
+    restoreNavigatorMediaDevices = null;
+  };
+  return { getUserMedia, stopTrack };
+}
+
 function createStorageMock(): Storage {
   const items = new Map<string, string>();
   return {
@@ -533,6 +568,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    restoreNavigatorMediaDevices?.();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -711,6 +747,71 @@ describe("App", () => {
     expect(realtimeMock.instances).toHaveLength(0);
   });
 
+  it("primes microphone permission before starting default hold recognition", async () => {
+    const media = installGetUserMediaMock();
+    const speech = installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(media.getUserMedia).toHaveBeenCalledWith({ audio: true });
+    expect(media.stopTrack).toHaveBeenCalledTimes(1);
+    expect(speech.instances).toHaveLength(1);
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+  });
+
+  it("assembles one hold utterance across aggressive recognition restarts", async () => {
+    const speech = installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+
+    act(() => speech.instances[0].emitResult("hello", true));
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(2);
+    expect(chatTextBodies).toHaveLength(0);
+    expect(screen.getByLabelText("Live transcript")).toHaveTextContent("hello");
+
+    act(() => speech.instances[0].emitResult("from iphone", true));
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(3);
+    expect(chatTextBodies).toHaveLength(0);
+    expect(screen.getByLabelText("Live transcript")).toHaveTextContent(
+      "hello from iphone",
+    );
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(chatTextBodies).toEqual([
+        expect.objectContaining({
+          job: true,
+          interactive_budget_ms: 0,
+          message: "hello from iphone",
+        }),
+      ]),
+    );
+    expect(screen.getByText("hello from iphone")).toBeInTheDocument();
+  });
+
   it("keeps normal pointer release from being cancelled by lost pointer capture", async () => {
     const speech = installSpeechRecognitionMock({ stopEnds: false });
     await renderUnlockedApp();
@@ -787,9 +888,14 @@ describe("App", () => {
       await Promise.resolve();
     });
     expect(chatTextBodies).toHaveLength(0);
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(2);
     expect(screen.getByText("Holding to talk")).toBeInTheDocument();
 
     fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
     vi.useRealTimers();
 
     await waitFor(() =>
@@ -797,7 +903,7 @@ describe("App", () => {
         expect.objectContaining({ message: "finish this after release" }),
       ),
     );
-    expect(speech.instances[0].stop).not.toHaveBeenCalled();
+    expect(speech.instances[0].stop).toHaveBeenCalledTimes(1);
     expect(screen.getByText("finish this after release")).toBeInTheDocument();
   });
 

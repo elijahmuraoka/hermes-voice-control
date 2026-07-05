@@ -278,6 +278,8 @@ export default function App() {
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
   const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
   const speechRecognitionDisclosureShownRef = useRef(false);
+  const basicHoldMicPermissionPrimedRef = useRef(false);
+  const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
   const sessionGenerationRef = useRef(0);
   const connectingRef = useRef(false);
@@ -1026,6 +1028,41 @@ export default function App() {
     return "Microphone permission was blocked. Allow microphone access for this site, then hold the orb again.";
   }
 
+  async function primeBasicHoldMicrophonePermission({
+    reportError = false,
+  }: { reportError?: boolean } = {}): Promise<boolean> {
+    if (basicHoldMicPermissionPrimedRef.current) return true;
+    if (basicHoldMicPermissionPendingRef.current)
+      return basicHoldMicPermissionPendingRef.current;
+
+    const getUserMedia = navigator.mediaDevices?.getUserMedia;
+    if (typeof getUserMedia !== "function") return true;
+
+    const pending = getUserMedia
+      .call(navigator.mediaDevices, { audio: true })
+      .then((stream) => {
+        stream.getTracks().forEach((track) => track.stop());
+        basicHoldMicPermissionPrimedRef.current = true;
+        return true;
+      })
+      .catch(() => {
+        if (reportError) {
+          appendSystem(speechRecognitionPermissionMessage(), "failed");
+          dispatch({
+            type: "ERROR",
+            error: "Hold-to-talk needs microphone permission.",
+          });
+        }
+        return false;
+      })
+      .finally(() => {
+        basicHoldMicPermissionPendingRef.current = null;
+      });
+
+    basicHoldMicPermissionPendingRef.current = pending;
+    return pending;
+  }
+
   function discloseBrowserSpeechRecognition() {
     if (speechRecognitionDisclosureShownRef.current) return;
     speechRecognitionDisclosureShownRef.current = true;
@@ -1117,7 +1154,8 @@ export default function App() {
       finishSpeechCapture(capture);
       return;
     }
-    if (!speechCaptureText(capture) && !restartSpeechCapture(capture))
+    if (restartSpeechCapture(capture)) return;
+    if (!speechCaptureText(capture))
       finishSpeechCapture(capture);
   }
 
@@ -1201,12 +1239,10 @@ export default function App() {
     void submitText(text, { existingUserEntryId: capture.entryId ?? undefined });
   }
 
-  function beginBasicHold(): boolean {
+  function startBasicHoldRecognition(press: PressState): boolean {
     if (!canUsePrivateSession()) return false;
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
-    const press = pressRef.current;
-    press.holding = true;
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
       press.holding = false;
       return false;
@@ -1276,6 +1312,46 @@ export default function App() {
     return true;
   }
 
+  function beginBasicHold(): boolean {
+    if (!canUsePrivateSession()) return false;
+    if (speechCaptureRef.current && !speechCaptureRef.current.finished)
+      return false;
+    const press = pressRef.current;
+    press.holding = true;
+    if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
+      press.holding = false;
+      return false;
+    }
+
+    if (
+      basicHoldMicPermissionPrimedRef.current ||
+      typeof navigator.mediaDevices?.getUserMedia !== "function"
+    ) {
+      return startBasicHoldRecognition(press);
+    }
+
+    void primeBasicHoldMicrophonePermission({ reportError: true }).then(
+      (allowed) => {
+        if (!allowed) {
+          if (pressRef.current === press) {
+            press.holding = false;
+            pressRef.current = emptyPress();
+          }
+          return;
+        }
+        if (
+          pressRef.current !== press ||
+          press.released ||
+          voiceModeRef.current !== "push-to-talk"
+        )
+          return;
+        startBasicHoldRecognition(press);
+      },
+    );
+
+    return true;
+  }
+
   function stopBasicHold({ cancel = false }: { cancel?: boolean } = {}) {
     const capture = speechCaptureRef.current;
     if (!capture || capture.finished) return;
@@ -1330,6 +1406,7 @@ export default function App() {
     endCall();
     setVoiceModeImmediate("push-to-talk");
     discloseBrowserSpeechRecognition();
+    void primeBasicHoldMicrophonePermission();
   }
 
   function toggleVoiceMode() {

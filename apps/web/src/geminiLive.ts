@@ -112,7 +112,12 @@ export class GeminiLiveSession {
     this.webSocketFactory =
       dependencies.webSocketFactory ??
       ((url: string) => new WebSocket(url) as unknown as LiveWebSocket);
-    this.audio = dependencies.audio ?? new BrowserGeminiAudio();
+    this.audio =
+      dependencies.audio ??
+      new BrowserGeminiAudio({
+        onInputLevel: options.audio?.onInputLevel,
+        onOutputLevel: options.audio?.onOutputLevel,
+      });
     this.captureEnabled = !options.audio?.startMuted;
   }
 

@@ -5,8 +5,8 @@ import { join } from "node:path";
 const root = new URL("..", import.meta.url).pathname;
 const assetsDir = join(root, "apps/web/dist/assets");
 const bundleBudgets = {
-  // Reliability bundle: reconnect+wake-lock (raised from #76's 256 KiB).
-  jsBytes: 272000,
+  // Reliability + standalone PWA hold-to-talk fallback (raised from 272000).
+  jsBytes: 280000,
   cssBytes: 20 * 1024,
 };
 const diagnosticsBudgetsPath = join(

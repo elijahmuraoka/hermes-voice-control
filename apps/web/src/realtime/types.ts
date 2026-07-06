@@ -1,3 +1,4 @@
+import type { AudioLevelCallback } from "../audio";
 import type { HvcDiagnosticsEvent } from "../diagnostics";
 
 export type RealtimeVoiceProviderId = "gemini";
@@ -54,6 +55,8 @@ export interface RealtimeVoiceAudioConfig {
   startMuted?: boolean;
   holdToTalkOnly?: boolean;
   startCapture?: boolean;
+  onInputLevel?: AudioLevelCallback;
+  onOutputLevel?: AudioLevelCallback;
 }
 
 export interface RealtimeVoiceSessionOptions {

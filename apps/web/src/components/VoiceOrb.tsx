@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { CallState } from "../types";
 import { stateLabel } from "../stateMachine";
 import type { VoiceMode, VoiceState } from "../types";
@@ -9,9 +10,27 @@ interface Props {
   onPointerUp: React.PointerEventHandler<HTMLButtonElement>;
   onPointerCancel: React.PointerEventHandler<HTMLButtonElement>;
   onRetry: () => void;
+<<<<<<< HEAD
+  audioLevelRef?: RefObject<number>;
+=======
+>>>>>>> origin/main
   nudging?: boolean;
   nudgeKey?: number;
 }
+
+const LEVEL_ACTIVE_STATES = new Set<CallState>([
+  "connecting",
+  "listening",
+  "user-speaking",
+  "hold-to-talk",
+  "agent-thinking",
+  "agent-speaking",
+  "reconnecting",
+  "finalizing",
+]);
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
 export function VoiceOrb({
   state,
   mode,
@@ -20,20 +39,106 @@ export function VoiceOrb({
   onPointerUp,
   onPointerCancel,
   onRetry,
+<<<<<<< HEAD
+  audioLevelRef,
+  nudging = false,
+  nudgeKey = 0,
+}: Props) {
+  const orbRef = useRef<HTMLButtonElement | null>(null);
+  const cls = `voice-orb state-${state.callState}${
+    nudging ? " is-nudging" : ""
+=======
   nudging = false,
   nudgeKey = 0,
 }: Props) {
   const cls = `voice-orb state-${state.callState}${
     nudging ? ` is-nudging nudge-${nudgeKey % 2}` : ""
+>>>>>>> origin/main
   }`;
   const label = voiceStateLabel(state, mode, agentName);
   const helperText = subcopy(state.callState, mode, agentName);
+  const levelLoopActive = LEVEL_ACTIVE_STATES.has(state.callState);
+
+  useEffect(() => {
+    const element = orbRef.current;
+    if (!element) return;
+    const motionQuery =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia(REDUCED_MOTION_QUERY)
+        : null;
+
+    let raf: number | null = null;
+    let renderedLevel = Number.parseFloat(
+      element.style.getPropertyValue("--orb-level") || "0",
+    );
+    const stop = () => {
+      if (raf !== null) window.cancelAnimationFrame(raf);
+      raf = null;
+      if (audioLevelRef) audioLevelRef.current = 0;
+      element.style.setProperty("--orb-level", "0");
+    };
+    const canRunLevelLoop = () =>
+      levelLoopActive &&
+      !motionQuery?.matches &&
+      !(
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      );
+    const tick = () => {
+      if (!canRunLevelLoop()) {
+        stop();
+        return;
+      }
+      const targetLevel = Math.max(
+        0,
+        Math.min(1, audioLevelRef?.current ?? 0),
+      );
+      renderedLevel += (targetLevel - renderedLevel) * 0.28;
+      if (audioLevelRef) audioLevelRef.current = targetLevel * 0.84;
+      element.style.setProperty("--orb-level", renderedLevel.toFixed(3));
+      raf = window.requestAnimationFrame(tick);
+    };
+    const handleVisibility = () => {
+      if (!canRunLevelLoop()) {
+        stop();
+      } else if (raf === null) {
+        raf = window.requestAnimationFrame(tick);
+      }
+    };
+    const handleMotionPreference = () => handleVisibility();
+
+    if (canRunLevelLoop()) raf = window.requestAnimationFrame(tick);
+    else stop();
+    document.addEventListener("visibilitychange", handleVisibility);
+    motionQuery?.addEventListener?.("change", handleMotionPreference);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      motionQuery?.removeEventListener?.("change", handleMotionPreference);
+      stop();
+    };
+  }, [audioLevelRef, levelLoopActive]);
+
+  useLayoutEffect(() => {
+    if (!nudging || nudgeKey <= 0) return;
+    const element = orbRef.current;
+    if (!element) return;
+    element.style.animation = "none";
+    void element.offsetWidth;
+    element.style.animation = "";
+  }, [nudgeKey, nudging]);
+
   return (
-    <div className="orb-stage" aria-live="polite">
+    <div className="orb-stage">
       <button
+        ref={orbRef}
         type="button"
         className={cls}
+        data-nudge-key={nudging ? nudgeKey : undefined}
         aria-label={`Voice orb: ${label}`}
+        aria-pressed={
+          mode === "push-to-talk" ? state.callState === "hold-to-talk" : undefined
+        }
+        aria-roledescription="voice orb"
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
@@ -42,13 +147,23 @@ export function VoiceOrb({
         <span className="orb-aura" />
         <span className="orb-core" />
         <span className="orb-ring" />
+        <span className="orb-shimmer" />
         <span className="orb-wave w1" />
         <span className="orb-wave w2" />
       </button>
-      <div className="state-copy">
+      <h1 className="orb-agent-title">{agentName}</h1>
+      <div className="state-copy" aria-live="polite" aria-atomic="true">
         <p>{label}</p>
         {helperText ? <span>{helperText}</span> : null}
+<<<<<<< HEAD
+        {nudging ? (
+          <span key={`nudge-copy-${nudgeKey}`} className="sr-only">
+            Still finalizing.
+          </span>
+        ) : null}
+=======
         {nudging ? <span className="sr-only">Still finalizing.</span> : null}
+>>>>>>> origin/main
         {state.callState === "error" ? (
           <button type="button" className="retry-pill" onClick={onRetry}>
             Tap to retry
@@ -64,9 +179,14 @@ function voiceStateLabel(
   mode: VoiceMode,
   agentName: string,
 ): string {
+  if (state.callState === "agent-thinking") return "Thinking.";
   if (mode === "live") return stateLabel(state, agentName);
+<<<<<<< HEAD
+  if (state.callState === "idle") return "Hold to talk.";
+=======
   if (state.callState === "idle") return `Hold to talk to ${agentName}`;
   if (state.callState === "agent-thinking") return "Sending...";
+>>>>>>> origin/main
   return stateLabel(state, agentName);
 }
 
@@ -78,9 +198,15 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
       case "hold-to-talk":
         return "Release to send.";
       case "finalizing":
+<<<<<<< HEAD
+        return "Polishing your words.";
+      case "agent-thinking":
+        return "Getting the reply.";
+=======
         return "Finalizing";
       case "agent-thinking":
         return `${agentName} is working.`;
+>>>>>>> origin/main
       case "error":
         return "Retry voice.";
       default:
@@ -97,7 +223,11 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
     case "agent-speaking":
       return "Hold to interrupt.";
     case "agent-thinking":
+<<<<<<< HEAD
+      return "Getting the reply.";
+=======
       return "One moment.";
+>>>>>>> origin/main
     case "reconnecting":
       return "Keeping voice alive.";
     case "error":

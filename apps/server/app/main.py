@@ -5,8 +5,11 @@ import binascii
 import struct
 <<<<<<< HEAD
 =======
+<<<<<<< HEAD
+=======
 import threading
 
+>>>>>>> origin/main
 >>>>>>> origin/main
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +20,9 @@ from .chat_jobs import ChatJobService
 from .config import CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX, CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN, LOCAL_CLIENT_HOSTS, Settings
 from .gemini import build_broker, build_transcriber
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
 from .security import AuthManager
 =======
 from .security import AuthManager, hash_secret

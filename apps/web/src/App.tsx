@@ -58,6 +58,11 @@ import {
 } from "./completionNotificationPreference";
 import { agentName, agentNounLower } from "./config";
 import {
+  createEarconController,
+  type EarconController,
+  type EarconName,
+} from "./earcons";
+import {
   createHvcDiagnosticsRecorder,
   exposeHvcDiagnostics,
   type HvcDiagnosticsRecorder,
@@ -88,6 +93,9 @@ const BASIC_HOLD_STT_TIMEOUT_PER_SECOND_MS = 150;
 const BASIC_HOLD_STT_TIMEOUT_MAX_MS = 12_000;
 const SESSION_EXPIRED_MESSAGE = "Session expired. Enter your private PIN again.";
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
 const READYZ_REFRESH_MS = 45_000;
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000] as const;
 const RECONNECT_GIVE_UP_MS = 45_000;
@@ -95,7 +103,10 @@ const TOKEN_RECONNECT_LEEWAY_MS = 5_000;
 const TOKEN_RECONNECT_DEFER_MS = 1_000;
 const FINALIZING_NUDGE_MS = 620;
 const MAX_BROWSER_TIMER_MS = 2_147_483_647;
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> origin/main
 >>>>>>> origin/main
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
@@ -156,8 +167,15 @@ type TextJobEntryMeta = {
 };
 
 type SpeechCaptureState = {
+<<<<<<< HEAD
+  recognition: BrowserSpeechRecognition | null;
+  audio: BrowserGeminiAudio | null;
+  audioStartSettled: boolean;
+  audioStartFailed: boolean;
+=======
   recognition: BrowserSpeechRecognition;
   audio: BrowserGeminiAudio | null;
+>>>>>>> origin/main
   audioChunksBase64: string[];
   audioBytes: number;
   audioCapped: boolean;
@@ -315,6 +333,12 @@ export default function App() {
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
   const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
   const speechFinalizingRef = useRef(false);
+<<<<<<< HEAD
+  const orbLevelRef = useRef(0);
+  const earconsRef = useRef<EarconController | null>(null);
+  const sttProviderConfirmedRef = useRef(false);
+=======
+>>>>>>> origin/main
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const speechRecognitionDisclosureShownRef = useRef(false);
@@ -336,6 +360,10 @@ export default function App() {
   const wakeLockReleaseHandlerRef = useRef<(() => void) | null>(null);
   const wakeLockRequestingRef = useRef(false);
   const finalizingNudgeTimerRef = useRef<number | null>(null);
+<<<<<<< HEAD
+  const finalizingNudgeSequenceRef = useRef(0);
+=======
+>>>>>>> origin/main
   const transcriptDraftsRef = useRef<
     Partial<Record<RealtimeTranscriptEvent["role"], string>>
   >({});
@@ -421,13 +449,17 @@ export default function App() {
       clearReadyzRefreshInterval();
       clearFinalizingNudgeTimer();
       void releaseWakeLock();
+<<<<<<< HEAD
+      earconsRef.current?.close();
+=======
+>>>>>>> origin/main
       const activeSpeechCapture = speechCaptureRef.current;
       if (activeSpeechCapture) {
         activeSpeechCapture.finished = true;
         activeSpeechCapture.aborting = true;
         clearSpeechCapture(activeSpeechCapture);
         try {
-          activeSpeechCapture.recognition.abort();
+          activeSpeechCapture.recognition?.abort();
         } catch {
           // The browser may already have ended recognition during teardown.
         }
@@ -473,11 +505,21 @@ export default function App() {
     }
 <<<<<<< HEAD
     const online = () => void refreshAgentConnection();
+    const offline = () => {
+      sttProviderConfirmedRef.current = false;
+=======
+<<<<<<< HEAD
+    const online = () => void refreshAgentConnection();
     const offline = () =>
+>>>>>>> origin/main
       setAgentConnection({
         state: "unavailable",
         label: "Offline",
         detail: "Browser network is offline",
+<<<<<<< HEAD
+      });
+    };
+=======
 =======
     let cancelled = false;
     setAgentConnection(checkingAgentConnection);
@@ -498,6 +540,7 @@ export default function App() {
           });
 >>>>>>> origin/main
       });
+>>>>>>> origin/main
     void refreshAgentConnection({ checking: true });
     readyzRefreshIntervalRef.current = window.setInterval(
       () => void refreshAgentConnection(),
@@ -542,6 +585,26 @@ export default function App() {
     setFinalizingNudgeKey(0);
   }
 
+<<<<<<< HEAD
+  function updateOrbLevel(level: number) {
+    orbLevelRef.current = Math.max(orbLevelRef.current, level);
+  }
+
+  function unlockEarcons() {
+    earconsRef.current ??= createEarconController();
+    void earconsRef.current.unlock();
+  }
+
+  function playEarcon(name: EarconName) {
+    earconsRef.current?.play(name);
+  }
+
+  function playTextReplyEarcon() {
+    if (voiceModeRef.current === "push-to-talk") playEarcon("reply");
+  }
+
+=======
+>>>>>>> origin/main
   async function refreshAgentConnection({
     checking = false,
   }: { checking?: boolean } = {}) {
@@ -557,8 +620,18 @@ export default function App() {
     )
       return;
     if (reconnectingRef.current) return;
+<<<<<<< HEAD
+    const provider = readyz.ok ? readyz.checks?.stt_provider?.trim() : "";
+    if (provider) {
+      sttProviderRef.current = provider;
+      sttProviderConfirmedRef.current = true;
+    } else {
+      sttProviderConfirmedRef.current = false;
+    }
+=======
     const provider = readyz.checks?.stt_provider?.trim();
     if (provider) sttProviderRef.current = provider;
+>>>>>>> origin/main
     setAgentConnection(agentConnectionFromReadyz(readyz));
   }
 
@@ -1025,6 +1098,7 @@ export default function App() {
         restored: false,
       });
       if (!meta.restored) {
+        playTextReplyEarcon();
         speakBackgroundCompletionNotice(SPOKEN_COMPLETION_NOTICE_TEXT);
       }
       finishTextJob(status.job_id, { keepRecoveryId: true });
@@ -1288,13 +1362,30 @@ export default function App() {
   }
 
   function speechRecognitionUnavailableMessage() {
+<<<<<<< HEAD
+    return "Hold-to-talk needs browser speech recognition here. Use Live or type.";
+=======
     return "Hold mode needs browser speech recognition. Switch to Live or type.";
+>>>>>>> origin/main
   }
 
   function speechRecognitionPermissionMessage() {
     return "Microphone blocked. Allow mic access, then hold again.";
   }
 
+<<<<<<< HEAD
+  function speechTranscriptionFailureMessage() {
+    return "Hold-to-talk could not transcribe that. Try again, use Live, or type.";
+  }
+
+  function speechAudioCaptureMessage(error?: unknown) {
+    if (error instanceof DOMException && error.name === "NotAllowedError")
+      return speechRecognitionPermissionMessage();
+    return "Hold-to-talk could not start microphone audio. Use Live or type.";
+  }
+
+=======
+>>>>>>> origin/main
   function basicHoldDisclosureMessage() {
     const provider = sttProviderRef.current;
     if (provider === "browser")
@@ -1308,6 +1399,16 @@ export default function App() {
     if (speechRecognitionDisclosureShownRef.current) return;
     speechRecognitionDisclosureShownRef.current = true;
     appendSystem(basicHoldDisclosureMessage());
+<<<<<<< HEAD
+  }
+
+  function serverSttCanTranscribeHold() {
+    return (
+      sttProviderConfirmedRef.current &&
+      ["gemini", "mock"].includes(sttProviderRef.current)
+    );
+=======
+>>>>>>> origin/main
   }
 
   async function primeBasicHoldMicrophonePermission({
@@ -1366,12 +1467,22 @@ export default function App() {
     );
   }
 
+<<<<<<< HEAD
+  function startSpeechCaptureAudio(capture: SpeechCaptureState): boolean {
+    let audio: BrowserGeminiAudio;
+    try {
+      audio = new BrowserGeminiAudio({ onInputLevel: updateOrbLevel });
+    } catch {
+      capture.audioStartFailed = true;
+      return false;
+=======
   function startSpeechCaptureAudio(capture: SpeechCaptureState) {
     let audio: BrowserGeminiAudio;
     try {
       audio = new BrowserGeminiAudio();
     } catch {
       return;
+>>>>>>> origin/main
     }
     capture.audio = audio;
     void audio
@@ -1379,7 +1490,11 @@ export default function App() {
         if (
           speechCaptureRef.current !== capture ||
           capture.finished ||
+<<<<<<< HEAD
+          (capture.releaseRequested && capture.recognition)
+=======
           capture.releaseRequested
+>>>>>>> origin/main
         )
           return;
         const bytes =
@@ -1392,6 +1507,37 @@ export default function App() {
         }
         capture.audioBytes += bytes;
         capture.audioChunksBase64.push(chunk.data);
+<<<<<<< HEAD
+        if (capture.releaseRequested && !capture.recognition)
+          finishSpeechCapture(capture);
+      })
+      .then(() => {
+        capture.audioStartSettled = true;
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.audio !== audio
+        )
+          audio.close();
+        if (
+          speechCaptureRef.current === capture &&
+          !capture.finished &&
+          capture.releaseRequested &&
+          !capture.recognition &&
+          capture.audioChunksBase64.length > 0
+        )
+          finishSpeechCapture(capture);
+      })
+      .catch((error: unknown) => {
+        capture.audioStartSettled = true;
+        capture.audioStartFailed = true;
+        if (capture.audio === audio) capture.audio = null;
+        audio.close();
+        if (!capture.recognition)
+          failSpeechCapture(capture, speechAudioCaptureMessage(error));
+      });
+    return true;
+=======
       })
       .then(() => {
         if (
@@ -1406,6 +1552,7 @@ export default function App() {
         if (capture.audio === audio) capture.audio = null;
         audio.close();
       });
+>>>>>>> origin/main
   }
 
   function updateSpeechCaptureEntry(
@@ -1452,25 +1599,60 @@ export default function App() {
   }
 
   function recognitionErrorMessage(error: string) {
-    if (error === "not-allowed" || error === "service-not-allowed")
+    if (error === "not-allowed")
       return speechRecognitionPermissionMessage();
     if (error === "audio-capture")
       return "I could not reach the microphone. Check the input, then try again or type.";
+<<<<<<< HEAD
+    if (error === "service-not-allowed")
+      return speechRecognitionUnavailableMessage();
+=======
+>>>>>>> origin/main
     if (error === "language-not-supported")
       return "This browser cannot recognize that language. Switch to Live or type.";
     return "Browser speech recognition stopped early. Try again, switch to Live, or type.";
   }
 
-  function isBlockingSpeechRecognitionError(error: string) {
-    return (
-      error === "not-allowed" ||
-      error === "service-not-allowed" ||
-      error === "audio-capture" ||
-      error === "language-not-supported"
-    );
+  function isMicrophoneBlockingSpeechRecognitionError(error: string) {
+    return error === "not-allowed" || error === "audio-capture";
+  }
+
+  function isSpeechRecognitionEnhancerUnavailableError(error: string) {
+    return error === "service-not-allowed" || error === "language-not-supported";
+  }
+
+  function disableSpeechRecognitionEnhancer(
+    capture: SpeechCaptureState,
+    recognition: BrowserSpeechRecognition,
+  ): boolean {
+    if (capture.recognition !== recognition) return false;
+    if (capture.releaseRequested && capture.audioChunksBase64.length > 0) {
+      capture.recognition = null;
+      capture.ended = true;
+      try {
+        recognition.abort();
+      } catch {
+        // The browser may already have ended recognition.
+      }
+      finishSpeechCapture(capture);
+      return false;
+    }
+    if (capture.audioStartFailed || !capture.audio) {
+      failSpeechCapture(capture, speechAudioCaptureMessage());
+      return false;
+    }
+    capture.recognition = null;
+    capture.ended = true;
+    try {
+      recognition.abort();
+    } catch {
+      // The browser may already have ended recognition.
+    }
+    return true;
   }
 
   function restartSpeechCapture(capture: SpeechCaptureState) {
+    if (!capture.recognition) return false;
     if (capture.restartAttempts >= BASIC_HOLD_SPEECH_RESTART_LIMIT)
       return false;
     capture.restartAttempts += 1;
@@ -1515,7 +1697,7 @@ export default function App() {
     capture.aborting = true;
     clearSpeechCapture(capture);
     try {
-      capture.recognition.abort();
+      capture.recognition?.abort();
     } catch {
       // The browser may already have ended recognition.
     }
@@ -1536,7 +1718,7 @@ export default function App() {
     capture.aborting = true;
     clearSpeechCapture(capture);
     try {
-      capture.recognition.abort();
+      capture.recognition?.abort();
     } catch {
       // The browser may already have ended recognition.
     }
@@ -1593,8 +1775,18 @@ export default function App() {
 
 <<<<<<< HEAD
   function nudgeFinalizingHold() {
+    if (finalizingNudgeTimerRef.current !== null) {
+      window.clearTimeout(finalizingNudgeTimerRef.current);
+      finalizingNudgeTimerRef.current = null;
+    }
+    finalizingNudgeSequenceRef.current += 1;
+    setFinalizingNudgeKey(finalizingNudgeSequenceRef.current);
+=======
+<<<<<<< HEAD
+  function nudgeFinalizingHold() {
     clearFinalizingNudgeTimer();
     setFinalizingNudgeKey((key) => key + 1);
+>>>>>>> origin/main
     finalizingNudgeTimerRef.current = window.setTimeout(() => {
       finalizingNudgeTimerRef.current = null;
       setFinalizingNudgeKey(0);
@@ -1611,6 +1803,8 @@ export default function App() {
       return;
     }
     dispatch({ type: "THINK" });
+<<<<<<< HEAD
+=======
 =======
   function submitFinishedSpeechCapture(capture: SpeechCaptureState, text: string) {
     if (!text) {
@@ -1621,6 +1815,7 @@ export default function App() {
       failFinishedSpeechCapture(capture, SESSION_EXPIRED_MESSAGE);
       return;
     }
+>>>>>>> origin/main
 >>>>>>> origin/main
     if (capture.entryId) {
       setEntries((items) =>
@@ -1686,7 +1881,16 @@ export default function App() {
           }
 <<<<<<< HEAD
           void refreshAgentConnection();
+          if (!browserText) {
+            failFinishedSpeechCapture(capture, speechTranscriptionFailureMessage());
+            dispatch({ type: "RECOVER" });
+            return;
+          }
 =======
+<<<<<<< HEAD
+          void refreshAgentConnection();
+=======
+>>>>>>> origin/main
 >>>>>>> origin/main
           // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
         }
@@ -1714,7 +1918,11 @@ export default function App() {
 <<<<<<< HEAD
     dispatch({ type: "FINALIZE" });
 =======
+<<<<<<< HEAD
+    dispatch({ type: "FINALIZE" });
+=======
     dispatch({ type: "POINTER_UP" });
+>>>>>>> origin/main
 >>>>>>> origin/main
     void finalizeSpeechCaptureTranscript(
       capture,
@@ -1728,12 +1936,18 @@ export default function App() {
   function startBasicHoldRecognition(press: PressState): boolean {
     if (!canUsePrivateSession()) return false;
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
     if (speechFinalizingRef.current) {
       nudgeFinalizingHold();
       return false;
     }
+<<<<<<< HEAD
+=======
 =======
     if (speechFinalizingRef.current) return false;
+>>>>>>> origin/main
 >>>>>>> origin/main
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
@@ -1742,7 +1956,7 @@ export default function App() {
       return false;
     }
     const recognition = createSpeechRecognition();
-    if (!recognition) {
+    if (!recognition && !serverSttCanTranscribeHold()) {
       press.holding = false;
       appendSystem(speechRecognitionUnavailableMessage(), "failed");
       dispatch({ type: "ERROR", error: "Hold-to-talk is not available here." });
@@ -1752,6 +1966,11 @@ export default function App() {
     const capture: SpeechCaptureState = {
       recognition,
       audio: null,
+<<<<<<< HEAD
+      audioStartSettled: false,
+      audioStartFailed: false,
+=======
+>>>>>>> origin/main
       audioChunksBase64: [],
       audioBytes: 0,
       audioCapped: false,
@@ -1769,44 +1988,76 @@ export default function App() {
     };
     speechCaptureRef.current = capture;
 
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
-    recognition.maxAlternatives = 1;
-    recognition.onresult = (event) => {
-      if (speechCaptureRef.current !== capture || capture.finished) return;
-      const next = readSpeechRecognitionTranscript(event);
-      capture.finalText = [capture.finalText, next.finalText]
-        .map((part) => part.trim())
-        .filter(Boolean)
-        .join(" ");
-      capture.interimText = next.interimText;
-      if (speechCaptureText(capture)) capture.restartAttempts = 0;
-      updateSpeechCaptureEntry(capture, speechCaptureText(capture));
-    };
-    recognition.onerror = (event) => {
-      if (speechCaptureRef.current !== capture || capture.finished) return;
-      if (event.error === "aborted" && (capture.stopping || capture.aborting))
-        return;
-      if (event.error === "no-speech") return;
-      if (!isBlockingSpeechRecognitionError(event.error)) return;
-      failSpeechCapture(capture, recognitionErrorMessage(event.error));
-    };
-    recognition.onend = () => {
-      if (speechCaptureRef.current !== capture || capture.finished) return;
-      settleEndedSpeechCapture(capture);
-    };
-
-    try {
-      recognition.start();
-    } catch {
-      failSpeechCapture(
-        capture,
-        "Speech recognition could not start in this browser. Switch to Live mode or type in the transcript.",
-      );
+    if (!startSpeechCaptureAudio(capture) && !recognition) {
+      failSpeechCapture(capture, speechAudioCaptureMessage());
       return false;
     }
     startSpeechCaptureAudio(capture);
+
+    if (recognition) {
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-US";
+      recognition.maxAlternatives = 1;
+      recognition.onresult = (event) => {
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.recognition !== recognition
+        )
+          return;
+        const next = readSpeechRecognitionTranscript(event);
+        capture.finalText = [capture.finalText, next.finalText]
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(" ");
+        capture.interimText = next.interimText;
+        if (speechCaptureText(capture)) capture.restartAttempts = 0;
+        updateSpeechCaptureEntry(capture, speechCaptureText(capture));
+      };
+      recognition.onerror = (event) => {
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.recognition !== recognition
+        )
+          return;
+        if (event.error === "aborted" && (capture.stopping || capture.aborting))
+          return;
+        if (event.error === "no-speech") return;
+        if (isMicrophoneBlockingSpeechRecognitionError(event.error)) {
+          failSpeechCapture(capture, recognitionErrorMessage(event.error));
+          return;
+        }
+        if (!isSpeechRecognitionEnhancerUnavailableError(event.error)) return;
+        if (serverSttCanTranscribeHold()) {
+          disableSpeechRecognitionEnhancer(capture, recognition);
+          return;
+        }
+        failSpeechCapture(capture, recognitionErrorMessage(event.error));
+      };
+      recognition.onend = () => {
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.recognition !== recognition
+        )
+          return;
+        settleEndedSpeechCapture(capture);
+      };
+
+      try {
+        recognition.start();
+      } catch {
+        if (serverSttCanTranscribeHold()) {
+          if (!disableSpeechRecognitionEnhancer(capture, recognition))
+            return false;
+        } else {
+          failSpeechCapture(capture, speechRecognitionUnavailableMessage());
+          return false;
+        }
+      }
+    }
 
     press.activated = true;
     dispatch({ type: "POINTER_DOWN" });
@@ -1816,12 +2067,18 @@ export default function App() {
   function beginBasicHold(): boolean {
     if (!canUsePrivateSession()) return false;
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
     if (speechFinalizingRef.current) {
       nudgeFinalizingHold();
       return false;
     }
+<<<<<<< HEAD
+=======
 =======
     if (speechFinalizingRef.current) return false;
+>>>>>>> origin/main
 >>>>>>> origin/main
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
@@ -1870,7 +2127,7 @@ export default function App() {
       capture.aborting = true;
       clearSpeechCapture(capture);
       try {
-        capture.recognition.abort();
+        capture.recognition?.abort();
       } catch {
         // The browser may already have ended recognition.
       }
@@ -1887,6 +2144,14 @@ export default function App() {
       return;
     }
     capture.releaseRequested = true;
+<<<<<<< HEAD
+    if (!capture.recognition) {
+      stopSpeechCaptureAudio(capture);
+      finishSpeechCapture(capture);
+      return;
+    }
+=======
+>>>>>>> origin/main
     stopSpeechCaptureAudio(capture);
     if (capture.ended) {
       finishSpeechCapture(capture);
@@ -1911,7 +2176,7 @@ export default function App() {
 
   function switchToPushToTalkMode() {
     if (isSpokenCompletionNoticeBlockingCapture()) return;
-    if (!browserSupportsSpeechRecognition()) {
+    if (!browserSupportsSpeechRecognition() && !serverSttCanTranscribeHold()) {
       appendSystem(speechRecognitionUnavailableMessage(), "failed");
       return;
     }
@@ -1922,6 +2187,7 @@ export default function App() {
   }
 
   function toggleVoiceMode() {
+    unlockEarcons();
     if (voiceModeRef.current === "live") {
       switchToPushToTalkMode();
     } else {
@@ -1992,7 +2258,9 @@ export default function App() {
       return [...items, entry];
     });
 
-    if (event.final) delete transcriptDraftsRef.current[event.role];
+    if (event.final) {
+      delete transcriptDraftsRef.current[event.role];
+    }
   }
 
   function settleTranscriptDraft(
@@ -2195,13 +2463,28 @@ export default function App() {
   function createLiveSession(sessionGeneration: number): RealtimeVoiceSession {
     return createDefaultRealtimeVoiceSession({
       callbacks: buildSessionCallbacks(sessionGeneration),
+<<<<<<< HEAD
+      audio: {
+        startMuted: stateRef.current.isMuted,
+        onInputLevel: updateOrbLevel,
+        onOutputLevel: updateOrbLevel,
+      },
+=======
       audio: { startMuted: stateRef.current.isMuted },
+>>>>>>> origin/main
       systemInstruction: buildLiveHermesSystemInstruction(agentName),
       requireToolResponseForModelOutput: true,
     });
   }
 
+<<<<<<< HEAD
+  async function connectLiveSession(
+    sessionGeneration: number,
+    { playStartEarcon = false }: { playStartEarcon?: boolean } = {},
+  ) {
+=======
   async function connectLiveSession(sessionGeneration: number) {
+>>>>>>> origin/main
     const session = createLiveSession(sessionGeneration);
     sessionRef.current = session;
     try {
@@ -2219,6 +2502,10 @@ export default function App() {
       disconnectLiveSession(session);
       throw new Error("voice connection cancelled");
     }
+<<<<<<< HEAD
+    if (playStartEarcon) playEarcon("session-start");
+=======
+>>>>>>> origin/main
   }
 
   function nextSessionGeneration(): number {
@@ -2384,6 +2671,24 @@ export default function App() {
     return "Restoring voice connection...";
   }
 
+<<<<<<< HEAD
+  function liveVoiceFailureCopy(reason: string) {
+    if (/unsupported realtime provider/i.test(reason)) return reason;
+    if (/permission|notallowed|microphone/i.test(reason))
+      return "Microphone permission is needed to use voice.";
+    if (/token=|session_id=|secret|api[_ -]?key/i.test(reason))
+      return "Voice connection had trouble. Retry.";
+    if (
+      /open timeout|socket|setup|closed before opening|network|offline/i.test(
+        reason,
+      )
+    )
+      return "Voice connection had trouble. Check the private network and retry.";
+    return "Voice connection had trouble. Retry.";
+  }
+
+=======
+>>>>>>> origin/main
   function handleLiveSessionLoss(sessionGeneration: number, reason: string) {
     if (!isCurrentSessionGeneration(sessionGeneration)) return;
     if (sessionLossHandledGenerationRef.current === sessionGeneration) return;
@@ -2413,7 +2718,11 @@ export default function App() {
     const previousSession = sessionRef.current;
     sessionRef.current = null;
     if (previousSession) disconnectLiveSession(previousSession);
+<<<<<<< HEAD
+    appendSystem(liveVoiceFailureCopy(reason), "failed");
+=======
     appendSystem(reason, "failed");
+>>>>>>> origin/main
     dispatch({ type: "ERROR", error: "Voice session disconnected." });
   }
 
@@ -2525,7 +2834,11 @@ export default function App() {
     dispatch({ type: "CONNECT" });
 
     try {
+<<<<<<< HEAD
+      await connectLiveSession(sessionGeneration, { playStartEarcon: true });
+=======
       await connectLiveSession(sessionGeneration);
+>>>>>>> origin/main
       if (
         !isCurrentSessionGeneration(sessionGeneration) ||
         !liveSessionDesired()
@@ -2552,7 +2865,11 @@ export default function App() {
         return;
       }
       liveDesiredRef.current = false;
+<<<<<<< HEAD
+      appendSystem(liveVoiceFailureCopy(errorMessage), "failed");
+=======
       appendSystem(errorMessage, "failed");
+>>>>>>> origin/main
       dispatch({
         type: "ERROR",
         error:
@@ -2606,11 +2923,16 @@ export default function App() {
     markCaptureNotReady();
     pressRef.current = emptyPress();
     endingRef.current = true;
-    sessionRef.current?.setHoldToTalk(false);
-    sessionRef.current?.disconnect();
+    const session = sessionRef.current;
+    session?.setHoldToTalk(false);
+    session?.disconnect();
     sessionRef.current = null;
     transcriptDraftsRef.current = {};
     void releaseWakeLock();
+<<<<<<< HEAD
+    if (session) playEarcon("session-end");
+=======
+>>>>>>> origin/main
     dispatch({ type: "RECOVER" });
   }
 
@@ -2707,6 +3029,7 @@ export default function App() {
   }
 
   function handlePointerDown(e: PointerEvent<HTMLButtonElement>) {
+    unlockEarcons();
     exitTextModeForOrbPress();
     if (
       e.button !== 0 ||
@@ -2861,6 +3184,7 @@ export default function App() {
     { existingUserEntryId }: { existingUserEntryId?: string } = {},
   ) {
     if (!canUsePrivateSession()) return;
+    unlockEarcons();
     const submitFocusEpoch = textFocusEpochRef.current;
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
@@ -2882,6 +3206,7 @@ export default function App() {
       };
       setEntries((items) => [...items, user]);
     }
+    playEarcon("send");
     try {
       const res = await sendText(text, entriesRef.current);
       if (isChatJobStatus(res)) {
@@ -2912,6 +3237,7 @@ export default function App() {
           at: Date.now(),
         },
       ]);
+      playTextReplyEarcon();
       dispatch({ type: "SPEAK" });
       window.setTimeout(() => {
         completeTextTurn(submitFocusEpoch);
@@ -2944,7 +3270,7 @@ export default function App() {
         <header className="topbar">
           <div>
             <span className="eyebrow">private voice control</span>
-            <h1>{agentName}</h1>
+            <span className="hero-agent-kicker">{agentName}</span>
           </div>
           <div
             className={`agent-connection state-${agentConnection.state}`}
@@ -2967,6 +3293,7 @@ export default function App() {
           nudging={finalizingNudgeKey > 0}
           nudgeKey={finalizingNudgeKey}
           agentName={agentName}
+          audioLevelRef={orbLevelRef}
         />
         <div className="control-row">
           {voiceMode === "live" ? (

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
 
 const APP_URL = process.env.HVC_E2E_APP_URL ?? "http://127.0.0.1:5173";
 const configuredAgentName = process.env.HVC_E2E_AGENT_NAME;
@@ -18,6 +19,54 @@ const viewports = [
   { name: "desktop-1280", width: 1280, height: 900 },
 ];
 const DRAWER_BREAKPOINT = 900;
+const stateCaptureViewports = [
+  { name: "mobile-390", width: 390, height: 844 },
+  { name: "desktop-1280", width: 1280, height: 900 },
+];
+const stateCaptures = [
+  {
+    name: "idle",
+    callState: "idle",
+    level: "0",
+    label: "Hold to talk.",
+    helper: "Hold, speak.",
+  },
+  {
+    name: "hold",
+    callState: "hold-to-talk",
+    level: "0.78",
+    label: "Holding to talk",
+    helper: "Release to send.",
+  },
+  {
+    name: "thinking",
+    callState: "agent-thinking",
+    level: "0.28",
+    label: "Thinking.",
+    helper: "Getting the reply.",
+  },
+  {
+    name: "finalizing",
+    callState: "finalizing",
+    level: "0.34",
+    label: "Finalizing",
+    helper: "Polishing your words.",
+  },
+  {
+    name: "reconnecting",
+    callState: "reconnecting",
+    level: "0.18",
+    label: "Reconnecting voice",
+    helper: "Keeping voice alive.",
+  },
+  {
+    name: "error",
+    callState: "error",
+    level: "0",
+    label: "Voice disconnected",
+    helper: "Retry voice.",
+  },
+] as const;
 
 interface BrowserDiagnostics {
   snapshot(): {
@@ -72,6 +121,7 @@ async function stubUnlockedSession(page: Page) {
         checks: {
           hermes_adapter: "api",
           hermes: { kind: "api", available: true },
+          stt_provider: "gemini",
         },
       }),
     });
@@ -106,6 +156,55 @@ async function waitForDrawerOpen(page: Page) {
   });
 }
 
+async function applyVisualState(
+  page: Page,
+  state: (typeof stateCaptures)[number],
+) {
+  await page.evaluate((nextState) => {
+    const orb = document.querySelector<HTMLButtonElement>(".voice-orb");
+    const copy = document.querySelector<HTMLElement>(".state-copy");
+    const chip = document.querySelector<HTMLElement>(".agent-connection");
+    const label = copy?.querySelector("p");
+    const helper = copy?.querySelector("span:not(.sr-only)");
+    if (!orb || !copy || !label) return;
+    for (const className of Array.from(orb.classList)) {
+      if (className.startsWith("state-")) orb.classList.remove(className);
+    }
+    orb.classList.add(`state-${nextState.callState}`);
+    orb.style.setProperty("--orb-level", nextState.level);
+    label.textContent = nextState.label;
+    if (helper) helper.textContent = nextState.helper;
+    if (chip) {
+      chip.classList.remove(
+        "state-checking",
+        "state-connected",
+        "state-degraded",
+        "state-unavailable",
+      );
+      const strong = chip.querySelector("strong");
+      const small = chip.querySelector("small");
+      if (nextState.callState === "error") {
+        chip.classList.add("state-unavailable");
+        chip.setAttribute("aria-label", "Agent connection: Backend unreachable");
+        if (strong) strong.textContent = "Backend unreachable";
+        if (small) small.textContent = "Check the private connection";
+      } else {
+        chip.classList.add("state-connected");
+        chip.setAttribute("aria-label", "Agent connection: Ready");
+        if (strong) strong.textContent = "Ready";
+        if (small) small.textContent = "Agent reachable";
+      }
+    }
+    if (nextState.callState === "error" && !copy.querySelector(".retry-pill")) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "retry-pill";
+      retry.textContent = "Tap to retry";
+      copy.append(retry);
+    }
+  }, state);
+}
+
 for (const viewport of viewports) {
   test(`renders without overflow at ${viewport.name}`, async ({ page }, testInfo) => {
     const consoleErrors: string[] = [];
@@ -131,7 +230,7 @@ for (const viewport of viewports) {
     await expect(muteButton).toHaveCount(0);
     await expect(liveButton).toBeVisible();
     await expect(endButton).toHaveCount(0);
-    await expect(page.getByText(`Hold to talk to ${AGENT_NAME}`)).toBeVisible();
+    await expect(page.getByText("Hold to talk.")).toBeVisible();
     await expect(
       page.getByLabel(/Agent connection: Ready/),
     ).toBeVisible();
@@ -198,6 +297,42 @@ for (const viewport of viewports) {
   });
 }
 
+for (const viewport of stateCaptureViewports) {
+  test(`captures orb visual states at ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({
+      width: viewport.width,
+      height: viewport.height,
+    });
+    await stubUnlockedSession(page);
+    await page.goto(APP_URL, { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
+    const outputDir = "docs/assets/screenshots/states";
+    if (WRITE_SCREENSHOTS) mkdirSync(outputDir, { recursive: true });
+
+    for (const visualState of stateCaptures) {
+      await applyVisualState(page, visualState);
+      const orb = page.getByRole("button", { name: /Voice orb:/ });
+      await expect(orb).toHaveClass(
+        new RegExp(`\\bstate-${visualState.callState}\\b`),
+      );
+      await expect(page.getByText(visualState.label).first()).toBeVisible();
+      if (WRITE_SCREENSHOTS) {
+        const filename = `${viewport.name}-${visualState.name}.png`;
+        await page.screenshot({
+          path: `${outputDir}/${filename}`,
+          fullPage: true,
+        });
+        await page.screenshot({
+          path: testInfo.outputPath(filename),
+          fullPage: true,
+        });
+      }
+    }
+  });
+}
+
 test("exposes local redacted diagnostics with launch budgets", async ({ page }) => {
   await page.goto(APP_URL, { waitUntil: "networkidle" });
 
@@ -249,7 +384,12 @@ test("prevents mobile long-press text and image selection on the voice surface",
   await expect(page.getByRole("heading", { name: AGENT_NAME })).toBeVisible();
 
   const selectionStyles = await page.evaluate(() => {
-    const selectors = [".hero-panel", ".topbar h1", ".orb-stage", ".voice-orb"];
+    const selectors = [
+      ".hero-panel",
+      ".hero-agent-kicker",
+      ".orb-stage",
+      ".voice-orb",
+    ];
     const styles = selectors.map((selector) => {
       const element = document.querySelector(selector);
       if (!element) return { selector, missing: true };
@@ -274,7 +414,7 @@ test("prevents mobile long-press text and image selection on the voice surface",
         webkitUserSelect: "none",
       }),
       expect.objectContaining({
-        selector: ".topbar h1",
+        selector: ".hero-agent-kicker",
         userSelect: "none",
         webkitUserSelect: "none",
       }),

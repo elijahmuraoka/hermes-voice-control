@@ -397,6 +397,21 @@ describe("App", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         const requestUrl = String(url);
+        if (requestUrl.includes("/readyz")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              checks: {
+                hermes_adapter: "api",
+                hermes: { kind: "api", available: true },
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
         if (requestUrl.includes("/auth/session")) {
           return new Response(
             JSON.stringify({ authenticated: sessionAuthenticated }),
@@ -530,18 +545,22 @@ describe("App", () => {
   }
 
   function switchToBasicHoldMode() {
-    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
+    const holdButton = screen.queryByRole("button", { name: /^Hold$/ });
+    if (holdButton) fireEvent.click(holdButton);
     expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
   }
 
-  async function startListeningVoice(): Promise<TestVoiceSession> {
-    const orb = screen.getByLabelText(/Voice orb/);
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
+  async function switchToLiveMode(): Promise<TestVoiceSession> {
+    const liveButton = screen.queryByRole("button", { name: /^Live$/ });
+    if (liveButton) fireEvent.click(liveButton);
     await waitFor(() =>
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
     return realtimeMock.instances[0] as TestVoiceSession;
+  }
+
+  async function startListeningVoice(): Promise<TestVoiceSession> {
+    return switchToLiveMode();
   }
 
   async function startBackgroundTextJob(
@@ -592,15 +611,7 @@ describe("App", () => {
     await user.tab();
     expect(screen.getByLabelText(/Voice orb/)).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: /^Mute$/ })).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: /^Hold$/ })).toHaveFocus();
-    await user.tab();
-    expect(
-      screen.getByRole("button", {
-        name: /Turn off spoken completion notices/i,
-      }),
-    ).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Live$/ })).toHaveFocus();
   });
 
   it("does not show default PIN or interrupt controls", async () => {
@@ -628,8 +639,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
-    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 2 });
+    await switchToLiveMode();
 
     await waitFor(() =>
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
@@ -661,22 +671,14 @@ describe("App", () => {
     );
   });
 
-  it("uses basic hold-to-talk speech recognition after explicit mode switch", async () => {
+  it("uses basic hold-to-talk speech recognition by default", async () => {
     const speech = installSpeechRecognitionMock();
     await renderUnlockedApp();
     vi.useFakeTimers();
 
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Mute$/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Hold$/ })).toBeInTheDocument();
-
-    switchToBasicHoldMode();
     expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Mute$/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Live$/ })).toBeInTheDocument();
-    expect(
-      screen.getByText(/Basic Hold uses this browser's speech recognition/i),
-    ).toBeInTheDocument();
 
     const orb = screen.getByLabelText(/Voice orb/);
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -1041,8 +1043,8 @@ describe("App", () => {
       screen.getByRole("button", { name: /Cancel background reply/i }),
     ).toBeInTheDocument();
     expect(input).not.toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /^Mute$/ }));
-    expect(screen.getByText("Mic paused")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Live$/ })).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1400);
@@ -1077,6 +1079,7 @@ describe("App", () => {
     expect(
       screen.getByText("I am checking the latest Hermes context..."),
     ).toBeInTheDocument();
+    expect(screen.getByText(/working \d+s/i)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Cancel background reply/i }),
     ).toBeInTheDocument();
@@ -2022,12 +2025,7 @@ describe("App", () => {
   it("does not resume hands-free capture just because the text composer blurs", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     const session = realtimeMock.instances[0];
     const input = screen.getByLabelText("Type a message to your Hermes agent");
@@ -2045,12 +2043,7 @@ describe("App", () => {
   it("restores hands-free capture after a successful typed send from a live session", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     const session = realtimeMock.instances[0];
     const input = screen.getByLabelText("Type a message to your Hermes agent");
@@ -2077,12 +2070,7 @@ describe("App", () => {
   it("preserves capture restore when text composer is blurred and refocused", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     const session = realtimeMock.instances[0];
     const input = screen.getByLabelText("Type a message to your Hermes agent");
@@ -2109,12 +2097,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     const session = realtimeMock.instances[0];
     const input = screen.getByLabelText("Type a message to your Hermes agent");
@@ -2147,12 +2130,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     const session = realtimeMock.instances[0];
     const input = screen.getByLabelText("Type a message to your Hermes agent");
@@ -2173,12 +2151,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     fireEvent.pointerUp(orb, { pointerId: 2 });
     expect(screen.getByText("Paused")).toBeInTheDocument();
@@ -2200,12 +2173,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     await user.click(screen.getByRole("button", { name: /^Mute$/ }));
     expect(screen.getByText("Mic paused")).toBeInTheDocument();
@@ -2226,12 +2194,7 @@ describe("App", () => {
   it("uses the first orb tap after text focus to resume capture", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     const session = realtimeMock.instances[0];
     const input = screen.getByLabelText("Type a message to your Hermes agent");
@@ -2250,12 +2213,7 @@ describe("App", () => {
   it("activates hold-to-talk after returning from text mode with an existing session", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
@@ -2275,13 +2233,7 @@ describe("App", () => {
   it("first orb tap constructs and connects one realtime session, then shows listening status", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     expect(screen.queryByText("test voice")).not.toBeInTheDocument();
     expect(realtimeMock.instances).toHaveLength(1);
     expect(realtimeMock.instances[0].connect).toHaveBeenCalledTimes(1);
@@ -2303,10 +2255,7 @@ describe("App", () => {
   it("records redacted diagnostics when initial voice connection fails", async () => {
     realtimeMock.connectError = new Error("token=secret session_id=sess_123456");
     await renderUnlockedApp();
-    const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
 
     await waitFor(() =>
       expect(screen.getByText(/Could not prepare/)).toBeInTheDocument(),
@@ -2329,10 +2278,7 @@ describe("App", () => {
   it("reopens the PIN gate when realtime auth expires", async () => {
     realtimeMock.connectError = new Error('{"detail":"Session expired"}');
     await renderUnlockedApp();
-    const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
 
     await waitFor(() =>
       expect(screen.getByLabelText("Private PIN")).toBeInTheDocument(),
@@ -2347,12 +2293,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const first = realtimeMock.instances[0];
 
     chatAuthExpired = true;
@@ -2385,12 +2326,7 @@ describe("App", () => {
   it("clears an active realtime session when realtime auth expires after connect", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const first = realtimeMock.instances[0];
 
     act(() => {
@@ -2409,12 +2345,7 @@ describe("App", () => {
     installSpeechRecognitionMock();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const first = realtimeMock.instances[0];
 
     await user.click(screen.getByRole("button", { name: /^Hold$/ }));
@@ -2453,10 +2384,7 @@ describe("App", () => {
       "Unsupported realtime provider 'openai'.",
     );
     await renderUnlockedApp();
-    const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
 
     await waitFor(() =>
       expect(
@@ -2474,12 +2402,7 @@ describe("App", () => {
   it("second orb tap pauses and disables microphone capture", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     fireEvent.pointerUp(orb, { pointerId: 2 });
 
@@ -2496,12 +2419,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     await user.click(screen.getByRole("button", { name: /Mute/ }));
     expect(
@@ -2517,12 +2435,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     await user.click(
       screen.getByLabelText("Type a message to your Hermes agent"),
@@ -2539,12 +2452,7 @@ describe("App", () => {
   it("leaves thinking state when text focus abandons a pending hold turn", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -2570,12 +2478,7 @@ describe("App", () => {
   it("long orb hold recovers when no speech or response arrives", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -2612,6 +2515,7 @@ describe("App", () => {
     realtimeMock.connectGate = createConnectGate();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -2642,6 +2546,7 @@ describe("App", () => {
     realtimeMock.emitInitialStatuses = false;
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -2673,6 +2578,7 @@ describe("App", () => {
     realtimeMock.connectGate = createConnectGate();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
@@ -2713,12 +2619,7 @@ describe("App", () => {
   it("recovers immediately when the provider completes a silent hold turn", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -2741,12 +2642,7 @@ describe("App", () => {
   it("cancels stale turn recovery when retrying with a new hold", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -2773,12 +2669,7 @@ describe("App", () => {
   it("ignores a stale provider turn-complete after retrying a hold", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -2804,12 +2695,7 @@ describe("App", () => {
   it("does not spend the next turn-complete after abandoning a hold with no finalized audio", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const session = realtimeMock.instances[0];
     session.finalizeInputTurn
       .mockReturnValueOnce(false)
@@ -2834,12 +2720,7 @@ describe("App", () => {
   it("ignores stale agent callbacks after abandoning a hold for text input", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const session = realtimeMock.instances[0];
 
     vi.useFakeTimers();
@@ -2876,12 +2757,7 @@ describe("App", () => {
   it("ignores a stale provider completion after a timed-out hold is retried", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const session = realtimeMock.instances[0];
 
     vi.useFakeTimers();
@@ -2907,12 +2783,7 @@ describe("App", () => {
   it("accepts a quick retry response before the abandoned provider turn completes", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const session = realtimeMock.instances[0];
 
     vi.useFakeTimers();
@@ -2942,12 +2813,7 @@ describe("App", () => {
   it("finalizes and suppresses an activated hold when pointer capture is cancelled", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
     const session = realtimeMock.instances[0];
 
     vi.useFakeTimers();
@@ -2967,12 +2833,7 @@ describe("App", () => {
   it("keeps streaming user transcription visible in the transcript drawer", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     act(() => {
       realtimeMock.instances[0].callbacks.onTranscript?.({
@@ -2985,7 +2846,7 @@ describe("App", () => {
     expect(screen.getByLabelText("Live transcript")).toHaveTextContent(
       "turn on the lights",
     );
-    expect(screen.getByText("live")).toBeInTheDocument();
+    expect(screen.getByText("hearing")).toBeInTheDocument();
 
     act(() => {
       realtimeMock.instances[0].callbacks.onTranscript?.({
@@ -3002,12 +2863,7 @@ describe("App", () => {
   it("starts a fresh transcript row after abandoning a partial user draft", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     act(() => {
       realtimeMock.instances[0].callbacks.onTranscript?.({
@@ -3037,12 +2893,7 @@ describe("App", () => {
   it("does not treat speech captured before hold release as silence", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -3074,12 +2925,7 @@ describe("App", () => {
   it("ends a completed tool turn with no agent output on provider completion", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -3115,12 +2961,7 @@ describe("App", () => {
   it("does not fail slow tool-backed hold responses at the first response timeout", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     vi.useFakeTimers();
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -3172,12 +3013,7 @@ describe("App", () => {
   it("keeps raw realtime tool activity out of the transcript", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     act(() => {
       realtimeMock.instances[0].callbacks.onToolCall?.({
@@ -3199,12 +3035,7 @@ describe("App", () => {
   it("long hold while the agent is speaking interrupts playback", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("agent-speaking"));
     await waitFor(() =>
@@ -3226,12 +3057,7 @@ describe("App", () => {
     installSpeechRecognitionMock();
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
-
-    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    fireEvent.pointerUp(orb, { pointerId: 1 });
-    await waitFor(() =>
-      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
-    );
+    await startListeningVoice();
 
     await user.click(screen.getByRole("button", { name: /^Hold$/ }));
 

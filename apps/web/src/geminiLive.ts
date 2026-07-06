@@ -53,6 +53,8 @@ export type {
 } from "./gemini-live/types";
 export { buildGeminiLiveUrl } from "./gemini-live/protocol";
 
+const WEBSOCKET_OPEN_TIMEOUT_MS = 10_000;
+
 function buildDefaultGenerationConfig(voiceName: string): Record<string, unknown> {
   return {
     responseModalities: ["AUDIO"],
@@ -134,27 +136,76 @@ export class GeminiLiveSession {
     const socket = this.webSocketFactory(buildGeminiLiveUrl(token.token));
     socket.binaryType = "arraybuffer";
     this.socket = socket;
-    socket.onopen = () => {
-      this.sendJson(this.buildSetupMessage(setupModel, setupVoiceName));
-      this.emitStatus("connected");
-    };
-    socket.onmessage = (event) => void this.handleMessage(event);
-    socket.onerror = () =>
-      this.emitError(new Error("Gemini Live websocket error"));
-    socket.onclose = (event) => {
-      this.audio?.close();
-      const reason = this.clientInitiatedClose
-        ? "client_disconnect"
-        : "provider_close";
-      this.clientInitiatedClose = false;
-      this.emitSessionClose({
-        reason,
-        closeCode: event.code,
-        closeReason: event.reason,
-      });
-      this.emitStatus("closed");
-      this.callbacks.onClose?.(event);
-    };
+    await new Promise<void>((resolve, reject) => {
+      let socketReady = false;
+      let settled = false;
+      const clearBeforeOpenHandlers = () => {
+        socket.onopen = null;
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+      };
+      const openTimer = window.setTimeout(() => {
+        rejectBeforeReady(new Error("open timeout"));
+        try {
+          socket.close();
+        } catch {
+          // The browser may already have torn down the socket.
+        }
+      }, WEBSOCKET_OPEN_TIMEOUT_MS);
+      const resolveOpen = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(openTimer);
+        resolve();
+      };
+      const rejectBeforeReady = (error: Error) => {
+        if (socketReady || settled) return;
+        settled = true;
+        window.clearTimeout(openTimer);
+        clearBeforeOpenHandlers();
+        reject(error);
+      };
+
+      socket.onopen = () => {
+        try {
+          this.sendJson(this.buildSetupMessage(setupModel, setupVoiceName));
+          socketReady = true;
+          this.emitStatus("connected");
+          resolveOpen();
+        } catch (error) {
+          rejectBeforeReady(
+            error instanceof Error
+              ? error
+              : new Error("setup"),
+          );
+        }
+      };
+      socket.onmessage = (event) => void this.handleMessage(event);
+      socket.onerror = () => {
+        const error = new Error("socket");
+        this.emitError(error);
+        rejectBeforeReady(error);
+      };
+      socket.onclose = (event) => {
+        this.audio?.close();
+        const clientClosed = this.clientInitiatedClose;
+        const reason = clientClosed ? "client_disconnect" : "provider_close";
+        this.clientInitiatedClose = false;
+        this.emitSessionClose({
+          reason,
+          closeCode: event.code,
+          closeReason: event.reason,
+        });
+        this.emitStatus("closed");
+        this.callbacks.onClose?.(event);
+        if (!socketReady && clientClosed) {
+          resolveOpen();
+          return;
+        }
+        rejectBeforeReady(new Error("closed before opening"));
+      };
+    });
   }
 
   interrupt(): void {
@@ -190,6 +241,7 @@ export class GeminiLiveSession {
 
   resume(): void {
     this.hasFirstProviderResponse = false;
+    void this.audio?.resume?.();
     this.emitDiagnostics("session_resume");
   }
 

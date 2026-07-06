@@ -30,6 +30,8 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
         ...state,
         callState: state.isMuted ? "muted" : "listening",
         inputMode: "hands-free",
+        reconnectAttempt: undefined,
+        error: undefined,
       };
     case "START_LISTENING":
       return { ...state, callState: "listening", inputMode: "hands-free" };
@@ -57,6 +59,9 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
     case "POINTER_UP":
       if (state.callState !== "hold-to-talk") return state;
       return { ...state, callState: "agent-thinking", inputMode: "hands-free" };
+    case "FINALIZE":
+      if (state.callState !== "hold-to-talk") return state;
+      return { ...state, callState: "finalizing", inputMode: "hands-free" };
     case "POINTER_CANCEL":
       if (state.callState !== "hold-to-talk") return state;
       return {
@@ -65,7 +70,7 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
         inputMode: "hands-free",
       };
     case "THINK":
-      return { ...state, callState: "agent-thinking" };
+      return { ...state, callState: "agent-thinking", reconnectAttempt: undefined };
     case "SPEAK":
       return { ...state, callState: "agent-speaking" };
     case "DONE":
@@ -91,13 +96,27 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
     case "INTERRUPT":
       return { ...state, callState: "listening", inputMode: "hands-free" };
     case "ERROR":
-      return { ...state, callState: "error", error: event.error };
+      return {
+        ...state,
+        callState: "error",
+        error: event.error,
+        reconnectAttempt: undefined,
+      };
+    case "RECONNECT":
+      return {
+        ...state,
+        callState: "reconnecting",
+        inputMode: "hands-free",
+        reconnectAttempt: event.attempt,
+        error: undefined,
+      };
     case "RECOVER":
       return {
         ...state,
         callState: "idle",
         inputMode: "hands-free",
         error: undefined,
+        reconnectAttempt: undefined,
       };
     case "SET_DRAWER":
       return { ...state, drawer: event.drawer };
@@ -109,7 +128,9 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
           "listening",
           "user-speaking",
           "hold-to-talk",
+          "finalizing",
           "agent-thinking",
+          "reconnecting",
         ].includes(state.callState)
           ? "idle"
           : state.callState,
@@ -129,9 +150,12 @@ export function stateLabel(state: VoiceState, agentName = "Hermes Agent"): strin
     "user-speaking": "Hearing you",
     "hold-to-talk": "Holding to talk",
     "agent-thinking": "Finishing your turn...",
+    finalizing: "Finalizing...",
     "agent-speaking": `${agentName} is speaking`,
     muted: "Mic paused",
-    reconnecting: "Reconnecting...",
+    reconnecting: state.reconnectAttempt
+      ? `Reconnecting... attempt ${state.reconnectAttempt}`
+      : "Reconnecting...",
     error: state.error || "Something needs attention",
   };
   return labels[state.callState] || state.callState;

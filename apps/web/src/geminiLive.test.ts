@@ -71,6 +71,8 @@ class MockAudio implements GeminiLiveAudio {
     this.played.push({ base64, rate: sourceSampleRate });
   }
 
+  async resume() {}
+
   interrupt() {
     this.interrupted += 1;
   }
@@ -78,6 +80,17 @@ class MockAudio implements GeminiLiveAudio {
   close() {
     this.closed += 1;
   }
+}
+
+async function connectOpenedSession(
+  session: GeminiLiveSession,
+  ws: MockWebSocket,
+) {
+  const connected = session.connect();
+  await Promise.resolve();
+  await Promise.resolve();
+  ws.open();
+  await connected;
 }
 
 describe("GeminiLiveSession", () => {
@@ -104,8 +117,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
 
     expect(url).toBe(buildGeminiLiveUrl("ephemeral/token"));
     expect(ws.binaryType).toBe("arraybuffer");
@@ -127,6 +139,123 @@ describe("GeminiLiveSession", () => {
     expect(statuses).toEqual(["connecting", "connected"]);
   });
 
+  it("rejects connect when the websocket closes before opening", async () => {
+    const ws = new MockWebSocket();
+    const statuses: string[] = [];
+    const closes: Array<{ code: number; reason: string }> = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => statuses.push(status),
+          onClose: (event) =>
+            closes.push({
+              code: event?.code ?? 0,
+              reason: event?.reason ?? "",
+            }),
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "ephemeral/token",
+          expires_at: "2026-01-01T00:00:00Z",
+          mode: "real",
+        }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    const connected = session.connect();
+    await Promise.resolve();
+    await Promise.resolve();
+    ws.close(1006, "provider down");
+
+    await expect(connected).rejects.toThrow(/closed before opening/i);
+    expect(closes).toEqual([{ code: 1006, reason: "provider down" }]);
+    expect(statuses).toEqual(["connecting", "closed"]);
+  });
+
+  it("rejects connect when the websocket never opens", async () => {
+    vi.useFakeTimers();
+    const ws = new MockWebSocket();
+    const statuses: string[] = [];
+    const closes: Array<{ code: number; reason: string }> = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => statuses.push(status),
+          onClose: (event) =>
+            closes.push({
+              code: event?.code ?? 0,
+              reason: event?.reason ?? "",
+            }),
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "ephemeral/token",
+          expires_at: "2026-01-01T00:00:00Z",
+          mode: "real",
+        }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    const connected = session.connect();
+    const rejection = expect(connected).rejects.toThrow(/open timeout/i);
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await rejection;
+    ws.open();
+    ws.close(4000, "late close");
+    vi.useRealTimers();
+    expect(closes).toEqual([]);
+    expect(statuses).toEqual(["connecting"]);
+    expect(ws.sent).toEqual([]);
+  });
+
+  it("resolves connect when the client disconnects before the websocket opens", async () => {
+    const ws = new MockWebSocket();
+    const statuses: string[] = [];
+    const closes: Array<{ code: number; reason: string }> = [];
+    const session = new GeminiLiveSession(
+      {
+        callbacks: {
+          onStatus: (status) => statuses.push(status),
+          onClose: (event) =>
+            closes.push({
+              code: event?.code ?? 0,
+              reason: event?.reason ?? "",
+            }),
+        },
+        audio: { startCapture: false },
+      },
+      {
+        tokenProvider: async () => ({
+          token: "ephemeral/token",
+          expires_at: "2026-01-01T00:00:00Z",
+          mode: "real",
+        }),
+        webSocketFactory: () => ws,
+        audio: new MockAudio(),
+      },
+    );
+
+    const connected = session.connect();
+    await Promise.resolve();
+    await Promise.resolve();
+    session.disconnect();
+
+    await expect(connected).resolves.toBeUndefined();
+    expect(closes).toEqual([{ code: 1000, reason: "client disconnect" }]);
+    expect(statuses).toEqual(["connecting", "closed"]);
+  });
+
   it("decodes binary Gemini Live messages before handling setup completion", async () => {
     const ws = new MockWebSocket();
     const audio = new MockAudio();
@@ -146,8 +275,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receiveBinary({ setupComplete: {} });
     await Promise.resolve();
     audio.emit({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" });
@@ -184,8 +312,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({ serverContent: { turnComplete: true } });
 
     expect(statuses).toEqual(["connecting", "connected", "turn-complete"]);
@@ -214,8 +341,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       serverContent: { turnComplete: true },
       toolCall: {
@@ -255,8 +381,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
 
     expect(onToken).toHaveBeenCalledWith({
       expires_at: "2026-01-01T00:00:00Z",
@@ -294,8 +419,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({ setupComplete: {} });
     await Promise.resolve();
     audio.emit({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" });
@@ -328,8 +452,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({ setupComplete: {} });
     await Promise.resolve();
     ws.receive({
@@ -384,8 +507,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.close(1011, "upstream unavailable");
 
     expect(diagnostics).toContainEqual(
@@ -421,8 +543,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({ setupComplete: {} });
     session.resume();
     ws.receive({ serverContent: { turnComplete: true } });
@@ -453,8 +574,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     session.sendAudioChunk({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "muted" });
     session.setHoldToTalk(true);
     session.sendAudioChunk({
@@ -485,8 +605,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({ setupComplete: {} });
     await Promise.resolve();
     audio.emit({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" });
@@ -521,8 +640,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     const sentLength = ws.sent.length;
 
     expect(session.finalizeInputTurn()).toBe(false);
@@ -549,8 +667,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     session.abandonPendingResponse();
     ws.receive({
       serverContent: {
@@ -592,8 +709,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     session.abandonPendingResponse();
     ws.receive({
       serverContent: { turnComplete: true },
@@ -648,8 +764,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     session.abandonPendingResponse();
     session.sendAudioChunk({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "retry-pcm" });
     session.finalizeInputTurn();
@@ -716,8 +831,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     session.sendAudioChunk({ mimeType: GEMINI_INPUT_MIME_TYPE, data: "pcm" });
     session.disconnect();
 
@@ -744,8 +858,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       serverContent: {
         inputTranscription: { text: "hello", finished: true },
@@ -804,8 +917,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       serverContent: {
         inputTranscription: { text: "hello", finished: true },
@@ -899,8 +1011,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -968,8 +1079,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1033,8 +1143,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1111,8 +1220,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1200,8 +1308,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1269,8 +1376,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({ toolCall: { functionCalls: [{ id: "call-active", name: "ask_agent", args: { message: "hi" } }] } });
     await Promise.resolve();
     session.disconnect();
@@ -1307,8 +1413,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1371,8 +1476,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1443,8 +1547,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1521,8 +1624,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1575,8 +1677,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [
@@ -1644,8 +1745,7 @@ describe("GeminiLiveSession", () => {
       },
     );
 
-    await session.connect();
-    ws.open();
+    await connectOpenedSession(session, ws);
     ws.receive({
       toolCall: {
         functionCalls: [

@@ -12,6 +12,7 @@ export interface GeminiLiveAudio {
   stopCapture(): void;
   setCaptureEnabled(enabled: boolean): void;
   playPcm16Base64(base64: string, sourceSampleRate?: number): Promise<void>;
+  resume(): Promise<void>;
   interrupt(): void;
   close(): void;
 }
@@ -200,6 +201,13 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     node.port.postMessage(samples, [samples.buffer]);
   }
 
+  async resume(): Promise<void> {
+    await Promise.all([
+      resumeAudioContext(this.captureContext),
+      resumeAudioContext(this.playbackContext),
+    ]);
+  }
+
   interrupt(): void {
     this.playbackNode?.port.postMessage("interrupt");
   }
@@ -229,6 +237,11 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     this.playbackNode.connect(this.playbackContext.destination);
     return this.playbackNode;
   }
+}
+
+async function resumeAudioContext(context?: AudioContext): Promise<void> {
+  if (!context || context.state !== "suspended") return;
+  await context.resume();
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {

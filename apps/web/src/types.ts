@@ -9,6 +9,7 @@ export type CallState =
   | "agent-speaking"
   | "muted"
   | "reconnecting"
+  | "finalizing"
   | "error";
 export type InputMode = "hands-free" | "hold-to-talk" | "text";
 export type VoiceMode = "push-to-talk" | "live";
@@ -94,6 +95,7 @@ export interface VoiceState {
   drawer: DrawerState;
   isMuted: boolean;
   partialTranscript: string;
+  reconnectAttempt?: number;
   error?: string;
 }
 export type VoiceEvent =
@@ -113,6 +115,8 @@ export type VoiceEvent =
   | { type: "MUTE" }
   | { type: "UNMUTE" }
   | { type: "INTERRUPT" }
+  | { type: "RECONNECT"; attempt: number }
+  | { type: "FINALIZE" }
   | { type: "ERROR"; error: string }
   | { type: "RECOVER" }
   | { type: "SET_DRAWER"; drawer: DrawerState }

@@ -15,6 +15,8 @@ const realtimeMock = vi.hoisted(() => ({
   createError: null as Error | null,
   connectGate: null as { promise: Promise<void>; resolve: () => void } | null,
   emitInitialStatuses: true,
+  emitTokenBeforeGate: false,
+  tokenExpiresAt: "2099-01-01T00:00:00Z",
 }));
 const audioMock = vi.hoisted(() => ({
   instances: [] as Array<{
@@ -22,6 +24,7 @@ const audioMock = vi.hoisted(() => ({
     stopCapture: ReturnType<typeof vi.fn>;
     setCaptureEnabled: ReturnType<typeof vi.fn>;
     playPcm16Base64: ReturnType<typeof vi.fn>;
+    resume: ReturnType<typeof vi.fn>;
     interrupt: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
     emit: (data?: string) => void;
@@ -43,6 +46,9 @@ let chatJobCounter = 0;
 let chatJobIds: string[] = [];
 let chatTextBodies: unknown[] = [];
 let restoreNavigatorMediaDevices: (() => void) | null = null;
+let readyzOk = true;
+let readyzHermesAvailable = true;
+let readyzDeferred: { promise: Promise<void>; resolve: () => void } | null = null;
 
 interface MockSpeechUtterance {
   text: string;
@@ -108,6 +114,8 @@ interface MockSpeechRecognitionInstance {
 interface TestVoiceSession {
   callbacks: {
     onStatus?: (status: "agent-speaking" | "turn-complete") => void;
+    onError?: (error: Error) => void;
+    onClose?: (event?: CloseEvent) => void;
     onTranscript?: (event: {
       role: "user" | "agent";
       text: string;
@@ -125,6 +133,7 @@ interface TestVoiceSession {
     }) => void;
   };
   disconnect: ReturnType<typeof vi.fn>;
+  resume: ReturnType<typeof vi.fn>;
   setMicrophoneEnabled: ReturnType<typeof vi.fn>;
 }
 
@@ -388,12 +397,21 @@ vi.mock("./realtime", () => {
     callbacks: any;
     connect = vi.fn(async () => {
       if (realtimeMock.connectError) throw realtimeMock.connectError;
+      if (realtimeMock.emitTokenBeforeGate) {
+        this.callbacks.onToken?.({
+          expires_at: realtimeMock.tokenExpiresAt,
+          mode: "test",
+          provider: "gemini",
+        });
+      }
       if (realtimeMock.connectGate) await realtimeMock.connectGate.promise;
-      this.callbacks.onToken?.({
-        expires_at: "2026-01-01T00:00:00Z",
-        mode: "test",
-        provider: "gemini",
-      });
+      if (!realtimeMock.emitTokenBeforeGate) {
+        this.callbacks.onToken?.({
+          expires_at: realtimeMock.tokenExpiresAt,
+          mode: "test",
+          provider: "gemini",
+        });
+      }
       if (realtimeMock.emitInitialStatuses) {
         this.callbacks.onStatus?.("setup-complete");
         this.callbacks.onStatus?.("listening");
@@ -434,6 +452,7 @@ vi.mock("./audio", async (importOriginal) => {
     stopCapture = vi.fn();
     setCaptureEnabled = vi.fn();
     playPcm16Base64 = vi.fn(async () => undefined);
+    resume = vi.fn(async () => undefined);
     interrupt = vi.fn();
     close = vi.fn(() => this.stopCapture());
     emit(data = "AAECAw==") {
@@ -453,6 +472,8 @@ describe("App", () => {
     realtimeMock.createError = null;
     realtimeMock.connectGate = null;
     realtimeMock.emitInitialStatuses = true;
+    realtimeMock.emitTokenBeforeGate = false;
+    realtimeMock.tokenExpiresAt = "2099-01-01T00:00:00Z";
     sessionAuthenticated = true;
     chatAuthExpired = false;
     chatPostMode = "fast";
@@ -465,6 +486,9 @@ describe("App", () => {
     chatJobCounter = 0;
     chatJobIds = [];
     chatTextBodies = [];
+    readyzOk = true;
+    readyzHermesAvailable = true;
+    readyzDeferred = null;
     chatJobStatuses.clear();
     chatCancelStatuses.clear();
     audioMock.instances = [];
@@ -481,12 +505,13 @@ describe("App", () => {
       vi.fn(async (url: string, init?: RequestInit) => {
         const requestUrl = String(url);
         if (requestUrl.includes("/readyz")) {
+          if (readyzDeferred) await readyzDeferred.promise;
           return new Response(
             JSON.stringify({
-              ok: true,
+              ok: readyzOk,
               checks: {
                 hermes_adapter: "api",
-                hermes: { kind: "api", available: true },
+                hermes: { kind: "api", available: readyzHermesAvailable },
                 stt_provider: "gemini",
               },
             }),
@@ -942,7 +967,7 @@ describe("App", () => {
       }),
     ]);
     expect(screen.getByText("browser guess")).toBeInTheDocument();
-    expect(screen.getByText("Sending...")).toBeInTheDocument();
+    expect(screen.getByText("Finalizing...")).toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
 
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -1160,7 +1185,7 @@ describe("App", () => {
       await Promise.resolve();
     });
     expect(chatTextBodies).toHaveLength(0);
-    expect(screen.getByText("Sending...")).toBeInTheDocument();
+    expect(screen.getByText("Finalizing...")).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4200);
@@ -2255,6 +2280,44 @@ describe("App", () => {
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
   });
 
+  it("defers Live reconnect while spoken completion audio is active", async () => {
+    const speech = installSpeechSynthesisMock();
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    vi.useFakeTimers();
+
+    await startBackgroundTextJob(
+      "job-spoken-reconnect",
+      "reconnect transcript answer",
+      "Reconnect summary.",
+    );
+    await completeBackgroundTextJobPoll();
+
+    expect(speech.speak).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.getByText(/Reconnecting.*attempt 1/i)).toBeInTheDocument();
+
+    speech.finish();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(realtimeMock.instances).toHaveLength(2);
+    await waitFor(() =>
+      expect(screen.getByText("Voice reconnected.")).toBeInTheDocument(),
+    );
+  });
+
   it("does not let unmute or hold-to-talk enable capture during spoken completion audio", async () => {
     const speech = installSpeechSynthesisMock();
     const recognition = installSpeechRecognitionMock();
@@ -2708,6 +2771,31 @@ describe("App", () => {
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
   });
 
+  it("starts a fresh Live session after text send if the focused session retired", async () => {
+    await renderUnlockedApp();
+    await startListeningVoice();
+    const first = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    fireEvent.focus(input);
+    expect(first.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+
+    act(() => first.callbacks.onClose?.());
+    expect(first.disconnect).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(1);
+
+    fireEvent.change(input, { target: { value: "hello after reconnect" } });
+    fireEvent.blur(input);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("hello after reconnect")).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(realtimeMock.instances).toHaveLength(2));
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
   it("preserves capture restore when text composer is blurred and refocused", async () => {
     await renderUnlockedApp();
     const orb = screen.getByLabelText(/Voice orb/);
@@ -2962,6 +3050,31 @@ describe("App", () => {
     await waitFor(() => expect(realtimeMock.instances).toHaveLength(2));
     expect(first.resume).not.toHaveBeenCalled();
     expect(realtimeMock.instances[1]).not.toBe(first);
+  });
+
+  it("ignores stale readyz responses after auth expires", async () => {
+    const user = userEvent.setup();
+    readyzDeferred = createConnectGate();
+    await renderUnlockedApp();
+
+    chatAuthExpired = true;
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    await user.type(input, "hello");
+    await user.click(
+      screen.getByRole("button", { name: /Send typed message/ }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Private PIN")).toBeInTheDocument(),
+    );
+    readyzOk = true;
+    readyzDeferred.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Ready")).not.toBeInTheDocument();
   });
 
   it("clears an active realtime session when realtime auth expires after connect", async () => {
@@ -3691,6 +3804,481 @@ describe("App", () => {
     expect(realtimeMock.instances[0].setHoldToTalk).toHaveBeenLastCalledWith(
       true,
     );
+  });
+
+  it("reconnects Live after an unexpected provider close", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    realtimeMock.connectGate = createConnectGate();
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(2);
+    expect(screen.getByText(/Reconnecting.*attempt 1/i)).toBeInTheDocument();
+
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(screen.getByText("Voice reconnected.")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
+  it("defers token refresh reconnect while a Live answer is active", async () => {
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    realtimeMock.tokenExpiresAt = "2026-01-01T00:00:06Z";
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+    const first = realtimeMock.instances[0];
+
+    act(() => first.callbacks.onStatus?.("agent-speaking"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+
+    realtimeMock.tokenExpiresAt = "2099-01-01T00:00:00Z";
+    act(() => first.callbacks.onStatus?.("turn-complete"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(2);
+    expect(screen.getByText("Voice reconnected.")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("does not reconnect a parked idle Live session on token refresh", async () => {
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    realtimeMock.tokenExpiresAt = "2026-01-01T00:00:06Z";
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const first = realtimeMock.instances[0];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(first.disconnect).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("does not revive a delayed reconnect after the transcript is focused", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    realtimeMock.connectGate = createConnectGate();
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(2);
+    const second = realtimeMock.instances[1];
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    fireEvent.focus(input);
+
+    expect(second.disconnect).toHaveBeenCalledTimes(1);
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.queryByText("Voice reconnected.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("does not revive a delayed reconnect after switching to Hold", async () => {
+    installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    realtimeMock.connectGate = createConnectGate();
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(2);
+    const second = realtimeMock.instances[1];
+    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
+
+    expect(second.disconnect).toHaveBeenCalledTimes(1);
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.queryByText("Voice reconnected.")).not.toBeInTheDocument();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("does not schedule reconnect while the initial Live connection is pending", async () => {
+    realtimeMock.connectGate = createConnectGate();
+    await renderUnlockedApp();
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
+    await waitFor(() =>
+      expect(screen.getByText("Connecting voice...")).toBeInTheDocument(),
+    );
+    vi.useFakeTimers();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(1);
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    expect(realtimeMock.instances).toHaveLength(1);
+  });
+
+  it("defers token refresh reconnect while the initial Live connection is pending", async () => {
+    realtimeMock.connectGate = createConnectGate();
+    realtimeMock.emitTokenBeforeGate = true;
+    realtimeMock.tokenExpiresAt = "2026-01-01T00:00:06Z";
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.resolve();
+    });
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.getByText("Connecting voice...")).toBeInTheDocument();
+
+    realtimeMock.tokenExpiresAt = "2099-01-01T00:00:00Z";
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) {
+        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(0);
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+    });
+    vi.useRealTimers();
+
+    expect(realtimeMock.instances).toHaveLength(2);
+    expect(screen.getByText("Voice reconnected.")).toBeInTheDocument();
+  });
+
+  it("does not reopen live capture when a paused session closes", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      await vi.advanceTimersByTimeAsync(5000);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(first.disconnect).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+  });
+
+  it("shows retry when Live reconnect gives up", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    realtimeMock.connectError = new Error("still offline");
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      for (let i = 0; i < 8; i += 1) {
+        await vi.advanceTimersByTimeAsync(8000);
+        await Promise.resolve();
+      }
+    });
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText(/Voice could not reconnect/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Tap to retry")).toBeInTheDocument();
+  });
+
+  it("does not reconnect after a deliberate Live end", async () => {
+    const user = userEvent.setup();
+    installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    await user.click(screen.getByRole("button", { name: /^Hold$/ }));
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      await vi.advanceTimersByTimeAsync(5000);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("does not reconnect or resume a parked idle Live session on visibility return", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    const input = screen.getByLabelText("Type a message to your Hermes agent");
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    vi.useFakeTimers();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(first.resume).not.toHaveBeenCalled();
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("reconnects and resumes audio after returning from the background", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    realtimeMock.connectGate = createConnectGate();
+    vi.useFakeTimers();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(first.resume).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(2);
+
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.getByText("Voice reconnected.")).toBeInTheDocument();
+  });
+
+  it("downgrades the connection chip when a Live session errors", async () => {
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    readyzOk = false;
+
+    await act(async () => {
+      session.callbacks.onError?.(new Error("socket failed"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Backend unreachable")).toBeInTheDocument(),
+    );
+  });
+
+  it("disconnects an errored Live session before reconnecting", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    realtimeMock.connectGate = createConnectGate();
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onError?.(new Error("socket failed"));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(first.disconnect).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(2);
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+  });
+
+  it("retries voice from the error pill", async () => {
+    const user = userEvent.setup();
+    realtimeMock.connectError = new Error("connect failed");
+    await renderUnlockedApp();
+
+    await user.click(screen.getByRole("button", { name: /^Live$/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Tap to retry/i })).toBeInTheDocument(),
+    );
+
+    realtimeMock.connectError = null;
+    await user.click(screen.getByRole("button", { name: /Tap to retry/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
+    );
+    expect(realtimeMock.instances.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps the retry pill in hold mode instead of starting Live", async () => {
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+    const orb = screen.getByLabelText(/Voice orb/);
+    vi.useFakeTimers();
+
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.getByText("Hold-to-talk is not available here.")).toBeInTheDocument();
+    await user.click(screen.getByText("Tap to retry"));
+
+    expect(realtimeMock.instances).toHaveLength(0);
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("shows finalizing feedback and nudges blocked hold attempts", async () => {
+    const speech = installSpeechRecognitionMock();
+    sttPostMode = "deferred";
+    sttDeferred = createConnectGate();
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    audioMock.instances[0].emit("AAECAw==");
+    act(() => speech.instances[0].emitResult("browser words", true));
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    expect(orb.className).toContain("is-nudging");
+
+    sttDeferred.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
   });
 
   it("Hold mode switch disconnects the realtime session and returns to idle", async () => {

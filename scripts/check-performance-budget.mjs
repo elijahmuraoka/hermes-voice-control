@@ -5,8 +5,8 @@ import { join } from "node:path";
 const root = new URL("..", import.meta.url).pathname;
 const assetsDir = join(root, "apps/web/dist/assets");
 const bundleBudgets = {
-  // PR #76 hold-to-talk STT hardening intentionally crossed the old 250 KiB cap.
-  jsBytes: 256 * 1024,
+  // Reliability bundle: reconnect+wake-lock.
+  jsBytes: 272000,
   cssBytes: 20 * 1024,
 };
 const diagnosticsBudgetsPath = join(

@@ -401,6 +401,24 @@ input {
   border-top-color: var(--cyan);
 }
 
+.state-finalizing .orb-ring,
+.state-reconnecting .orb-ring {
+  animation: spin 1.6s linear infinite;
+  border-top-color: var(--gold);
+}
+
+.state-finalizing .orb-core {
+  filter: saturate(0.78);
+}
+
+.state-reconnecting .orb-aura {
+  animation: breathe 1.7s ease-in-out infinite;
+}
+
+.voice-orb.is-nudging {
+  animation: nudge 0.42s ease-out;
+}
+
 .state-error .orb-core {
   background: radial-gradient(circle, #ffe0d7, #ff8f70 45%, #31110b);
 }
@@ -424,6 +442,16 @@ input {
   margin-top: 8px;
   color: rgba(246, 240, 232, 0.58);
   font-size: 14px;
+}
+
+.retry-pill {
+  margin-top: 14px;
+  border: 1px solid rgba(255, 143, 112, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 143, 112, 0.12);
+  color: #ffd7cc;
+  padding: 8px 13px;
+  cursor: pointer;
 }
 
 .control-row {
@@ -758,6 +786,15 @@ input {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes nudge {
+  35% {
+    transform: scale(1.04);
+  }
+  70% {
+    transform: scale(0.98);
   }
 }
 

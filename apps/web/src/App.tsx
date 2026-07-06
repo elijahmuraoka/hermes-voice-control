@@ -87,6 +87,13 @@ const BASIC_HOLD_STT_SAMPLE_BYTES_PER_SECOND = 16_000 * 2;
 const BASIC_HOLD_STT_TIMEOUT_PER_SECOND_MS = 150;
 const BASIC_HOLD_STT_TIMEOUT_MAX_MS = 12_000;
 const SESSION_EXPIRED_MESSAGE = "Session expired. Enter your private PIN again.";
+const READYZ_REFRESH_MS = 45_000;
+const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000] as const;
+const RECONNECT_GIVE_UP_MS = 45_000;
+const TOKEN_RECONNECT_LEEWAY_MS = 5_000;
+const TOKEN_RECONNECT_DEFER_MS = 1_000;
+const FINALIZING_NUDGE_MS = 620;
+const MAX_BROWSER_TIMER_MS = 2_147_483_647;
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
   return [
@@ -115,6 +122,18 @@ type AgentConnection = {
   state: AgentConnectionState;
   label: string;
   detail: string;
+};
+
+type WakeLockSentinelLike = {
+  release: () => Promise<void>;
+  addEventListener?: (type: "release", listener: () => void) => void;
+  removeEventListener?: (type: "release", listener: () => void) => void;
+};
+
+type WakeLockNavigator = Navigator & {
+  wakeLock?: {
+    request: (type: "screen") => Promise<WakeLockSentinelLike>;
+  };
 };
 
 type VoiceTurn = {
@@ -172,32 +191,30 @@ const emptyPress = (): PressState => ({
 
 const checkingAgentConnection: AgentConnection = {
   state: "checking",
-  label: "Checking agent",
-  detail: "Verifying Hermes bridge",
+  label: "Checking",
+  detail: "Verifying connection",
 };
 
 function agentConnectionFromReadyz(readyz: ReadyzResponse): AgentConnection {
   const hermes = readyz.checks?.hermes;
-  const adapter = readyz.checks?.hermes_adapter ?? hermes?.kind ?? "Hermes";
-  const adapterLabel = adapter === "api" ? "Hermes API" : adapter;
   if (readyz.ok && hermes?.available !== false) {
     return {
       state: "connected",
-      label: "Agent connected",
-      detail: `${adapterLabel} bridge ready`,
+      label: "Ready",
+      detail: "Agent reachable",
     };
   }
   if (readyz.ok) {
     return {
       state: "degraded",
-      label: "Agent degraded",
-      detail: `${adapterLabel} bridge unavailable`,
+      label: "Limited",
+      detail: "Agent unavailable",
     };
   }
   return {
     state: "unavailable",
-    label: "Agent status unavailable",
-    detail: "Open transcript if a request stalls",
+    label: "Backend unreachable",
+    detail: "Check the private connection",
   };
 }
 
@@ -287,7 +304,9 @@ export default function App() {
     spokenCompletionNotificationsEnabled,
     setSpokenCompletionNotificationsEnabled,
   ] = useState(readSpokenCompletionNotificationsEnabled);
+  const [finalizingNudge, setFinalizingNudge] = useState(false);
   const stateRef = useRef(state);
+  const authStateRef = useRef(authState);
   const voiceModeRef = useRef(voiceMode);
   const entriesRef = useRef(entries);
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
@@ -301,6 +320,19 @@ export default function App() {
   const sessionGenerationRef = useRef(0);
   const connectingRef = useRef(false);
   const endingRef = useRef(false);
+  const liveDesiredRef = useRef(false);
+  const reconnectingRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectStartedAtRef = useRef(0);
+  const reconnectAttemptRef = useRef(0);
+  const tokenReconnectTimerRef = useRef<number | null>(null);
+  const sessionLossHandledGenerationRef = useRef(0);
+  const readyzRefreshIntervalRef = useRef<number | null>(null);
+  const readyzRequestRef = useRef(0);
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
+  const wakeLockReleaseHandlerRef = useRef<(() => void) | null>(null);
+  const wakeLockRequestingRef = useRef(false);
+  const finalizingNudgeTimerRef = useRef<number | null>(null);
   const transcriptDraftsRef = useRef<
     Partial<Record<RealtimeTranscriptEvent["role"], string>>
   >({});
@@ -342,6 +374,10 @@ export default function App() {
   }, [state]);
 
   useEffect(() => {
+    authStateRef.current = authState;
+  }, [authState]);
+
+  useEffect(() => {
     voiceModeRef.current = voiceMode;
   }, [voiceMode]);
 
@@ -358,18 +394,30 @@ export default function App() {
     exposeHvcDiagnostics(diagnosticsRef.current);
     const cancel = () => cancelPress();
     const visibility = () => {
-      if (document.visibilityState === "hidden") cancelPress();
+      if (document.visibilityState === "hidden") {
+        cancelPress();
+        return;
+      }
+      handleVisibleReturn();
     };
+    const pageshow = () => handleVisibleReturn();
     window.addEventListener("blur", cancel);
+    window.addEventListener("pageshow", pageshow);
     document.addEventListener("visibilitychange", visibility);
     const currentEndingRef = endingRef;
     const currentSessionRef = sessionRef;
     return () => {
       window.removeEventListener("blur", cancel);
+      window.removeEventListener("pageshow", pageshow);
       document.removeEventListener("visibilitychange", visibility);
       clearPressTimer();
       clearVoiceTurnTimers();
       clearTextJobPollTimers();
+      clearReconnectTimer();
+      clearTokenReconnectTimer();
+      clearReadyzRefreshInterval();
+      clearFinalizingNudgeTimer();
+      void releaseWakeLock();
       const activeSpeechCapture = speechCaptureRef.current;
       if (activeSpeechCapture) {
         activeSpeechCapture.finished = true;
@@ -410,37 +458,188 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (authState !== "authenticated") return;
+    if (authStateRef.current !== "authenticated") return;
     recoverPendingTextJobs();
   }, [authState]);
 
   useEffect(() => {
     if (authState !== "authenticated") {
+      clearReadyzRefreshInterval();
       setAgentConnection(checkingAgentConnection);
       return;
     }
-    let cancelled = false;
-    setAgentConnection(checkingAgentConnection);
-    getReadyz()
-      .then((readyz) => {
-        if (!cancelled) {
-          const provider = readyz.checks?.stt_provider?.trim();
-          if (provider) sttProviderRef.current = provider;
-          setAgentConnection(agentConnectionFromReadyz(readyz));
-        }
-      })
-      .catch(() => {
-        if (!cancelled)
-          setAgentConnection({
-            state: "unavailable",
-            label: "Agent status unavailable",
-            detail: "Open transcript if a request stalls",
-          });
+    const online = () => void refreshAgentConnection();
+    const offline = () =>
+      setAgentConnection({
+        state: "unavailable",
+        label: "Offline",
+        detail: "Browser network is offline",
       });
+    void refreshAgentConnection({ checking: true });
+    readyzRefreshIntervalRef.current = window.setInterval(
+      () => void refreshAgentConnection(),
+      READYZ_REFRESH_MS,
+    );
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
     return () => {
-      cancelled = true;
+      clearReadyzRefreshInterval();
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
     };
   }, [authState]);
+
+  useEffect(() => {
+    void updateWakeLock();
+  }, [authState, voiceMode, state.callState]);
+
+  function clearReconnectTimer() {
+    if (reconnectTimerRef.current === null) return;
+    window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+  }
+
+  function clearTokenReconnectTimer() {
+    if (tokenReconnectTimerRef.current === null) return;
+    window.clearTimeout(tokenReconnectTimerRef.current);
+    tokenReconnectTimerRef.current = null;
+  }
+
+  function clearReadyzRefreshInterval() {
+    readyzRequestRef.current += 1;
+    if (readyzRefreshIntervalRef.current === null) return;
+    window.clearInterval(readyzRefreshIntervalRef.current);
+    readyzRefreshIntervalRef.current = null;
+  }
+
+  function clearFinalizingNudgeTimer() {
+    if (finalizingNudgeTimerRef.current === null) return;
+    window.clearTimeout(finalizingNudgeTimerRef.current);
+    finalizingNudgeTimerRef.current = null;
+  }
+
+  async function refreshAgentConnection({
+    checking = false,
+  }: { checking?: boolean } = {}) {
+    if (authStateRef.current !== "authenticated") return;
+    const requestId = readyzRequestRef.current + 1;
+    readyzRequestRef.current = requestId;
+    if (checking) setAgentConnection(checkingAgentConnection);
+    const readyz = await getReadyz();
+    if (
+      requestId !== readyzRequestRef.current ||
+      authStateRef.current !== "authenticated"
+    )
+      return;
+    const provider = readyz.checks?.stt_provider?.trim();
+    if (provider) sttProviderRef.current = provider;
+    setAgentConnection(agentConnectionFromReadyz(readyz));
+  }
+
+  function handleVisibleReturn() {
+    void refreshAgentConnection();
+    void updateWakeLock();
+    if (canAutoReconnectLive()) {
+      sessionRef.current?.resume();
+      scheduleLiveReconnect("App returned.");
+    }
+  }
+
+  function shouldHoldWakeLock(): boolean {
+    if (authStateRef.current !== "authenticated") return false;
+    if (stateRef.current.callState === "hold-to-talk") return true;
+    return (
+      voiceModeRef.current === "live" &&
+      liveDesiredRef.current &&
+      !["idle", "error"].includes(stateRef.current.callState)
+    );
+  }
+
+  async function updateWakeLock() {
+    if (!shouldHoldWakeLock()) {
+      await releaseWakeLock();
+      return;
+    }
+    await requestWakeLock();
+  }
+
+  async function requestWakeLock() {
+    if (wakeLockRef.current || wakeLockRequestingRef.current) return;
+    const wakeLock = (navigator as WakeLockNavigator).wakeLock;
+    if (!wakeLock) return;
+    wakeLockRequestingRef.current = true;
+    try {
+      const sentinel = await wakeLock.request("screen");
+      if (!shouldHoldWakeLock()) {
+        await sentinel.release();
+        return;
+      }
+      wakeLockRef.current = sentinel;
+      const releaseHandler = () => {
+        wakeLockRef.current = null;
+        wakeLockReleaseHandlerRef.current = null;
+      };
+      wakeLockReleaseHandlerRef.current = releaseHandler;
+      sentinel.addEventListener?.("release", releaseHandler);
+    } catch {
+      // Wake Lock is optional and inconsistently supported on iOS.
+    } finally {
+      wakeLockRequestingRef.current = false;
+    }
+  }
+
+  async function releaseWakeLock() {
+    const sentinel = wakeLockRef.current;
+    if (!sentinel) return;
+    const releaseHandler = wakeLockReleaseHandlerRef.current;
+    if (releaseHandler) sentinel.removeEventListener?.("release", releaseHandler);
+    wakeLockRef.current = null;
+    wakeLockReleaseHandlerRef.current = null;
+    try {
+      await sentinel.release();
+    } catch {
+      // The browser can release the lock before our cleanup runs.
+    }
+  }
+
+  function scheduleTokenReconnect(expiresAt: string) {
+    clearTokenReconnectTimer();
+    const expiresMs = Date.parse(expiresAt);
+    if (!Number.isFinite(expiresMs)) return;
+    const delayMs = Math.min(
+      MAX_BROWSER_TIMER_MS,
+      Math.max(0, expiresMs - Date.now() - TOKEN_RECONNECT_LEEWAY_MS),
+    );
+    tokenReconnectTimerRef.current = window.setTimeout(handleTokenReconnectDue, delayMs);
+  }
+
+  function hasActiveLiveTurn(): boolean {
+    const callState = stateRef.current.callState;
+    return (
+      voiceTurnRef.current.waiting ||
+      handsFreeTurnPendingRef.current ||
+      toolCallsInFlightRef.current.size > 0 ||
+      [
+        "user-speaking",
+        "hold-to-talk",
+        "finalizing",
+        "agent-thinking",
+        "agent-speaking",
+      ].includes(callState)
+    );
+  }
+
+  function handleTokenReconnectDue() {
+    tokenReconnectTimerRef.current = null;
+    if (connectingRef.current || hasActiveLiveTurn()) {
+      tokenReconnectTimerRef.current = window.setTimeout(
+        handleTokenReconnectDue,
+        TOKEN_RECONNECT_DEFER_MS,
+      );
+      return;
+    }
+    scheduleLiveReconnect("Voice token expired.");
+  }
 
   function clearPressTimer() {
     if (pressRef.current.timer !== null) {
@@ -1011,6 +1210,10 @@ export default function App() {
 
   function requireAuth(message = "Enter your private PIN to continue.") {
     clearPressTimer();
+    clearReconnectTimer();
+    clearTokenReconnectTimer();
+    finishLiveReconnect();
+    liveDesiredRef.current = false;
     stopVoiceTurnWatch();
     abortActiveSpeechCapture();
     speechFinalizingRef.current = false;
@@ -1027,6 +1230,7 @@ export default function App() {
       sessionRef.current = null;
       transcriptDraftsRef.current = {};
     }
+    void releaseWakeLock();
     setAuthState("needs-pin");
     setAuthError(message);
   }
@@ -1346,6 +1550,15 @@ export default function App() {
     );
   }
 
+  function nudgeFinalizingHold() {
+    clearFinalizingNudgeTimer();
+    setFinalizingNudge(true);
+    finalizingNudgeTimerRef.current = window.setTimeout(() => {
+      finalizingNudgeTimerRef.current = null;
+      setFinalizingNudge(false);
+    }, FINALIZING_NUDGE_MS);
+  }
+
   function submitFinishedSpeechCapture(capture: SpeechCaptureState, text: string) {
     if (!text) {
       cancelEmptySpeechCapture(capture);
@@ -1355,6 +1568,7 @@ export default function App() {
       failFinishedSpeechCapture(capture, SESSION_EXPIRED_MESSAGE);
       return;
     }
+    dispatch({ type: "THINK" });
     if (capture.entryId) {
       setEntries((items) =>
         items.map((entry) =>
@@ -1440,7 +1654,7 @@ export default function App() {
       return;
     }
     speechFinalizingRef.current = true;
-    dispatch({ type: "POINTER_UP" });
+    dispatch({ type: "FINALIZE" });
     void finalizeSpeechCaptureTranscript(
       capture,
       text,
@@ -1452,7 +1666,10 @@ export default function App() {
 
   function startBasicHoldRecognition(press: PressState): boolean {
     if (!canUsePrivateSession()) return false;
-    if (speechFinalizingRef.current) return false;
+    if (speechFinalizingRef.current) {
+      nudgeFinalizingHold();
+      return false;
+    }
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
@@ -1533,7 +1750,10 @@ export default function App() {
 
   function beginBasicHold(): boolean {
     if (!canUsePrivateSession()) return false;
-    if (speechFinalizingRef.current) return false;
+    if (speechFinalizingRef.current) {
+      nudgeFinalizingHold();
+      return false;
+    }
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     const press = pressRef.current;
@@ -1854,10 +2074,252 @@ export default function App() {
     return sessionGeneration === sessionGenerationRef.current;
   }
 
+  function liveSessionDesired(): boolean {
+    return (
+      authStateRef.current === "authenticated" &&
+      liveDesiredRef.current &&
+      voiceModeRef.current === "live" &&
+      !endingRef.current
+    );
+  }
+
+  function liveCaptureIsActive(): boolean {
+    const current = stateRef.current;
+    return (
+      current.inputMode !== "text" &&
+      !["idle", "paused", "error"].includes(current.callState)
+    );
+  }
+
+  function canAutoReconnectLive(): boolean {
+    return liveSessionDesired() && liveCaptureIsActive();
+  }
+
+  function disconnectLiveSession(session: RealtimeVoiceSession) {
+    try {
+      session.setHoldToTalk(false);
+      session.setMicrophoneEnabled(false);
+      session.disconnect();
+    } catch {
+      // The old socket may already be closing.
+    }
+  }
+
+  function retireLiveSessionUntilResume() {
+    finishLiveReconnect();
+    clearTokenReconnectTimer();
+    stopVoiceTurnWatch();
+    resetHoldSpeechState();
+    clearHandsFreeTurnPending();
+    markCaptureNotReady();
+    const previousSession = sessionRef.current;
+    sessionRef.current = null;
+    if (!previousSession) return;
+    endingRef.current = true;
+    try {
+      disconnectLiveSession(previousSession);
+    } finally {
+      endingRef.current = false;
+    }
+  }
+
+  function createLiveSession(sessionGeneration: number): RealtimeVoiceSession {
+    return createDefaultRealtimeVoiceSession({
+      callbacks: buildSessionCallbacks(sessionGeneration),
+      audio: { startMuted: stateRef.current.isMuted },
+      systemInstruction: buildLiveHermesSystemInstruction(agentName),
+      requireToolResponseForModelOutput: true,
+    });
+  }
+
+  async function connectLiveSession(sessionGeneration: number) {
+    const session = createLiveSession(sessionGeneration);
+    sessionRef.current = session;
+    await session.connect();
+  }
+
+  function nextSessionGeneration(): number {
+    const sessionGeneration = sessionGenerationRef.current + 1;
+    sessionGenerationRef.current = sessionGeneration;
+    diagnosticsRef.current?.startSession();
+    return sessionGeneration;
+  }
+
+  function cancelLiveReconnectForUserIntent() {
+    if (!reconnectingRef.current) return;
+    sessionGenerationRef.current += 1;
+    finishLiveReconnect();
+    const previousSession = sessionRef.current;
+    sessionRef.current = null;
+    if (previousSession) disconnectLiveSession(previousSession);
+  }
+
+  function scheduleLiveReconnect(reason: string) {
+    if (connectingRef.current) return;
+    if (!canAutoReconnectLive()) {
+      if (liveSessionDesired() && !liveCaptureIsActive()) {
+        retireLiveSessionUntilResume();
+      }
+      return;
+    }
+    if (
+      reconnectingRef.current &&
+      (reconnectTimerRef.current !== null || connectingRef.current)
+    )
+      return;
+    if (!reconnectingRef.current) {
+      reconnectingRef.current = true;
+      reconnectStartedAtRef.current = Date.now();
+      reconnectAttemptRef.current = 0;
+      appendSystem(`${reason} Reconnecting voice...`, "working");
+    }
+    stopVoiceTurnWatch();
+    resetHoldSpeechState();
+    clearHandsFreeTurnPending();
+    clearTokenReconnectTimer();
+    markCaptureNotReady();
+    setAgentConnection({
+      state: "checking",
+      label: "Reconnecting...",
+      detail: "Checking",
+    });
+    queueLiveReconnectAttempt(0);
+  }
+
+  function queueLiveReconnectAttempt(delayMs: number) {
+    clearReconnectTimer();
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      void runLiveReconnectAttempt();
+    }, delayMs);
+  }
+
+  async function runLiveReconnectAttempt() {
+    if (!canAutoReconnectLive()) {
+      finishLiveReconnect();
+      return;
+    }
+    const attempt = reconnectAttemptRef.current + 1;
+    reconnectAttemptRef.current = attempt;
+    const delayMs =
+      RECONNECT_DELAYS_MS[
+        Math.min(attempt - 1, RECONNECT_DELAYS_MS.length - 1)
+      ];
+    dispatch({ type: "RECONNECT", attempt });
+    void refreshAgentConnection();
+
+    if (!canEnableMicrophoneCapture()) {
+      const elapsedMs = Date.now() - reconnectStartedAtRef.current;
+      if (elapsedMs >= RECONNECT_GIVE_UP_MS) {
+        failLiveReconnect();
+        return;
+      }
+      queueLiveReconnectAttempt(delayMs);
+      return;
+    }
+
+    const previousSession = sessionRef.current;
+    const sessionGeneration = nextSessionGeneration();
+    sessionLossHandledGenerationRef.current = 0;
+    sessionRef.current = null;
+    if (previousSession) disconnectLiveSession(previousSession);
+
+    connectingRef.current = true;
+    try {
+      await connectLiveSession(sessionGeneration);
+      if (
+        !isCurrentSessionGeneration(sessionGeneration) ||
+        !canAutoReconnectLive()
+      ) {
+        const staleSession = sessionRef.current;
+        sessionRef.current = null;
+        if (staleSession) disconnectLiveSession(staleSession);
+        finishLiveReconnect();
+        return;
+      }
+      finishLiveReconnect();
+      appendSystem("Voice reconnected.");
+    } catch (error) {
+      sessionRef.current = null;
+      markCaptureNotReady();
+      if (isAuthFailure(error)) {
+        finishLiveReconnect();
+        requireAuth(SESSION_EXPIRED_MESSAGE);
+        dispatch({ type: "RECOVER" });
+        return;
+      }
+      const elapsedMs = Date.now() - reconnectStartedAtRef.current;
+      if (elapsedMs >= RECONNECT_GIVE_UP_MS) {
+        failLiveReconnect();
+        return;
+      }
+      queueLiveReconnectAttempt(delayMs);
+    } finally {
+      connectingRef.current = false;
+    }
+  }
+
+  function finishLiveReconnect() {
+    reconnectingRef.current = false;
+    reconnectStartedAtRef.current = 0;
+    reconnectAttemptRef.current = 0;
+    clearReconnectTimer();
+  }
+
+  function failLiveReconnect() {
+    finishLiveReconnect();
+    liveDesiredRef.current = false;
+    appendSystem(
+      "Voice could not reconnect. Retry.",
+      "failed",
+    );
+    dispatch({
+      type: "ERROR",
+      error: "Voice disconnected. Retry.",
+    });
+  }
+
+  function handleLiveSessionLoss(sessionGeneration: number, reason: string) {
+    if (!isCurrentSessionGeneration(sessionGeneration)) return;
+    if (sessionLossHandledGenerationRef.current === sessionGeneration) return;
+    sessionLossHandledGenerationRef.current = sessionGeneration;
+    clearTokenReconnectTimer();
+    stopVoiceTurnWatch();
+    resetHoldSpeechState();
+    clearHandsFreeTurnPending();
+    markCaptureNotReady();
+    void refreshAgentConnection();
+    if (endingRef.current) {
+      sessionRef.current = null;
+      endingRef.current = false;
+      return;
+    }
+    if (canAutoReconnectLive()) {
+      const previousSession = sessionRef.current;
+      sessionRef.current = null;
+      if (previousSession) disconnectLiveSession(previousSession);
+      scheduleLiveReconnect(reason);
+      return;
+    }
+    if (liveSessionDesired() && !liveCaptureIsActive()) {
+      retireLiveSessionUntilResume();
+      return;
+    }
+    const previousSession = sessionRef.current;
+    sessionRef.current = null;
+    if (previousSession) disconnectLiveSession(previousSession);
+    appendSystem(reason, "failed");
+    dispatch({ type: "ERROR", error: "Voice session disconnected." });
+  }
+
   function buildSessionCallbacks(
     sessionGeneration: number,
   ): RealtimeVoiceCallbacks {
     return {
+      onToken: (token) => {
+        if (!isCurrentSessionGeneration(sessionGeneration)) return;
+        scheduleTokenReconnect(token.expires_at);
+      },
       onStatus: (status) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
         if (status === "listening") {
@@ -1888,9 +2350,7 @@ export default function App() {
           !connectingRef.current &&
           !endingRef.current
         ) {
-          markCaptureNotReady();
-          appendSystem("Voice session closed.");
-          dispatch({ type: "RECOVER" });
+          handleLiveSessionLoss(sessionGeneration, "Voice closed.");
         }
       },
       onTranscript: (event) => {
@@ -1917,29 +2377,19 @@ export default function App() {
       },
       onError: (error) => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
-        markCaptureNotReady();
         if (isAuthFailure(error)) {
           requireAuth(SESSION_EXPIRED_MESSAGE);
           dispatch({ type: "RECOVER" });
           return;
         }
-        stopVoiceTurnWatch();
-        resetHoldSpeechState();
-        clearHandsFreeTurnPending();
-        appendSystem(
+        handleLiveSessionLoss(
+          sessionGeneration,
           error.message || "Realtime voice session reported an error.",
-          "failed",
         );
-        dispatch({ type: "ERROR", error: "Voice session failed." });
       },
       onClose: () => {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
-        stopVoiceTurnWatch();
-        resetHoldSpeechState();
-        clearHandsFreeTurnPending();
-        markCaptureNotReady();
-        sessionRef.current = null;
-        endingRef.current = false;
+        handleLiveSessionLoss(sessionGeneration, "Voice closed.");
       },
     };
   }
@@ -1949,6 +2399,7 @@ export default function App() {
     if (isSpokenCompletionNoticeBlockingCapture()) return;
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
+    liveDesiredRef.current = true;
     if (sessionRef.current) {
       textFocusReturnModeRef.current = "none";
       sessionRef.current.resume();
@@ -1962,21 +2413,14 @@ export default function App() {
 
     connectingRef.current = true;
     endingRef.current = false;
+    finishLiveReconnect();
     markCaptureNotReady({ preservePendingHoldActivation: true });
-    const sessionGeneration = sessionGenerationRef.current + 1;
-    sessionGenerationRef.current = sessionGeneration;
-    diagnosticsRef.current?.startSession();
+    const sessionGeneration = nextSessionGeneration();
+    sessionLossHandledGenerationRef.current = 0;
     dispatch({ type: "CONNECT" });
 
     try {
-      const session = createDefaultRealtimeVoiceSession({
-        callbacks: buildSessionCallbacks(sessionGeneration),
-        audio: { startMuted: stateRef.current.isMuted },
-        systemInstruction: buildLiveHermesSystemInstruction(agentName),
-        requireToolResponseForModelOutput: true,
-      });
-      sessionRef.current = session;
-      await session.connect();
+      await connectLiveSession(sessionGeneration);
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -1992,6 +2436,7 @@ export default function App() {
         dispatch({ type: "RECOVER" });
         return;
       }
+      liveDesiredRef.current = false;
       appendSystem(errorMessage, "failed");
       dispatch({
         type: "ERROR",
@@ -2016,6 +2461,10 @@ export default function App() {
   function resumeCall() {
     if (!canEnableMicrophoneCapture()) return;
     textFocusReturnModeRef.current = "none";
+    if (!sessionRef.current) {
+      void startCall();
+      return;
+    }
     stopVoiceTurnWatch();
     resetHoldSpeechState();
     clearHandsFreeTurnPending();
@@ -2028,6 +2477,11 @@ export default function App() {
 
   function endCall() {
     clearPressTimer();
+    clearReconnectTimer();
+    clearTokenReconnectTimer();
+    finishLiveReconnect();
+    sessionGenerationRef.current += 1;
+    liveDesiredRef.current = false;
     stopVoiceTurnWatch();
     resetHoldSpeechState();
     clearHandsFreeTurnPending();
@@ -2039,6 +2493,7 @@ export default function App() {
     sessionRef.current?.disconnect();
     sessionRef.current = null;
     transcriptDraftsRef.current = {};
+    void releaseWakeLock();
     dispatch({ type: "RECOVER" });
   }
 
@@ -2060,6 +2515,15 @@ export default function App() {
     ) {
       pauseCall();
     }
+  }
+
+  function handleRetry() {
+    if (!canUsePrivateSession()) return;
+    if (voiceModeRef.current === "push-to-talk") {
+      dispatch({ type: "RECOVER" });
+      return;
+    }
+    void startCall();
   }
 
   function beginHold() {
@@ -2195,6 +2659,7 @@ export default function App() {
   function focusText() {
     textFocusEpochRef.current += 1;
     textComposerFocusedRef.current = true;
+    cancelLiveReconnectForUserIntent();
     const current = stateRef.current;
     if (
       current.inputMode !== "text" &&
@@ -2263,6 +2728,10 @@ export default function App() {
     textFocusReturnModeRef.current = "none";
     if (returnMode === "restore-capture") {
       dispatch({ type: "DONE" });
+      if (!sessionRef.current) {
+        void startCall();
+        return;
+      }
       // DONE exits text mode, but stateRef can be one render behind here.
       restoreHandsFreeCapture({ force: true, resume: true });
       return;
@@ -2377,6 +2846,8 @@ export default function App() {
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           onPointerCancel={cancelPress}
+          onRetry={handleRetry}
+          nudging={finalizingNudge}
           agentName={agentName}
         />
         <div className="control-row">

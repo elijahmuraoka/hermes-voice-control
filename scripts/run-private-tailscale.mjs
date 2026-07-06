@@ -117,11 +117,14 @@ async function main() {
   if (!shouldServe) assertLocalPortsNotServed([backendPort, proxyPort]);
   const servePlan = shouldServe ? prepareServeChange(proxyPort, backendPort) : null;
 
+  // Validate the environment BEFORE the expensive web build. Under launchd
+  // (KeepAlive.SuccessfulExit=false) a config error otherwise triggers a full
+  // rebuild on every crash-loop restart; fail-fast keeps a bad env cheap.
+  runChecked("pnpm", ["env:check"], { env: backendEnv });
+
   if (!noBuild) {
     runChecked("pnpm", ["build"], { env: { ...process.env, VITE_API_BASE: "" } });
   }
-
-  runChecked("pnpm", ["env:check"], { env: backendEnv });
 
   const uvicornArgs = [
     "run",

@@ -58,6 +58,22 @@ Tool calls are cancellable. Barge-in or end-session cancellation asks the
 backend to mark the tool call cancelled, aborts the frontend request, and causes
 late responses for that call to be ignored.
 
+## PWA and Resilience Features
+
+- **Installable PWA:** The app ships a web manifest with `display: standalone`.
+  Supported browsers can add HVC to the home screen or app launcher. The
+  installed name is fixed at build time: "Hermes Voice Control" (short name
+  "Hermes"). The in-app agent name is separately configurable via
+  `VITE_HVC_AGENT_NAME`.
+- **Live self-healing reconnect:** When the Gemini Live WebSocket drops, the
+  client reconnects automatically — it re-mints a fresh ephemeral token from the
+  backend, re-establishes the WebSocket, and applies exponential backoff with
+  jitter. A wake lock is held during reconnect to prevent device sleep from
+  interrupting recovery on mobile.
+- **Unlock-time Hermes session warming:** When the operator unlocks the app
+  (PIN entry or device-cookie auth), the backend immediately warms the Hermes
+  session so the first agent answer is pre-warmed and lower-latency.
+
 ## Data Stores
 
 SQLite stores sessions, transcripts/events, confirmations, audit logs, and

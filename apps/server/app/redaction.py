@@ -10,7 +10,7 @@ def redact(value):
         result = {}
         for key, item in value.items():
             lowered = str(key).lower()
-            if lowered in SECRET_KEYS or any(marker in lowered for marker in ("token", "secret", "password", "cookie", "pin")):
+            if lowered in SECRET_KEYS or any(marker in lowered for marker in ("token", "secret", "password", "cookie", "pin", "session", "authorization")):
                 result[key] = "[REDACTED]"
             else:
                 result[key] = redact(item)

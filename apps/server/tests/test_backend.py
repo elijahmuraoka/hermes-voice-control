@@ -14,7 +14,25 @@ from app import gemini as gemini_module
 from app.adapters import AdapterResult, HermesAdapter, LocalHermesAdapter
 from app.config import Settings
 from app.main import create_app
+from app.redaction import redact
+from app.security import AuthManager
 from app.store import Store
+
+
+def test_redaction_masks_cookie_and_authorization_shaped_keys():
+    masked = redact({
+        "hvc_session": "raw-session-token",
+        "Authorization": "Bearer abc",
+        "x-authorization": "abc",
+        "authenticated": True,
+        "message": "hello",
+    })
+    assert masked["hvc_session"] == "[REDACTED]"
+    assert masked["Authorization"] == "[REDACTED]"
+    assert masked["x-authorization"] == "[REDACTED]"
+    # Non-secret fields must survive — 'authenticated' must not be caught.
+    assert masked["authenticated"] is True
+    assert masked["message"] == "hello"
 
 TEST_PIN = "voice-9Kq2"
 PCM_CHUNK = base64.b64encode(b"\x00\x00" * 160).decode("ascii")
@@ -167,6 +185,46 @@ def test_logout_revokes_device_token(tmp_path):
     assert client.post("/auth/logout").status_code == 200
     client.cookies.clear()
     client.cookies.set("hvc_device", device)
+    assert client.get("/auth/session").status_code == 401
+def test_pin_rate_limit_is_keyed_per_peer_behind_proxy(tmp_path):
+    # Behind the loopback proxy every peer shares request.client.host, so the
+    # limiter keys on a forwarded per-peer signal instead. One peer exhausting
+    # its 5 attempts must not lock out a different peer.
+    client = make_pin_client(tmp_path)
+    peer_a = {"x-forwarded-for": "100.64.0.10"}
+    peer_b = {"x-forwarded-for": "100.64.0.20"}
+    for _ in range(5):
+        assert client.post("/auth/pin", json={"pin": "0000-0000"}, headers=peer_a).status_code == 401
+    # Peer A is now throttled.
+    assert client.post("/auth/pin", json={"pin": "0000-0000"}, headers=peer_a).status_code == 429
+    # Peer B is unaffected and can still authenticate.
+    assert client.post("/auth/pin", json={"pin": TEST_PIN}, headers=peer_b).status_code == 200
+def test_pin_rate_limit_global_cap_bounds_header_rotation(tmp_path):
+    # A caller rotating the per-peer identity header must not mint unlimited
+    # guesses: the global bucket bounds total brute-force attempts.
+    client = make_pin_client(tmp_path)
+    statuses = [
+        client.post("/auth/pin", json={"pin": "0000-0000"}, headers={"x-forwarded-for": f"100.64.0.{i}"}).status_code
+        for i in range(30)
+    ]
+    # Each request uses a fresh peer bucket, so throttling can only come from
+    # the global cap — which must trip well before 30 unique-peer attempts.
+    assert 429 in statuses
+    assert statuses.count(401) <= AuthManager._GLOBAL_LIMIT
+def test_logout_is_final_on_idle_remembered_device(tmp_path):
+    # Idle remembered device: the short-lived session cookie has expired but
+    # the long-lived device cookie is still valid. session_dep re-mints a
+    # session for this very request; logout must not leave the browser holding
+    # that fresh cookie (which would keep the user authenticated post-logout).
+    client = make_pin_client(tmp_path)
+    login(client)
+    client.cookies.delete("hvc_session")
+    res = client.post("/auth/logout")
+    assert res.status_code == 200
+    # The response must not hand back a live session cookie.
+    set_cookie = res.headers.get("set-cookie", "")
+    assert "hvc_session=;" in set_cookie or "hvc_session=\"\";" in set_cookie
+    # And the caller is actually logged out on the next request.
     assert client.get("/auth/session").status_code == 401
 class _WarmSpyAdapter(HermesAdapter):
     def __init__(self):

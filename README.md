@@ -4,8 +4,9 @@ Hermes Voice Control is a private-by-default browser voice surface for talking
 to your Hermes agent from a phone or laptop.
 
 The app keeps the experience simple: open the page, hold the orb for
-push-to-talk, or switch to Live for hands-free voice. The visible agent name is
-configurable, so each setup can use the name of its own Hermes agent.
+push-to-talk, or switch to Live for hands-free voice. The in-app agent name is
+configurable; the PWA install name (home screen / browser title bar) is fixed at
+build time as "Hermes Voice Control" (short name "Hermes").
 
 <p align="center">
   <img src="docs/assets/screenshots/mobile-idle.png" width="260" alt="Hermes Voice Control mobile voice screen for a Hermes agent" />
@@ -85,6 +86,10 @@ Hermes Voice Control is designed for private use before public exposure:
 - Basic Hold records audio only while held, finalizes the transcript through the
   authenticated backend STT path when configured, then sends text to Hermes. Use
   it only on trusted operator browsers.
+- After the first successful PIN entry, a long-lived `hvc_device` httpOnly
+  cookie (default 90-day TTL) lets the device skip PIN re-entry on subsequent
+  visits. Set `HVC_REMEMBER_DEVICE=false` to disable this and require the PIN
+  every time.
 
 ## Quick Start
 

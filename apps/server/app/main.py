@@ -206,6 +206,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception:
                 store.log("hermes.warm", "failed", error_code="WARM_ERROR", session_hash=session_hash)
         threading.Thread(target=_run, name="hvc-hermes-warm", daemon=True).start()
+    def pin_rate_limit_key(request: Request) -> str:
+        # Behind the one-origin loopback proxy, request.client.host is always
+        # 127.0.0.1, which collapses every tailnet peer into a single shared
+        # brute-force bucket. Prefer a per-peer signal from the edge when one
+        # is present. These headers are used ONLY as a throttle key, never for
+        # authorization, so a spoofed value only changes which rate-limit
+        # bucket the caller lands in — it grants no access.
+        for header in ("tailscale-user-login", "x-forwarded-for"):
+            value = request.headers.get(header)
+            if value:
+                return value.split(",")[0].strip()
+        return request.client.host if request.client else "local"
     def device_principal(request: Request) -> str | None:
         # Agent identity is keyed to the remembered device when one exists:
         # the short-lived session token rotates (PIN TTL, re-mints), and keying
@@ -300,7 +312,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.require_pin:
             store.log("auth.pin", "disabled", {"reason": "pin_auth_disabled"})
             raise HTTPException(status_code=404, detail="PIN auth is disabled")
-        client_key = request.client.host if request.client else "local"
+        client_key = pin_rate_limit_key(request)
         if not auth.verify_pin(payload.pin, client_key=client_key):
             store.log("auth.pin", "failed", {"pin_supplied": bool(payload.pin)}, error_code="INVALID_PIN")
             raise HTTPException(status_code=401, detail="Invalid PIN")
@@ -318,13 +330,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 device = auth.create_device()
                 auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
                 principal = f"dev-{hash_secret(device.token)}"
-        store.log("auth.pin", "success", {"session_id": session.token})
+        # Log a non-reversible hash prefix, never the raw session token.
+        store.log("auth.pin", "success", {"session_id": session.token_hash[:12]})
         warm_hermes_session_async(principal)
         return {"ok": True, "expires_at": session.expires_at.isoformat()}
     @app.post("/auth/logout")
     def logout(request: Request, response: Response, session_hash: str = Depends(session_dep)):
         token = request.cookies.get("hvc_session")
         if token: auth.revoke(token)
+        # A remembered-device logout arrives with no valid hvc_session, so
+        # session_dep re-mints one (stashed in pending_session_cookie) and the
+        # refresh middleware would otherwise hand the browser that fresh, valid
+        # cookie AFTER this handler deletes the old one — defeating logout.
+        # Revoke the re-mint and cancel the pending cookie so logout is final.
+        pending = getattr(request.state, "pending_session_cookie", None)
+        if pending is not None:
+            # Cancel the pending cookie before revoking so that even if revoke
+            # raises, the refresh middleware never re-sets a live session on the
+            # (error) response.
+            request.state.pending_session_cookie = None
+            auth.revoke(pending.token)
         device_token = request.cookies.get("hvc_device")
         if device_token:
             auth.revoke_device(device_token)

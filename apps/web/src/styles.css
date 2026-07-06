@@ -489,6 +489,8 @@ input {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 18px;
   scroll-behavior: smooth;
 }
@@ -608,7 +610,7 @@ input {
 }
 
 .message-action {
-  min-height: 34px;
+  min-height: 44px;
   margin-top: 12px;
   display: inline-flex;
   align-items: center;
@@ -771,6 +773,7 @@ input {
 @media (max-width: 900px) {
   body {
     overflow: auto;
+    overscroll-behavior-y: none;
   }
   .app-shell {
     display: block;

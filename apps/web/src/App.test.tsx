@@ -917,7 +917,16 @@ describe("App", () => {
       }),
     ]);
     expect(screen.getByText("browser guess")).toBeInTheDocument();
+    expect(screen.getByText("Sending your words...")).toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
+
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    expect(speech.instances).toHaveLength(1);
 
     sttDeferred.resolve();
     await act(async () => {

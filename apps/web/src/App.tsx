@@ -73,7 +73,6 @@ const uid = () => Math.random().toString(36).slice(2);
 const HOLD_DELAY_MS = 220;
 const NO_SPEECH_TIMEOUT_MS = 3500;
 const BASIC_HOLD_SPEECH_RESTART_LIMIT = 2;
-const BASIC_HOLD_STT_CHUNK_LIMIT = 1500;
 const BASIC_HOLD_RELEASE_WATCHDOG_MS = 2000;
 const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
 const TOOL_RESPONSE_TIMEOUT_MS = 95000;
@@ -284,6 +283,7 @@ export default function App() {
   const entriesRef = useRef(entries);
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
   const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
+  const speechFinalizingRef = useRef(false);
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
@@ -998,6 +998,7 @@ export default function App() {
     clearPressTimer();
     stopVoiceTurnWatch();
     abortActiveSpeechCapture();
+    speechFinalizingRef.current = false;
     resetHoldSpeechState();
     clearHandsFreeTurnPending();
     textFocusReturnModeRef.current = "none";
@@ -1093,11 +1094,8 @@ export default function App() {
     void audio
       .startCapture((chunk) => {
         if (speechCaptureRef.current !== capture || capture.finished) return;
-        if (capture.audioChunksBase64.length >= BASIC_HOLD_STT_CHUNK_LIMIT) {
-          stopSpeechCaptureAudio(capture);
-          return;
-        }
-        capture.audioChunksBase64.push(chunk.data);
+        if (capture.audioChunksBase64.length < 1500)
+          capture.audioChunksBase64.push(chunk.data);
       })
       .then(() => {
         if (speechCaptureRef.current !== capture || capture.finished)
@@ -1283,7 +1281,6 @@ export default function App() {
         ),
       );
     }
-    dispatch({ type: "POINTER_UP" });
     void submitText(text, { existingUserEntryId: capture.entryId ?? undefined });
   }
 
@@ -1298,27 +1295,31 @@ export default function App() {
           entry.id === capture.entryId
             ? {
                 ...entry,
-                text: browserText || "Finalizing speech...",
+                text: browserText,
                 status: "sending",
               }
             : entry,
         ),
       );
     }
-    let finalText = browserText;
-    if (audioChunksBase64.length > 0) {
-      try {
-        const result = await transcribeSpeechAudio(
-          audioChunksBase64,
-          browserText,
-        );
-        const transcript = result.transcript.trim();
-        if (transcript) finalText = transcript;
-      } catch {
-        // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
+    try {
+      let finalText = browserText;
+      if (audioChunksBase64.length > 0) {
+        try {
+          const result = await transcribeSpeechAudio(
+            audioChunksBase64,
+            browserText,
+          );
+          const transcript = result.transcript.trim();
+          if (transcript) finalText = transcript;
+        } catch {
+          // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
+        }
       }
+      submitFinishedSpeechCapture(capture, finalText);
+    } finally {
+      speechFinalizingRef.current = false;
     }
-    submitFinishedSpeechCapture(capture, finalText);
   }
 
   function finishSpeechCapture(capture: SpeechCaptureState) {
@@ -1332,11 +1333,14 @@ export default function App() {
       cancelEmptySpeechCapture(capture);
       return;
     }
+    speechFinalizingRef.current = true;
+    dispatch({ type: "POINTER_UP" });
     void finalizeSpeechCaptureTranscript(capture, text, audioChunksBase64);
   }
 
   function startBasicHoldRecognition(press: PressState): boolean {
     if (!canUsePrivateSession()) return false;
+    if (speechFinalizingRef.current) return false;
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
@@ -1414,6 +1418,7 @@ export default function App() {
 
   function beginBasicHold(): boolean {
     if (!canUsePrivateSession()) return false;
+    if (speechFinalizingRef.current) return false;
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     const press = pressRef.current;

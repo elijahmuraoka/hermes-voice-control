@@ -155,7 +155,7 @@ export async function transcribeSpeechAudio(
       timedOut ||
       (error instanceof DOMException && error.name === "AbortError")
     ) {
-      throw new ApiRequestTimeoutError("Speech transcription timed out");
+      throw new ApiRequestTimeoutError("");
     }
     throw error;
   } finally {

@@ -1,8 +1,9 @@
 ---
 name: 2026-07-04-hvc-production-path
-status: active
+status: archived
 started: '2026-07-04'
 pr: 67
+shipped: '2026-07-06'
 ---
 # 2026-07-04-hvc-production-path
 

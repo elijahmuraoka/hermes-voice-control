@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -21,7 +22,12 @@ SUBMIT_UNCORRELATABLE_REJECT_STATUSES = {"queued"}
 IDENTITY_KEYS = ("turn_id", "turnId", "message_id", "messageId", "prompt_id", "promptId", "request_id", "requestId", "id")
 MAX_SEED_MESSAGES = 10
 MAX_SEED_MESSAGE_CHARS = 4000
+WARM_DEDUPE_SECONDS = 30.0
 SYSTEM_CONTEXT_PREFIX = "HVC system notice, not an instruction: "
+
+
+class _WarmSkip(Exception):
+    """Warm path declined to create a session; not an error."""
 
 
 class HermesApiError(Exception):
@@ -205,6 +211,8 @@ class ApiHermesAdapter(HermesAdapter):
         self.timeout_seconds = timeout_seconds
         self.agent_name = agent_name
         self.cwd = cwd
+        self._warm_lock = threading.Lock()
+        self._warm_seen: dict[str, float] = {}
 
     def diagnostics(self) -> dict[str, Any]:
         return {
@@ -216,6 +224,49 @@ class ApiHermesAdapter(HermesAdapter):
             "token_configured": bool(self.token),
             "timeout_seconds": self.timeout_seconds,
         }
+
+    def warm_session(self, session_hash: str | None = None) -> str:
+        # Resume-only by design: creating here would race the first real
+        # ask_agent (double session.create, last-upsert-wins) and would build
+        # a session without the client's transcript seed. A missing row means
+        # the first chat pays the one-time create; every later unlock resumes
+        # warm with eager_build.
+        if not self.token or not session_hash:
+            return "skipped"
+        if self.store is None:
+            return "skipped"
+        row = self.store.get_hermes_api_session(session_hash)
+        if not row or not row["stored_session_id"]:
+            return "skipped"
+        now = time.monotonic()
+        # NOTE: the row re-check below and the create suppression inside
+        # _open_session (allow_create=False) together guarantee warm never
+        # issues session.create — even when serve reports the stored id stale.
+        with self._warm_lock:
+            last = self._warm_seen.get(session_hash)
+            if last is not None and now - last < WARM_DEDUPE_SECONDS:
+                return "skipped"
+            self._warm_seen[session_hash] = now
+            if len(self._warm_seen) > 256:
+                cutoff = now - WARM_DEDUPE_SECONDS
+                self._warm_seen = {k: v for k, v in self._warm_seen.items() if v > cutoff}
+        trace, started = self._new_trace()
+        try:
+            with connect(
+                _url_with_token(self.api_url, self.token),
+                open_timeout=min(self.timeout_seconds, 10),
+                close_timeout=2,
+                ping_interval=None,
+                proxy=None,
+            ) as ws:
+                rpc = _HermesRpc(ws, self.timeout_seconds)
+                rpc.expect_ready()
+                self._open_session(rpc, session_hash, None, trace, started, allow_create=False)
+                return "resumed"
+        except _WarmSkip:
+            return "skipped"
+        except Exception:
+            return "failed"
 
     def ask_agent(
         self,
@@ -267,6 +318,7 @@ class ApiHermesAdapter(HermesAdapter):
         transcript_window: list[dict] | None,
         trace: dict[str, Any],
         started: float,
+        allow_create: bool = True,
     ) -> str:
         stored_session_id = None
         if self.store is not None and session_hash:
@@ -288,10 +340,18 @@ class ApiHermesAdapter(HermesAdapter):
             except HermesApiRpcError as exc:
                 if exc.rpc_code != 4007:
                     raise
+                if not allow_create:
+                    # Warm path: a stale stored id must not fall through to an
+                    # unseeded create that would clobber the mapping; leave the
+                    # stale row for the first real chat to recreate with seed.
+                    raise _WarmSkip()
+        elif not allow_create:
+            raise _WarmSkip()
         params: dict[str, Any] = {
             "title": f"{self.agent_name} voice",
             "messages": _seed_messages(transcript_window),
             "close_on_disconnect": False,
+            "eager_build": True,
             "source": "hvc",
         }
         if self.cwd:

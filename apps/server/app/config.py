@@ -57,6 +57,8 @@ class Settings:
     pin: str = DEFAULT_PIN
     require_pin: bool = False
     session_ttl_seconds: int = 86_400
+    remember_device: bool = True
+    device_ttl_seconds: int = 7_776_000
     db_path: Path = Path("./hvc.sqlite3")
     gemini_mode: str = "mock"
     hermes_adapter: str = "mock"
@@ -82,6 +84,8 @@ class Settings:
             pin=os.getenv("HVC_PIN", DEFAULT_PIN),
             require_pin=env_bool("HVC_REQUIRE_PIN", False),
             session_ttl_seconds=int(os.getenv("HVC_SESSION_TTL_SECONDS", "86400")),
+            remember_device=env_bool("HVC_REMEMBER_DEVICE", True),
+            device_ttl_seconds=env_int("HVC_DEVICE_TTL_SECONDS", 7_776_000),
             db_path=Path(os.getenv("HVC_DB_PATH", "./hvc.sqlite3")),
             gemini_mode=os.getenv("HVC_GEMINI_MODE", "mock"),
             hermes_adapter=os.getenv("HVC_HERMES_ADAPTER", "mock"),

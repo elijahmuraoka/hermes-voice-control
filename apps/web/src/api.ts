@@ -6,7 +6,6 @@ import type {
   TranscriptEntry,
 } from "./types";
 import { apiBase } from "./config";
-import { GEMINI_INPUT_MIME_TYPE, GEMINI_INPUT_SAMPLE_RATE } from "./audio";
 
 export class ApiError extends Error {
   constructor(
@@ -148,8 +147,6 @@ export async function transcribeSpeechAudio(
       signal: controller.signal,
       body: JSON.stringify({
         audio_chunks_base64: audioChunksBase64,
-        mime_type: GEMINI_INPUT_MIME_TYPE,
-        sample_rate: GEMINI_INPUT_SAMPLE_RATE,
         fallback_transcript: fallbackTranscript,
       }),
     });

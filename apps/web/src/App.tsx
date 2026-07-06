@@ -73,7 +73,8 @@ const uid = () => Math.random().toString(36).slice(2);
 const HOLD_DELAY_MS = 220;
 const NO_SPEECH_TIMEOUT_MS = 3500;
 const BASIC_HOLD_SPEECH_RESTART_LIMIT = 2;
-const BASIC_HOLD_STT_AUDIO_MAX_BYTES = 2_100_000;
+const BASIC_HOLD_STT_CHUNK_LIMIT = 1500;
+const BASIC_HOLD_RELEASE_WATCHDOG_MS = 2000;
 const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
 const TOOL_RESPONSE_TIMEOUT_MS = 95000;
 const TEXT_JOB_POLL_MS = 1400;
@@ -131,7 +132,6 @@ type SpeechCaptureState = {
   recognition: BrowserSpeechRecognition;
   audio: BrowserGeminiAudio | null;
   audioChunksBase64: string[];
-  audioBytes: number;
   entryId: string | null;
   finalText: string;
   interimText: string;
@@ -139,6 +139,7 @@ type SpeechCaptureState = {
   finished: boolean;
   releaseRequested: boolean;
   restartAttempts: number;
+  releaseWatchdogTimer: number | null;
   stopping: boolean;
   aborting: boolean;
 };
@@ -283,7 +284,8 @@ export default function App() {
   const entriesRef = useRef(entries);
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
   const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
-  const speechRecognitionDisclosureShownRef = useRef(false);
+  const basicHoldMicPermissionPrimedRef = useRef(false);
+  const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
   const sessionGenerationRef = useRef(0);
   const connectingRef = useRef(false);
@@ -1032,12 +1034,39 @@ export default function App() {
     return "Microphone permission was blocked. Allow microphone access for this site, then hold the orb again.";
   }
 
-  function discloseBrowserSpeechRecognition() {
-    if (speechRecognitionDisclosureShownRef.current) return;
-    speechRecognitionDisclosureShownRef.current = true;
-    appendSystem(
-      "Basic Hold uses this browser's speech recognition before sending text to Hermes. Use Live for the realtime audio path.",
-    );
+  async function primeBasicHoldMicrophonePermission({
+    reportError = false,
+  }: { reportError?: boolean } = {}): Promise<boolean> {
+    if (basicHoldMicPermissionPrimedRef.current) return true;
+    if (basicHoldMicPermissionPendingRef.current)
+      return basicHoldMicPermissionPendingRef.current;
+
+    const getUserMedia = navigator.mediaDevices?.getUserMedia;
+    if (typeof getUserMedia !== "function") return true;
+
+    const pending = getUserMedia
+      .call(navigator.mediaDevices, { audio: true })
+      .then((stream) => {
+        stream.getTracks().forEach((track) => track.stop());
+        basicHoldMicPermissionPrimedRef.current = true;
+        return true;
+      })
+      .catch(() => {
+        if (reportError) {
+          appendSystem(speechRecognitionPermissionMessage(), "failed");
+          dispatch({
+            type: "ERROR",
+            error: "Hold-to-talk needs microphone permission.",
+          });
+        }
+        return false;
+      })
+      .finally(() => {
+        basicHoldMicPermissionPendingRef.current = null;
+      });
+
+    basicHoldMicPermissionPendingRef.current = pending;
+    return pending;
   }
 
   function speechCaptureText(capture: SpeechCaptureState): string {
@@ -1046,11 +1075,6 @@ export default function App() {
       .filter(Boolean)
       .join(" ")
       .trim();
-  }
-
-  function base64DecodedLength(value: string): number {
-    const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
-    return Math.max(0, Math.floor((value.length * 3) / 4) - padding);
   }
 
   function stopSpeechCaptureAudio(capture: SpeechCaptureState) {
@@ -1069,12 +1093,10 @@ export default function App() {
     void audio
       .startCapture((chunk) => {
         if (speechCaptureRef.current !== capture || capture.finished) return;
-        const bytes = base64DecodedLength(chunk.data);
-        if (capture.audioBytes + bytes > BASIC_HOLD_STT_AUDIO_MAX_BYTES) {
+        if (capture.audioChunksBase64.length >= BASIC_HOLD_STT_CHUNK_LIMIT) {
           stopSpeechCaptureAudio(capture);
           return;
         }
-        capture.audioBytes += bytes;
         capture.audioChunksBase64.push(chunk.data);
       })
       .then(() => {
@@ -1118,8 +1140,15 @@ export default function App() {
     );
   }
 
+  function clearSpeechCaptureReleaseWatchdog(capture: SpeechCaptureState) {
+    if (capture.releaseWatchdogTimer === null) return;
+    window.clearTimeout(capture.releaseWatchdogTimer);
+    capture.releaseWatchdogTimer = null;
+  }
+
   function clearSpeechCapture(capture: SpeechCaptureState) {
     stopSpeechCaptureAudio(capture);
+    clearSpeechCaptureReleaseWatchdog(capture);
     if (speechCaptureRef.current === capture) speechCaptureRef.current = null;
   }
 
@@ -1163,8 +1192,21 @@ export default function App() {
       finishSpeechCapture(capture);
       return;
     }
-    if (!speechCaptureText(capture) && !restartSpeechCapture(capture))
+    if (restartSpeechCapture(capture)) return;
+    finishSpeechCapture(capture);
+  }
+
+  function armSpeechCaptureReleaseWatchdog(capture: SpeechCaptureState) {
+    clearSpeechCaptureReleaseWatchdog(capture);
+    capture.releaseWatchdogTimer = window.setTimeout(() => {
+      if (
+        speechCaptureRef.current !== capture ||
+        capture.finished ||
+        !capture.releaseRequested
+      )
+        return;
       finishSpeechCapture(capture);
+    }, BASIC_HOLD_RELEASE_WATCHDOG_MS);
   }
 
   function abortActiveSpeechCapture() {
@@ -1293,12 +1335,10 @@ export default function App() {
     void finalizeSpeechCaptureTranscript(capture, text, audioChunksBase64);
   }
 
-  function beginBasicHold(): boolean {
+  function startBasicHoldRecognition(press: PressState): boolean {
     if (!canUsePrivateSession()) return false;
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
-    const press = pressRef.current;
-    press.holding = true;
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
       press.holding = false;
       return false;
@@ -1315,7 +1355,6 @@ export default function App() {
       recognition,
       audio: null,
       audioChunksBase64: [],
-      audioBytes: 0,
       entryId: null,
       finalText: "",
       interimText: "",
@@ -1323,6 +1362,7 @@ export default function App() {
       finished: false,
       releaseRequested: false,
       restartAttempts: 0,
+      releaseWatchdogTimer: null,
       stopping: false,
       aborting: false,
     };
@@ -1372,6 +1412,46 @@ export default function App() {
     return true;
   }
 
+  function beginBasicHold(): boolean {
+    if (!canUsePrivateSession()) return false;
+    if (speechCaptureRef.current && !speechCaptureRef.current.finished)
+      return false;
+    const press = pressRef.current;
+    press.holding = true;
+    if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
+      press.holding = false;
+      return false;
+    }
+
+    if (
+      basicHoldMicPermissionPrimedRef.current ||
+      typeof navigator.mediaDevices?.getUserMedia !== "function"
+    ) {
+      return startBasicHoldRecognition(press);
+    }
+
+    void primeBasicHoldMicrophonePermission({ reportError: true }).then(
+      (allowed) => {
+        if (!allowed) {
+          if (pressRef.current === press) {
+            press.holding = false;
+            pressRef.current = emptyPress();
+          }
+          return;
+        }
+        if (
+          pressRef.current !== press ||
+          press.released ||
+          voiceModeRef.current !== "push-to-talk"
+        )
+          return;
+        startBasicHoldRecognition(press);
+      },
+    );
+
+    return true;
+  }
+
   function stopBasicHold({ cancel = false }: { cancel?: boolean } = {}) {
     const capture = speechCaptureRef.current;
     if (!capture || capture.finished) return;
@@ -1401,6 +1481,7 @@ export default function App() {
       finishSpeechCapture(capture);
       return;
     }
+    armSpeechCaptureReleaseWatchdog(capture);
     try {
       capture.stopping = true;
       capture.recognition.stop();
@@ -1425,7 +1506,7 @@ export default function App() {
     }
     endCall();
     setVoiceModeImmediate("push-to-talk");
-    discloseBrowserSpeechRecognition();
+    void primeBasicHoldMicrophonePermission();
   }
 
   function toggleVoiceMode() {

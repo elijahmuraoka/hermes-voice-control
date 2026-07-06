@@ -23,6 +23,7 @@ const apiPrefixes = [
   "/logs",
   "/healthz",
   "/readyz",
+  "/stt",
 ];
 
 const hopByHopHeaders = new Set([
@@ -45,6 +46,7 @@ const contentTypes = new Map([
   [".ico", "image/x-icon"],
   [".json", "application/json; charset=utf-8"],
   [".txt", "text/plain; charset=utf-8"],
+  [".webmanifest", "application/manifest+json; charset=utf-8"],
 ]);
 
 function isApiPath(pathname) {

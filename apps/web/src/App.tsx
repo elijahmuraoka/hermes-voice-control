@@ -87,6 +87,7 @@ const BASIC_HOLD_STT_SAMPLE_BYTES_PER_SECOND = 16_000 * 2;
 const BASIC_HOLD_STT_TIMEOUT_PER_SECOND_MS = 150;
 const BASIC_HOLD_STT_TIMEOUT_MAX_MS = 12_000;
 const SESSION_EXPIRED_MESSAGE = "Session expired. Enter your private PIN again.";
+<<<<<<< HEAD
 const READYZ_REFRESH_MS = 45_000;
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000] as const;
 const RECONNECT_GIVE_UP_MS = 45_000;
@@ -94,6 +95,8 @@ const TOKEN_RECONNECT_LEEWAY_MS = 5_000;
 const TOKEN_RECONNECT_DEFER_MS = 1_000;
 const FINALIZING_NUDGE_MS = 620;
 const MAX_BROWSER_TIMER_MS = 2_147_483_647;
+=======
+>>>>>>> origin/main
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
   return [
@@ -468,12 +471,32 @@ export default function App() {
       setAgentConnection(checkingAgentConnection);
       return;
     }
+<<<<<<< HEAD
     const online = () => void refreshAgentConnection();
     const offline = () =>
       setAgentConnection({
         state: "unavailable",
         label: "Offline",
         detail: "Browser network is offline",
+=======
+    let cancelled = false;
+    setAgentConnection(checkingAgentConnection);
+    getReadyz()
+      .then((readyz) => {
+        if (!cancelled) {
+          const provider = readyz.checks?.stt_provider?.trim();
+          if (provider) sttProviderRef.current = provider;
+          setAgentConnection(agentConnectionFromReadyz(readyz));
+        }
+      })
+      .catch(() => {
+        if (!cancelled)
+          setAgentConnection({
+            state: "unavailable",
+            label: "Agent status unavailable",
+            detail: "Open transcript if a request stalls",
+          });
+>>>>>>> origin/main
       });
     void refreshAgentConnection({ checking: true });
     readyzRefreshIntervalRef.current = window.setInterval(
@@ -1568,6 +1591,7 @@ export default function App() {
     );
   }
 
+<<<<<<< HEAD
   function nudgeFinalizingHold() {
     clearFinalizingNudgeTimer();
     setFinalizingNudgeKey((key) => key + 1);
@@ -1587,6 +1611,17 @@ export default function App() {
       return;
     }
     dispatch({ type: "THINK" });
+=======
+  function submitFinishedSpeechCapture(capture: SpeechCaptureState, text: string) {
+    if (!text) {
+      cancelEmptySpeechCapture(capture);
+      return;
+    }
+    if (!canUsePrivateSession()) {
+      failFinishedSpeechCapture(capture, SESSION_EXPIRED_MESSAGE);
+      return;
+    }
+>>>>>>> origin/main
     if (capture.entryId) {
       setEntries((items) =>
         items.map((entry) =>
@@ -1649,7 +1684,10 @@ export default function App() {
             dispatch({ type: "RECOVER" });
             return;
           }
+<<<<<<< HEAD
           void refreshAgentConnection();
+=======
+>>>>>>> origin/main
           // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
         }
       }
@@ -1673,7 +1711,11 @@ export default function App() {
       return;
     }
     speechFinalizingRef.current = true;
+<<<<<<< HEAD
     dispatch({ type: "FINALIZE" });
+=======
+    dispatch({ type: "POINTER_UP" });
+>>>>>>> origin/main
     void finalizeSpeechCaptureTranscript(
       capture,
       text,
@@ -1685,10 +1727,14 @@ export default function App() {
 
   function startBasicHoldRecognition(press: PressState): boolean {
     if (!canUsePrivateSession()) return false;
+<<<<<<< HEAD
     if (speechFinalizingRef.current) {
       nudgeFinalizingHold();
       return false;
     }
+=======
+    if (speechFinalizingRef.current) return false;
+>>>>>>> origin/main
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
@@ -1769,10 +1815,14 @@ export default function App() {
 
   function beginBasicHold(): boolean {
     if (!canUsePrivateSession()) return false;
+<<<<<<< HEAD
     if (speechFinalizingRef.current) {
       nudgeFinalizingHold();
       return false;
     }
+=======
+    if (speechFinalizingRef.current) return false;
+>>>>>>> origin/main
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     const press = pressRef.current;

@@ -3,6 +3,11 @@ from __future__ import annotations
 import base64
 import binascii
 import struct
+<<<<<<< HEAD
+=======
+import threading
+
+>>>>>>> origin/main
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -11,7 +16,11 @@ from .adapters import build_adapter
 from .chat_jobs import ChatJobService
 from .config import CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX, CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN, LOCAL_CLIENT_HOSTS, Settings
 from .gemini import build_broker, build_transcriber
+<<<<<<< HEAD
 from .security import AuthManager
+=======
+from .security import AuthManager, hash_secret
+>>>>>>> origin/main
 from .store import Store
 from .tools import ADAPTER_DIAGNOSTICS_HEADER, ADAPTER_DIAGNOSTICS_RESPONSE_KEY, ToolCallRequest, ToolCancelRequest, ToolService, adapter_diagnostics_headers
 
@@ -190,6 +199,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_HEADER, CHAT_JOB_BUDGET_HEADER],
         expose_headers=[ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_ID_HEADER, "Location"],
     )
+    def warm_hermes_session_async(session_hash: str) -> None:
+        # Unlock-time warm: eagerly resume the agent session in the background
+        # so the first utterance skips the cold-session cost. Resolves the
+        # adapter through `tools` so test doubles are honored.
+        def _run() -> None:
+            try:
+                status = tools.adapter.warm_session(session_hash)
+                if status == "resumed":
+                    store.log("hermes.warm", "success", session_hash=session_hash)
+                elif status == "failed":
+                    store.log("hermes.warm", "failed", error_code="WARM_FAILED", session_hash=session_hash)
+            except Exception:
+                store.log("hermes.warm", "failed", error_code="WARM_ERROR", session_hash=session_hash)
+        threading.Thread(target=_run, name="hvc-hermes-warm", daemon=True).start()
+    def device_principal(request: Request) -> str | None:
+        # Agent identity is keyed to the remembered device when one exists:
+        # the short-lived session token rotates (PIN TTL, re-mints), and keying
+        # the Hermes session to it would reset conversation memory on every
+        # rotation and orphan serve sessions.
+        if not settings.remember_device:
+            return None
+        device_token = request.cookies.get("hvc_device")
+        if device_token and auth.validate_device(device_token):
+            return f"dev-{hash_secret(device_token)}"
+        return None
     def session_dep(request: Request) -> str:
         if not settings.require_pin:
             client_host = request.client.host if request.client else "local"
@@ -199,7 +233,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=401, detail="PIN auth is required for non-local clients")
             return "tailscale-local"
         try:
-            return auth.validate(authorization=request.headers.get("authorization"), hvc_session=request.cookies.get("hvc_session"))
+            session_hash = auth.validate(authorization=request.headers.get("authorization"), hvc_session=request.cookies.get("hvc_session"))
+            return device_principal(request) or session_hash
         except HTTPException:
             # Remembered device: a valid long-lived device cookie re-mints the
             # short-lived session so the PIN is only ever typed once per device.
@@ -211,7 +246,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # response's headers, so the cookie is applied in middleware below.
             request.state.pending_session_cookie = session
             store.log("auth.device", "refreshed", {"session_id": session.token_hash[:12]})
-            return session.token_hash
+            principal = f"dev-{hash_secret(device_token)}"
+            warm_hermes_session_async(principal)
+            return principal
     @app.middleware("http")
     async def apply_refreshed_session_cookie(request: Request, call_next):
         result = await call_next(request)
@@ -276,10 +313,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid PIN")
         session = auth.create_session()
         auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
+        principal = session.token_hash
         if settings.remember_device:
-            device = auth.create_device()
-            auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
+            # Re-entering the PIN with a still-valid device cookie must not
+            # rotate the device: the device keys agent memory and job
+            # ownership, and rotation would silently reset both.
+            existing = device_principal(request)
+            if existing:
+                principal = existing
+            else:
+                device = auth.create_device()
+                auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
+                principal = f"dev-{hash_secret(device.token)}"
         store.log("auth.pin", "success", {"session_id": session.token})
+        warm_hermes_session_async(principal)
         return {"ok": True, "expires_at": session.expires_at.isoformat()}
     @app.post("/auth/logout")
     def logout(request: Request, response: Response, session_hash: str = Depends(session_dep)):
@@ -293,7 +340,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.log("auth.logout", "success", session_hash=session_hash)
         return {"ok": True}
     @app.get("/auth/session")
-    def auth_session(session_hash: str = Depends(session_dep)): return {"authenticated": True, "mode": "pin" if settings.require_pin else "tailscale"}
+    def auth_session(session_hash: str = Depends(session_dep)):
+        # The app calls this on every load; warming here covers the
+        # valid-cookies open (no re-mint). Adapter-side dedupe keeps it cheap.
+        warm_hermes_session_async(session_hash)
+        return {"authenticated": True, "mode": "pin" if settings.require_pin else "tailscale"}
     @app.post("/gemini/ephemeral-token")
     def gemini_token(session_hash: str = Depends(session_dep)):
         token = broker.create_token()

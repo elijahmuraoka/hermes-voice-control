@@ -32,6 +32,19 @@ const audioMock = vi.hoisted(() => ({
   startError: null as Error | null,
   startGate: null as { promise: Promise<void>; resolve: () => void } | null,
 }));
+const audioMock = vi.hoisted(() => ({
+  instances: [] as Array<{
+    startCapture: ReturnType<typeof vi.fn>;
+    stopCapture: ReturnType<typeof vi.fn>;
+    setCaptureEnabled: ReturnType<typeof vi.fn>;
+    playPcm16Base64: ReturnType<typeof vi.fn>;
+    interrupt: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+    emit: (data?: string) => void;
+  }>,
+  startError: null as Error | null,
+  startGate: null as { promise: Promise<void>; resolve: () => void } | null,
+}));
 
 let sessionAuthenticated = true;
 let chatAuthExpired = false;
@@ -458,7 +471,10 @@ vi.mock("./audio", async (importOriginal) => {
     stopCapture = vi.fn();
     setCaptureEnabled = vi.fn();
     playPcm16Base64 = vi.fn(async () => undefined);
+<<<<<<< HEAD
     resume = vi.fn(async () => undefined);
+=======
+>>>>>>> origin/main
     interrupt = vi.fn();
     close = vi.fn(() => this.stopCapture());
     emit(data = "AAECAw==") {
@@ -517,7 +533,11 @@ describe("App", () => {
               ok: readyzOk,
               checks: {
                 hermes_adapter: "api",
+<<<<<<< HEAD
                 hermes: { kind: "api", available: readyzHermesAvailable },
+=======
+                hermes: { kind: "api", available: true },
+>>>>>>> origin/main
                 stt_provider: "gemini",
               },
             }),
@@ -973,7 +993,11 @@ describe("App", () => {
       }),
     ]);
     expect(screen.getByText("browser guess")).toBeInTheDocument();
+<<<<<<< HEAD
     expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+=======
+    expect(screen.getByText("Sending...")).toBeInTheDocument();
+>>>>>>> origin/main
     expect(chatTextBodies).toHaveLength(0);
 
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -1191,7 +1215,11 @@ describe("App", () => {
       await Promise.resolve();
     });
     expect(chatTextBodies).toHaveLength(0);
+<<<<<<< HEAD
     expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+=======
+    expect(screen.getByText("Sending...")).toBeInTheDocument();
+>>>>>>> origin/main
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4200);

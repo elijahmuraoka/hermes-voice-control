@@ -5,7 +5,7 @@ import { join } from "node:path";
 const root = new URL("..", import.meta.url).pathname;
 const assetsDir = join(root, "apps/web/dist/assets");
 const bundleBudgets = {
-  // Reliability bundle: reconnect+wake-lock.
+  // Reliability bundle: reconnect+wake-lock (raised from #76's 256 KiB).
   jsBytes: 272000,
   cssBytes: 20 * 1024,
 };

@@ -62,6 +62,7 @@ class Settings:
     device_ttl_seconds: int = 7_776_000
     db_path: Path = Path("./hvc.sqlite3")
     gemini_mode: str = "mock"
+    stt_provider: str = "browser"
     hermes_adapter: str = "mock"
     agent_name: str = "Hermes Agent"
     hermes_bin: str = "hermes"
@@ -81,6 +82,10 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         origins = os.getenv("HVC_FRONTEND_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
+        gemini_mode = os.getenv("HVC_GEMINI_MODE", "mock")
+        stt_provider = os.getenv("HVC_STT_PROVIDER")
+        if stt_provider is None:
+            stt_provider = "gemini" if gemini_mode == "real" and (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) else "browser"
         return cls(
             host=os.getenv("HVC_HOST", "127.0.0.1"),
             port=int(os.getenv("HVC_PORT", "8765")),
@@ -91,7 +96,8 @@ class Settings:
             remember_device=env_bool("HVC_REMEMBER_DEVICE", True),
             device_ttl_seconds=env_int("HVC_DEVICE_TTL_SECONDS", 7_776_000),
             db_path=Path(os.getenv("HVC_DB_PATH", "./hvc.sqlite3")),
-            gemini_mode=os.getenv("HVC_GEMINI_MODE", "mock"),
+            gemini_mode=gemini_mode,
+            stt_provider=stt_provider,
             hermes_adapter=os.getenv("HVC_HERMES_ADAPTER", "mock"),
             agent_name=os.getenv("HVC_AGENT_NAME", os.getenv("VITE_HVC_AGENT_NAME", "Hermes Agent")),
             hermes_bin=os.getenv("HVC_HERMES_BIN", "hermes"),
@@ -130,3 +136,5 @@ class Settings:
             parts = urlsplit(self.hermes_api_url)
             if parts.scheme != "ws" or (parts.hostname or "") not in LOCAL_HOSTS:
                 raise RuntimeError("HVC_HERMES_API_URL must be a loopback ws:// URL")
+        if self.stt_provider not in {"gemini", "browser"}:
+            raise RuntimeError("HVC_STT_PROVIDER must be gemini or browser")

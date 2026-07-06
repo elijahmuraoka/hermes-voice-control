@@ -78,6 +78,18 @@ async function stubUnlockedSession(page: Page) {
       body: JSON.stringify({ authenticated: true }),
     });
   });
+  await page.route("**/stt/transcribe", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        transcript: "browser smoke phrase",
+        provider: "gemini",
+        model: "gemini-smoke",
+        fallback: false,
+      }),
+    });
+  });
 }
 
 async function waitForDrawerOpen(page: Page) {

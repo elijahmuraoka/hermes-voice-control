@@ -1,4 +1,5 @@
 from pathlib import Path
+import base64
 import importlib.util
 import json
 import sys
@@ -16,6 +17,7 @@ from app.main import create_app
 from app.store import Store
 
 TEST_PIN = "voice-9Kq2"
+PCM_CHUNK = base64.b64encode(b"\x00\x00" * 160).decode("ascii")
 
 def make_client(tmp_path: Path, **overrides) -> TestClient:
     settings = Settings(pin=TEST_PIN, db_path=tmp_path / "test.sqlite3", allow_logs_endpoint=True, **overrides)
@@ -425,6 +427,102 @@ def test_real_gemini_token_is_single_use_and_constrained(monkeypatch):
     }
     assert created["config"]["lock_additional_fields"] == []
     assert "super-secret-gemini-key" not in str(created["config"])
+
+def test_stt_transcribe_requires_auth_in_pin_mode(tmp_path):
+    client = make_pin_client(tmp_path)
+    res = client.post("/stt/transcribe", json={"audio_chunks_base64": [PCM_CHUNK]})
+    assert res.status_code == 401
+
+def test_mock_stt_transcribe_returns_deterministic_transcript(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    res = client.post(
+        "/stt/transcribe",
+        json={"audio_chunks_base64": [PCM_CHUNK], "fallback_transcript": "browser guess"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body == {
+        "transcript": "mock gemini transcript",
+        "provider": "mock",
+        "model": "mock-gemini-stt",
+        "fallback": False,
+    }
+    logs = client.get("/logs").text
+    assert "browser guess" not in logs
+    assert "mock gemini transcript" not in logs
+
+def test_browser_stt_provider_returns_fallback_signal(tmp_path, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    client = TestClient(create_app(Settings(pin=TEST_PIN, db_path=tmp_path / "stt-browser.sqlite3", gemini_mode="real", stt_provider="browser")))
+    res = client.post("/stt/transcribe", json={"audio_chunks_base64": [PCM_CHUNK]})
+    assert res.status_code == 200
+    assert res.json() == {
+        "transcript": "",
+        "provider": "browser",
+        "model": None,
+        "fallback": True,
+    }
+
+def test_stt_transcribe_rejects_oversized_audio(tmp_path):
+    client = make_client(tmp_path)
+    oversized = base64.b64encode(b"\x00" * 2_100_001).decode("ascii")
+    res = client.post("/stt/transcribe", json={"audio_chunks_base64": [oversized]})
+    assert res.status_code == 413
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"audio_chunks_base64": ["not base64"]},
+        {"audio_base64": base64.b64encode(b"not wav").decode("ascii"), "mime_type": "audio/wav"},
+        {"audio_chunks_base64": [base64.b64encode(b"\x00").decode("ascii")]},
+    ],
+)
+def test_stt_transcribe_rejects_bad_audio(tmp_path, payload):
+    client = make_client(tmp_path)
+    res = client.post("/stt/transcribe", json=payload)
+    assert res.status_code == 422
+
+def test_real_gemini_stt_transcribes_without_exposing_secret(tmp_path, monkeypatch):
+    captured = {}
+    class FakeResponse:
+        text = "transcribed words"
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            captured["model"] = model
+            captured["contents"] = contents
+            captured["config"] = config
+            return FakeResponse()
+    class FakeClient:
+        def __init__(self, api_key):
+            captured["api_key"] = api_key
+            self.models = FakeModels()
+    fake_genai = types.SimpleNamespace(Client=FakeClient)
+    fake_google = types.ModuleType("google")
+    fake_google.genai = fake_genai
+    monkeypatch.setitem(sys.modules, "google", fake_google)
+    monkeypatch.setenv("GEMINI_API_KEY", "super-secret-gemini-key")
+    monkeypatch.setenv("HVC_STT_MODEL", "gemini-test-stt")
+    client = TestClient(create_app(Settings(pin=TEST_PIN, allow_logs_endpoint=True, db_path=tmp_path / "stt-real.sqlite3", gemini_mode="real", stt_provider="gemini")))
+
+    res = client.post("/stt/transcribe", json={"audio_chunks_base64": [PCM_CHUNK]})
+
+    assert res.status_code == 200
+    assert res.json() == {
+        "transcript": "transcribed words",
+        "provider": "gemini",
+        "model": "gemini-test-stt",
+        "fallback": False,
+    }
+    assert captured["api_key"] == "super-secret-gemini-key"
+    assert captured["model"] == "gemini-test-stt"
+    assert captured["config"] == {"temperature": 0, "max_output_tokens": 256}
+    assert "Transcribe the provided audio verbatim" in captured["contents"][0]
+    assert "super-secret-gemini-key" not in res.text
+    logs = client.get("/logs").text
+    assert "transcribed words" not in logs
+    assert PCM_CHUNK not in logs
 
 def test_tool_allowlist_and_mock_agent(tmp_path):
     client = make_client(tmp_path)

@@ -26,7 +26,9 @@ import {
   getTextJob,
   login,
   sendText,
+  transcribeSpeechAudio,
 } from "./api";
+import { BrowserGeminiAudio } from "./audio";
 import {
   createDefaultRealtimeVoiceSession,
   type RealtimeTranscriptEvent,
@@ -71,6 +73,7 @@ const uid = () => Math.random().toString(36).slice(2);
 const HOLD_DELAY_MS = 220;
 const NO_SPEECH_TIMEOUT_MS = 3500;
 const BASIC_HOLD_SPEECH_RESTART_LIMIT = 2;
+const BASIC_HOLD_STT_AUDIO_MAX_BYTES = 2_100_000;
 const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
 const TOOL_RESPONSE_TIMEOUT_MS = 95000;
 const TEXT_JOB_POLL_MS = 1400;
@@ -126,6 +129,9 @@ type TextJobEntryMeta = {
 
 type SpeechCaptureState = {
   recognition: BrowserSpeechRecognition;
+  audio: BrowserGeminiAudio | null;
+  audioChunksBase64: string[];
+  audioBytes: number;
   entryId: string | null;
   finalText: string;
   interimText: string;
@@ -1042,6 +1048,45 @@ export default function App() {
       .trim();
   }
 
+  function base64DecodedLength(value: string): number {
+    const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+    return Math.max(0, Math.floor((value.length * 3) / 4) - padding);
+  }
+
+  function stopSpeechCaptureAudio(capture: SpeechCaptureState) {
+    capture.audio?.close();
+    capture.audio = null;
+  }
+
+  function startSpeechCaptureAudio(capture: SpeechCaptureState) {
+    let audio: BrowserGeminiAudio;
+    try {
+      audio = new BrowserGeminiAudio();
+    } catch {
+      return;
+    }
+    capture.audio = audio;
+    void audio
+      .startCapture((chunk) => {
+        if (speechCaptureRef.current !== capture || capture.finished) return;
+        const bytes = base64DecodedLength(chunk.data);
+        if (capture.audioBytes + bytes > BASIC_HOLD_STT_AUDIO_MAX_BYTES) {
+          stopSpeechCaptureAudio(capture);
+          return;
+        }
+        capture.audioBytes += bytes;
+        capture.audioChunksBase64.push(chunk.data);
+      })
+      .then(() => {
+        if (speechCaptureRef.current !== capture || capture.finished)
+          audio.close();
+      })
+      .catch(() => {
+        if (capture.audio === audio) capture.audio = null;
+        audio.close();
+      });
+  }
+
   function updateSpeechCaptureEntry(
     capture: SpeechCaptureState,
     text: string,
@@ -1074,6 +1119,7 @@ export default function App() {
   }
 
   function clearSpeechCapture(capture: SpeechCaptureState) {
+    stopSpeechCaptureAudio(capture);
     if (speechCaptureRef.current === capture) speechCaptureRef.current = null;
   }
 
@@ -1166,28 +1212,26 @@ export default function App() {
     dispatch({ type: "ERROR", error: "Hold-to-talk could not hear you." });
   }
 
-  function finishSpeechCapture(capture: SpeechCaptureState) {
-    if (capture.finished) return;
-    capture.finished = true;
-    clearSpeechCapture(capture);
-    const text = speechCaptureText(capture);
+  function cancelEmptySpeechCapture(capture: SpeechCaptureState) {
+    if (capture.entryId) {
+      setEntries((items) =>
+        items.map((entry) =>
+          entry.id === capture.entryId
+            ? { ...entry, status: "cancelled", text: "I didn't catch that." }
+            : entry,
+        ),
+      );
+    } else {
+      appendSystem("I didn't catch that.", "cancelled");
+    }
+    dispatch({ type: "RECOVER" });
+  }
 
+  function submitFinishedSpeechCapture(capture: SpeechCaptureState, text: string) {
     if (!text) {
-      if (capture.entryId) {
-        setEntries((items) =>
-          items.map((entry) =>
-            entry.id === capture.entryId
-              ? { ...entry, status: "cancelled", text: "I didn't catch that." }
-              : entry,
-          ),
-        );
-      } else {
-        appendSystem("I didn't catch that.", "cancelled");
-      }
-      dispatch({ type: "RECOVER" });
+      cancelEmptySpeechCapture(capture);
       return;
     }
-
     if (capture.entryId) {
       setEntries((items) =>
         items.map((entry) =>
@@ -1199,6 +1243,54 @@ export default function App() {
     }
     dispatch({ type: "POINTER_UP" });
     void submitText(text, { existingUserEntryId: capture.entryId ?? undefined });
+  }
+
+  async function finalizeSpeechCaptureTranscript(
+    capture: SpeechCaptureState,
+    browserText: string,
+    audioChunksBase64: string[],
+  ) {
+    if (capture.entryId) {
+      setEntries((items) =>
+        items.map((entry) =>
+          entry.id === capture.entryId
+            ? {
+                ...entry,
+                text: browserText || "Finalizing speech...",
+                status: "sending",
+              }
+            : entry,
+        ),
+      );
+    }
+    let finalText = browserText;
+    if (audioChunksBase64.length > 0) {
+      try {
+        const result = await transcribeSpeechAudio(
+          audioChunksBase64,
+          browserText,
+        );
+        const transcript = result.transcript.trim();
+        if (transcript) finalText = transcript;
+      } catch {
+        // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
+      }
+    }
+    submitFinishedSpeechCapture(capture, finalText);
+  }
+
+  function finishSpeechCapture(capture: SpeechCaptureState) {
+    if (capture.finished) return;
+    capture.finished = true;
+    const text = speechCaptureText(capture);
+    const audioChunksBase64 = capture.audioChunksBase64.slice();
+    clearSpeechCapture(capture);
+
+    if (!text && audioChunksBase64.length === 0) {
+      cancelEmptySpeechCapture(capture);
+      return;
+    }
+    void finalizeSpeechCaptureTranscript(capture, text, audioChunksBase64);
   }
 
   function beginBasicHold(): boolean {
@@ -1221,6 +1313,9 @@ export default function App() {
 
     const capture: SpeechCaptureState = {
       recognition,
+      audio: null,
+      audioChunksBase64: [],
+      audioBytes: 0,
       entryId: null,
       finalText: "",
       interimText: "",
@@ -1270,6 +1365,7 @@ export default function App() {
       );
       return false;
     }
+    startSpeechCaptureAudio(capture);
 
     press.activated = true;
     dispatch({ type: "POINTER_DOWN" });

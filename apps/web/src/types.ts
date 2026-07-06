@@ -81,6 +81,12 @@ export interface ChatJobStatus {
   error?: ChatJobError;
 }
 export type TextChatResponse = TextChatResult | ChatJobStatus;
+export interface SpeechTranscriptionResponse {
+  transcript: string;
+  provider: "gemini" | "browser" | "mock" | string;
+  model?: string | null;
+  fallback?: boolean;
+}
 export interface VoiceState {
   callState: CallState;
   inputMode: InputMode;

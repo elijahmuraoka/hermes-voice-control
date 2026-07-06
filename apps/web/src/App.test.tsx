@@ -32,6 +32,11 @@ const audioMock = vi.hoisted(() => ({
   startError: null as Error | null,
   startGate: null as { promise: Promise<void>; resolve: () => void } | null,
 }));
+const earconMock = vi.hoisted(() => ({
+  plays: [] as string[],
+  unlocks: 0,
+  closes: 0,
+}));
 
 let sessionAuthenticated = true;
 let chatAuthExpired = false;
@@ -471,6 +476,20 @@ vi.mock("./audio", async (importOriginal) => {
   return { ...actual, BrowserGeminiAudio: MockBrowserGeminiAudio };
 });
 
+vi.mock("./earcons", () => ({
+  createEarconController: () => ({
+    unlock: vi.fn(async () => {
+      earconMock.unlocks += 1;
+    }),
+    play: vi.fn((name: string) => {
+      earconMock.plays.push(name);
+    }),
+    close: vi.fn(() => {
+      earconMock.closes += 1;
+    }),
+  }),
+}));
+
 describe("App", () => {
   beforeEach(() => {
     realtimeMock.instances.length = 0;
@@ -495,6 +514,9 @@ describe("App", () => {
     readyzOk = true;
     readyzHermesAvailable = true;
     readyzDeferred = null;
+    earconMock.plays = [];
+    earconMock.unlocks = 0;
+    earconMock.closes = 0;
     chatJobStatuses.clear();
     chatCancelStatuses.clear();
     audioMock.instances = [];
@@ -749,7 +771,9 @@ describe("App", () => {
 
   it("renders premium voice surface and transcript toggle", async () => {
     await renderUnlockedApp();
-    expect(screen.getByText("Hermes Agent")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Hermes Agent" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText(/Voice orb/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Toggle transcript/ }),
@@ -2666,6 +2690,7 @@ describe("App", () => {
       { timeout: 2200 },
     );
     expect(speech.speak).not.toHaveBeenCalled();
+    expect(earconMock.plays).not.toContain("reply");
   });
 
   it("reopens unlock when background job polling loses auth", async () => {
@@ -2999,6 +3024,9 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByText(/Could not prepare/)).toBeInTheDocument(),
     );
+    expect(screen.getByText("Voice connection had trouble. Retry.")).toBeInTheDocument();
+    expect(screen.queryByText(/token=secret/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sess_123456/)).not.toBeInTheDocument();
     const snapshot = (window as any).__HVC_DIAGNOSTICS__.snapshot();
 
     expect(snapshot.events).toEqual(
@@ -3012,6 +3040,21 @@ describe("App", () => {
     );
     expect(JSON.stringify(snapshot)).not.toContain("token=secret");
     expect(JSON.stringify(snapshot)).not.toContain("sess_123456");
+  });
+
+  it("maps initial transport failures to human voice copy", async () => {
+    realtimeMock.connectError = new Error("open timeout");
+    await renderUnlockedApp();
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Voice connection had trouble. Check the private network and retry.",
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("open timeout")).not.toBeInTheDocument();
   });
 
   it("reopens the PIN gate when realtime auth expires", async () => {
@@ -4446,7 +4489,22 @@ describe("App", () => {
       vi.advanceTimersByTime(230);
       await Promise.resolve();
     });
-    expect(orb.className).toContain("is-nudging");
+    const firstNudgedOrb = screen.getByLabelText(/Voice orb/);
+    expect(firstNudgedOrb.className).toContain("is-nudging");
+    const firstNudgeKey = firstNudgedOrb.getAttribute("data-nudge-key");
+    fireEvent.pointerUp(firstNudgedOrb, { pointerId: 2 });
+
+    fireEvent.pointerDown(firstNudgedOrb, { pointerId: 3, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    const secondNudgedOrb = screen.getByLabelText(/Voice orb/);
+    expect(secondNudgedOrb.className).toContain("is-nudging");
+    expect(secondNudgedOrb).toBe(firstNudgedOrb);
+    expect(secondNudgedOrb.getAttribute("data-nudge-key")).not.toBe(
+      firstNudgeKey,
+    );
 
     sttDeferred.resolve();
     await act(async () => {
@@ -4512,9 +4570,36 @@ describe("App", () => {
     const orb = screen.getByLabelText(/Voice orb/);
     await startListeningVoice();
 
+    earconMock.plays = [];
     await user.click(screen.getByRole("button", { name: /^Hold$/ }));
 
     expect(realtimeMock.instances[0].disconnect).toHaveBeenCalledTimes(1);
+    expect(earconMock.plays).toContain("session-end");
+    expect(earconMock.plays.filter((name) => name === "session-end")).toHaveLength(
+      1,
+    );
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("does not play a session-end sound when switching to Hold after Live setup failed", async () => {
+    const user = userEvent.setup();
+    installSpeechRecognitionMock();
+    realtimeMock.connectError = new Error("open timeout");
+    await renderUnlockedApp();
+
+    await user.click(screen.getByRole("button", { name: /^Live$/ }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Voice connection had trouble. Check the private network and retry.",
+        ),
+      ).toBeInTheDocument(),
+    );
+
+    earconMock.plays = [];
+    await user.click(screen.getByRole("button", { name: /^Hold$/ }));
+
+    expect(earconMock.plays).not.toContain("session-end");
     expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import type { GeminiLiveAudio } from "../audio";
+import type { AudioLevelCallback } from "../audio";
 import type { HvcDiagnosticsEvent } from "../diagnostics";
 
 export type GeminiLiveStatus =
@@ -58,6 +59,8 @@ export interface GeminiLiveAudioConfig {
   startMuted?: boolean;
   holdToTalkOnly?: boolean;
   startCapture?: boolean;
+  onInputLevel?: AudioLevelCallback;
+  onOutputLevel?: AudioLevelCallback;
 }
 
 export interface GeminiToolDeclaration {

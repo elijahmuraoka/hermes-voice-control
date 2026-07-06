@@ -119,12 +119,14 @@ input {
   font-size: 12px;
 }
 
-.topbar h1 {
+.hero-agent-kicker {
+  display: block;
+  margin-top: 8px;
+  color: rgba(246, 240, 232, 0.72);
   font-family: Georgia, serif;
-  font-size: 64px;
-  line-height: 0.9;
-  margin: 10px 0 0;
-  text-wrap: balance;
+  font-size: 20px;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
 }
 
 .agent-connection {
@@ -307,11 +309,12 @@ input {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 28px;
+  gap: 16px;
 }
 
 .voice-orb {
   position: relative;
+  --orb-level: 0;
   width: min(46vw, 360px);
   height: min(46vw, 360px);
   min-width: 240px;
@@ -321,6 +324,8 @@ input {
   background: transparent;
   cursor: pointer;
   touch-action: none;
+  transform: translateZ(0);
+  transition: transform 0.16s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .voice-orb:focus-visible {
@@ -331,6 +336,7 @@ input {
 .orb-aura,
 .orb-core,
 .orb-ring,
+.orb-shimmer,
 .orb-wave {
   position: absolute;
   inset: 0;
@@ -346,6 +352,8 @@ input {
     transparent 67%
   );
   filter: blur(20px);
+  opacity: calc(0.58 + var(--orb-level) * 0.18);
+  transform: scale(calc(1 + var(--orb-level) * 0.14));
   animation: breathe 4.8s ease-in-out infinite;
 }
 
@@ -361,12 +369,36 @@ input {
   box-shadow:
     inset -18px -28px 60px rgba(0, 0, 0, 0.44),
     0 0 80px rgba(214, 179, 106, 0.28);
+  transform: scale(calc(1 + var(--orb-level) * 0.045));
+  transition:
+    filter 0.16s,
+    box-shadow 0.16s,
+    transform 0.08s linear;
 }
 
 .orb-ring {
   inset: 8%;
   border: 1px solid rgba(255, 255, 255, 0.22);
   box-shadow: 0 0 50px rgba(157, 232, 255, 0.12);
+}
+
+.orb-shimmer {
+  inset: 18%;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.orb-shimmer::before {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  background: linear-gradient(
+    115deg,
+    transparent 34%,
+    rgba(255, 248, 220, 0.32) 48%,
+    transparent 62%
+  );
+  transform: translateX(-120%) rotate(12deg);
 }
 
 .orb-wave {
@@ -383,6 +415,17 @@ input {
 .state-listening .orb-aura,
 .state-user-speaking .orb-aura {
   animation: breathe 2s ease-in-out infinite;
+}
+
+.state-connecting .orb-aura {
+  animation: connectBreath 1.35s ease-in-out infinite;
+}
+
+.state-listening .orb-ring,
+.state-user-speaking .orb-ring,
+.state-hold-to-talk .orb-ring {
+  border-color: rgba(157, 232, 255, 0.32);
+  box-shadow: 0 0 70px rgba(157, 232, 255, 0.16);
 }
 
 .state-hold-to-talk .orb-core {
@@ -408,8 +451,12 @@ input {
   animation: ripple 1.9s ease-out infinite;
 }
 
+.state-agent-thinking .orb-core {
+  animation: coreSwirl 3.2s linear infinite;
+}
+
 .state-agent-thinking .orb-ring {
-  animation: spin 2.4s linear infinite;
+  animation: spin 3s linear infinite;
   border-top-color: var(--cyan);
 }
 
@@ -423,6 +470,14 @@ input {
   filter: saturate(0.78);
 }
 
+.state-finalizing .orb-shimmer {
+  opacity: 1;
+}
+
+.state-finalizing .orb-shimmer::before {
+  animation: shimmerSweep 1.4s ease-in-out infinite;
+}
+
 .state-reconnecting .orb-aura {
   animation: breathe 1.7s ease-in-out infinite;
 }
@@ -431,12 +486,27 @@ input {
   animation: nudge 0.42s ease-out;
 }
 
-.voice-orb.is-nudging.nudge-1 {
-  animation-name: nudgeAlt;
-}
-
 .state-error .orb-core {
   background: radial-gradient(circle, #ffe0d7, #ff8f70 45%, #31110b);
+  box-shadow:
+    inset -18px -28px 60px rgba(0, 0, 0, 0.42),
+    0 0 70px rgba(255, 143, 112, 0.24);
+}
+
+.state-error .orb-ring {
+  border-color: rgba(255, 143, 112, 0.38);
+  box-shadow: 0 0 44px rgba(255, 143, 112, 0.12);
+}
+
+.orb-agent-title {
+  margin: 4px 0 0;
+  color: rgba(246, 240, 232, 0.82);
+  font-family: Georgia, serif;
+  font-size: clamp(20px, 3.4vw, 30px);
+  font-weight: 520;
+  line-height: 1;
+  text-align: center;
+  text-wrap: balance;
 }
 
 .state-copy {
@@ -461,6 +531,7 @@ input {
 }
 
 .retry-pill {
+  min-height: 42px;
   margin-top: 14px;
   border: 1px solid rgba(255, 143, 112, 0.34);
   border-radius: 999px;
@@ -468,6 +539,19 @@ input {
   color: #ffd7cc;
   padding: 8px 13px;
   cursor: pointer;
+  transition:
+    transform 0.16s cubic-bezier(0.2, 0, 0, 1),
+    border-color 0.16s,
+    background 0.16s;
+}
+
+.retry-pill:active {
+  transform: scale(0.96);
+}
+
+.retry-pill:focus-visible {
+  outline: 2px solid rgba(255, 143, 112, 0.72);
+  outline-offset: 3px;
 }
 
 .control-row {
@@ -788,6 +872,13 @@ input {
   }
 }
 
+@keyframes connectBreath {
+  50% {
+    transform: scale(1.04);
+    opacity: 0.86;
+  }
+}
+
 @keyframes ripple {
   0% {
     transform: scale(0.82);
@@ -805,16 +896,22 @@ input {
   }
 }
 
-@keyframes nudge {
-  35% {
-    transform: scale(1.04);
+@keyframes coreSwirl {
+  50% {
+    filter: hue-rotate(8deg) saturate(1.08);
   }
-  70% {
-    transform: scale(0.98);
+  to {
+    transform: scale(calc(1 + var(--orb-level) * 0.045)) rotate(360deg);
   }
 }
 
-@keyframes nudgeAlt {
+@keyframes shimmerSweep {
+  to {
+    transform: translateX(120%) rotate(12deg);
+  }
+}
+
+@keyframes nudge {
   35% {
     transform: scale(1.04);
   }
@@ -843,8 +940,8 @@ input {
     border-radius: 28px;
     padding: 20px 16px calc(env(safe-area-inset-bottom) + 86px);
   }
-  .topbar h1 {
-    font-size: 52px;
+  .hero-agent-kicker {
+    font-size: 18px;
   }
   .voice-orb {
     width: 72vw;
@@ -912,8 +1009,8 @@ input {
   .eyebrow {
     font-size: 11px;
   }
-  .topbar h1 {
-    font-size: 46px;
+  .hero-agent-kicker {
+    font-size: 17px;
     max-width: 100%;
   }
   .state-copy p {

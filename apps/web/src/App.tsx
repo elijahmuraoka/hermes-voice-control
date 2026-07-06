@@ -57,6 +57,7 @@ import {
   saveSpokenCompletionNotificationsEnabled,
 } from "./completionNotificationPreference";
 import { agentName, agentNounLower } from "./config";
+import { createEarconController, type EarconName } from "./earcons";
 import {
   createHvcDiagnosticsRecorder,
   exposeHvcDiagnostics,
@@ -312,6 +313,8 @@ export default function App() {
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
   const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
   const speechFinalizingRef = useRef(false);
+  const orbLevelRef = useRef(0);
+  const earconsRef = useRef(createEarconController());
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const speechRecognitionDisclosureShownRef = useRef(false);
@@ -333,6 +336,7 @@ export default function App() {
   const wakeLockReleaseHandlerRef = useRef<(() => void) | null>(null);
   const wakeLockRequestingRef = useRef(false);
   const finalizingNudgeTimerRef = useRef<number | null>(null);
+  const finalizingNudgeSequenceRef = useRef(0);
   const transcriptDraftsRef = useRef<
     Partial<Record<RealtimeTranscriptEvent["role"], string>>
   >({});
@@ -418,6 +422,7 @@ export default function App() {
       clearReadyzRefreshInterval();
       clearFinalizingNudgeTimer();
       void releaseWakeLock();
+      earconsRef.current.close();
       const activeSpeechCapture = speechCaptureRef.current;
       if (activeSpeechCapture) {
         activeSpeechCapture.finished = true;
@@ -517,6 +522,18 @@ export default function App() {
     window.clearTimeout(finalizingNudgeTimerRef.current);
     finalizingNudgeTimerRef.current = null;
     setFinalizingNudgeKey(0);
+  }
+
+  function updateOrbLevel(level: number) {
+    orbLevelRef.current = Math.max(orbLevelRef.current, level);
+  }
+
+  function unlockEarcons() {
+    void earconsRef.current.unlock();
+  }
+
+  function playEarcon(name: EarconName) {
+    earconsRef.current.play(name);
   }
 
   async function refreshAgentConnection({
@@ -1002,6 +1019,7 @@ export default function App() {
         restored: false,
       });
       if (!meta.restored) {
+        playEarcon("reply");
         speakBackgroundCompletionNotice(SPOKEN_COMPLETION_NOTICE_TEXT);
       }
       finishTextJob(status.job_id, { keepRecoveryId: true });
@@ -1346,7 +1364,7 @@ export default function App() {
   function startSpeechCaptureAudio(capture: SpeechCaptureState) {
     let audio: BrowserGeminiAudio;
     try {
-      audio = new BrowserGeminiAudio();
+      audio = new BrowserGeminiAudio({ onInputLevel: updateOrbLevel });
     } catch {
       return;
     }
@@ -1569,8 +1587,12 @@ export default function App() {
   }
 
   function nudgeFinalizingHold() {
-    clearFinalizingNudgeTimer();
-    setFinalizingNudgeKey((key) => key + 1);
+    if (finalizingNudgeTimerRef.current !== null) {
+      window.clearTimeout(finalizingNudgeTimerRef.current);
+      finalizingNudgeTimerRef.current = null;
+    }
+    finalizingNudgeSequenceRef.current += 1;
+    setFinalizingNudgeKey(finalizingNudgeSequenceRef.current);
     finalizingNudgeTimerRef.current = window.setTimeout(() => {
       finalizingNudgeTimerRef.current = null;
       setFinalizingNudgeKey(0);
@@ -1872,6 +1894,7 @@ export default function App() {
   }
 
   function toggleVoiceMode() {
+    unlockEarcons();
     if (voiceModeRef.current === "live") {
       switchToPushToTalkMode();
     } else {
@@ -1942,7 +1965,10 @@ export default function App() {
       return [...items, entry];
     });
 
-    if (event.final) delete transcriptDraftsRef.current[event.role];
+    if (event.final) {
+      delete transcriptDraftsRef.current[event.role];
+      if (event.role === "agent") playEarcon("reply");
+    }
   }
 
   function settleTranscriptDraft(
@@ -2145,7 +2171,11 @@ export default function App() {
   function createLiveSession(sessionGeneration: number): RealtimeVoiceSession {
     return createDefaultRealtimeVoiceSession({
       callbacks: buildSessionCallbacks(sessionGeneration),
-      audio: { startMuted: stateRef.current.isMuted },
+      audio: {
+        startMuted: stateRef.current.isMuted,
+        onInputLevel: updateOrbLevel,
+        onOutputLevel: updateOrbLevel,
+      },
       systemInstruction: buildLiveHermesSystemInstruction(agentName),
       requireToolResponseForModelOutput: true,
     });
@@ -2169,6 +2199,7 @@ export default function App() {
       disconnectLiveSession(session);
       throw new Error("voice connection cancelled");
     }
+    playEarcon("session-start");
   }
 
   function nextSessionGeneration(): number {
@@ -2334,6 +2365,21 @@ export default function App() {
     return "Restoring voice connection...";
   }
 
+  function liveVoiceFailureCopy(reason: string) {
+    if (/unsupported realtime provider/i.test(reason)) return reason;
+    if (/permission|notallowed|microphone/i.test(reason))
+      return "Microphone permission is needed to use voice.";
+    if (/token=|session_id=|secret|api[_ -]?key/i.test(reason))
+      return "Voice connection had trouble. Retry.";
+    if (
+      /open timeout|socket|setup|closed before opening|network|offline/i.test(
+        reason,
+      )
+    )
+      return "Voice connection had trouble. Check the private network and retry.";
+    return "Voice connection had trouble. Retry.";
+  }
+
   function handleLiveSessionLoss(sessionGeneration: number, reason: string) {
     if (!isCurrentSessionGeneration(sessionGeneration)) return;
     if (sessionLossHandledGenerationRef.current === sessionGeneration) return;
@@ -2363,7 +2409,7 @@ export default function App() {
     const previousSession = sessionRef.current;
     sessionRef.current = null;
     if (previousSession) disconnectLiveSession(previousSession);
-    appendSystem(reason, "failed");
+    appendSystem(liveVoiceFailureCopy(reason), "failed");
     dispatch({ type: "ERROR", error: "Voice session disconnected." });
   }
 
@@ -2502,7 +2548,7 @@ export default function App() {
         return;
       }
       liveDesiredRef.current = false;
-      appendSystem(errorMessage, "failed");
+      appendSystem(liveVoiceFailureCopy(errorMessage), "failed");
       dispatch({
         type: "ERROR",
         error:
@@ -2556,11 +2602,13 @@ export default function App() {
     markCaptureNotReady();
     pressRef.current = emptyPress();
     endingRef.current = true;
-    sessionRef.current?.setHoldToTalk(false);
-    sessionRef.current?.disconnect();
+    const session = sessionRef.current;
+    session?.setHoldToTalk(false);
+    session?.disconnect();
     sessionRef.current = null;
     transcriptDraftsRef.current = {};
     void releaseWakeLock();
+    if (session) playEarcon("session-end");
     dispatch({ type: "RECOVER" });
   }
 
@@ -2657,6 +2705,7 @@ export default function App() {
   }
 
   function handlePointerDown(e: PointerEvent<HTMLButtonElement>) {
+    unlockEarcons();
     exitTextModeForOrbPress();
     if (
       e.button !== 0 ||
@@ -2811,6 +2860,7 @@ export default function App() {
     { existingUserEntryId }: { existingUserEntryId?: string } = {},
   ) {
     if (!canUsePrivateSession()) return;
+    unlockEarcons();
     const submitFocusEpoch = textFocusEpochRef.current;
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
@@ -2832,6 +2882,7 @@ export default function App() {
       };
       setEntries((items) => [...items, user]);
     }
+    playEarcon("send");
     try {
       const res = await sendText(text, entriesRef.current);
       if (isChatJobStatus(res)) {
@@ -2862,6 +2913,7 @@ export default function App() {
           at: Date.now(),
         },
       ]);
+      playEarcon("reply");
       dispatch({ type: "SPEAK" });
       window.setTimeout(() => {
         completeTextTurn(submitFocusEpoch);
@@ -2894,7 +2946,7 @@ export default function App() {
         <header className="topbar">
           <div>
             <span className="eyebrow">private voice control</span>
-            <h1>{agentName}</h1>
+            <span className="hero-agent-kicker">{agentName}</span>
           </div>
           <div
             className={`agent-connection state-${agentConnection.state}`}
@@ -2917,6 +2969,7 @@ export default function App() {
           nudging={finalizingNudgeKey > 0}
           nudgeKey={finalizingNudgeKey}
           agentName={agentName}
+          audioLevelRef={orbLevelRef}
         />
         <div className="control-row">
           {voiceMode === "live" ? (

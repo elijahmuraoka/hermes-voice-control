@@ -7,6 +7,8 @@ export interface PcmChunk {
   mimeType: typeof GEMINI_INPUT_MIME_TYPE;
 }
 
+export type AudioLevelCallback = (level: number) => void;
+
 export interface GeminiLiveAudio {
   startCapture(onChunk: (chunk: PcmChunk) => void): Promise<void>;
   stopCapture(): void;
@@ -22,6 +24,8 @@ export interface BrowserGeminiAudioOptions {
   playbackWorkletUrl?: string;
   mediaDevices?: MediaDevices;
   AudioContextCtor?: typeof AudioContext;
+  onInputLevel?: AudioLevelCallback;
+  onOutputLevel?: AudioLevelCallback;
 }
 
 const DEFAULT_CAPTURE_WORKLET = "/audio-processors/capture.worklet.js";
@@ -101,18 +105,41 @@ export function decodeGeminiOutputForPlayback(
   );
 }
 
+export function computeAudioLevel(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (const sample of samples) sum += sample * sample;
+  const rms = Math.sqrt(sum / samples.length);
+  return Math.max(0, Math.min(1, rms * 4.8));
+}
+
 export class BrowserGeminiAudio implements GeminiLiveAudio {
   private readonly captureWorkletUrl: string;
   private readonly playbackWorkletUrl: string;
   private readonly mediaDevices?: MediaDevices;
   private readonly AudioContextCtor: typeof AudioContext;
+  private readonly onInputLevel?: AudioLevelCallback;
+  private readonly onOutputLevel?: AudioLevelCallback;
   private captureContext?: AudioContext;
   private playbackContext?: AudioContext;
   private captureNode?: AudioWorkletNode;
   private playbackNode?: AudioWorkletNode;
+  private inputAnalyser?: AnalyserNode;
+  private inputLevelSamples?: Float32Array<ArrayBuffer>;
+  private inputLevelRaf: number | null = null;
+  private outputLevelTimers = new Set<number>();
+  private outputLevelTailMs = 0;
   private mediaStream?: MediaStream;
   private captureEnabled = true;
   private closed = false;
+  private readonly visibilityHandler = () => {
+    if (document.visibilityState === "hidden") {
+      this.stopInputLevelMeter();
+      this.onInputLevel?.(0);
+      return;
+    }
+    this.startInputLevelMeter();
+  };
 
   constructor(options: BrowserGeminiAudioOptions = {}) {
     const AudioContextCtor =
@@ -121,6 +148,8 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
       throw new Error("AudioContext is not available in this browser");
     this.AudioContextCtor = AudioContextCtor;
     this.mediaDevices = options.mediaDevices ?? navigator.mediaDevices;
+    this.onInputLevel = options.onInputLevel;
+    this.onOutputLevel = options.onOutputLevel;
     this.captureWorkletUrl =
       options.captureWorkletUrl ?? DEFAULT_CAPTURE_WORKLET;
     this.playbackWorkletUrl =
@@ -167,7 +196,18 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     this.mediaStream = mediaStream;
     this.captureContext = captureContext;
 
-    const source = this.captureContext.createMediaStreamSource(this.mediaStream);
+    const source = this.captureContext.createMediaStreamSource(
+      this.mediaStream,
+    );
+    if (this.onInputLevel) {
+      this.inputAnalyser = this.captureContext.createAnalyser();
+      this.inputAnalyser.fftSize = 1024;
+      this.inputLevelSamples = new Float32Array(this.inputAnalyser.fftSize);
+      source.connect(this.inputAnalyser);
+      if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", this.visibilityHandler);
+      }
+    }
     this.captureNode = new AudioWorkletNode(
       this.captureContext,
       "audio-capture-processor",
@@ -194,9 +234,18 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
       });
     };
     source.connect(this.captureNode);
+    this.startInputLevelMeter();
   }
 
   stopCapture(): void {
+    this.stopInputLevelMeter();
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+    }
+    this.onInputLevel?.(0);
+    this.inputAnalyser?.disconnect();
+    this.inputAnalyser = undefined;
+    this.inputLevelSamples = undefined;
     this.captureNode?.disconnect();
     this.captureNode = undefined;
     this.mediaStream?.getTracks().forEach((track) => track.stop());
@@ -207,6 +256,12 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
 
   setCaptureEnabled(enabled: boolean): void {
     this.captureEnabled = enabled;
+    if (enabled) {
+      this.startInputLevelMeter();
+    } else {
+      this.stopInputLevelMeter();
+      this.onInputLevel?.(0);
+    }
   }
 
   async playPcm16Base64(
@@ -221,6 +276,7 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
       playbackSampleRate,
       sourceSampleRate,
     );
+    this.scheduleOutputLevel(samples, playbackSampleRate);
     node.port.postMessage(samples, [samples.buffer]);
   }
 
@@ -233,6 +289,7 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
 
   interrupt(): void {
     this.playbackNode?.port.postMessage("interrupt");
+    this.clearOutputLevelMeter();
   }
 
   close(): void {
@@ -260,6 +317,95 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     );
     this.playbackNode.connect(this.playbackContext.destination);
     return this.playbackNode;
+  }
+
+  private startInputLevelMeter(): void {
+    if (
+      !this.onInputLevel ||
+      !this.inputAnalyser ||
+      !this.inputLevelSamples ||
+      !this.captureEnabled ||
+      this.inputLevelRaf !== null ||
+      (typeof document !== "undefined" && document.visibilityState === "hidden")
+    )
+      return;
+    const tick = () => {
+      if (
+        !this.onInputLevel ||
+        !this.inputAnalyser ||
+        !this.inputLevelSamples ||
+        !this.captureEnabled ||
+        (typeof document !== "undefined" && document.visibilityState === "hidden")
+      ) {
+        this.inputLevelRaf = null;
+        return;
+      }
+      this.inputAnalyser.getFloatTimeDomainData(this.inputLevelSamples);
+      this.onInputLevel(computeAudioLevel(this.inputLevelSamples));
+      this.inputLevelRaf = window.requestAnimationFrame(tick);
+    };
+    this.inputLevelRaf = window.requestAnimationFrame(tick);
+  }
+
+  private stopInputLevelMeter(): void {
+    if (this.inputLevelRaf === null) return;
+    window.cancelAnimationFrame(this.inputLevelRaf);
+    this.inputLevelRaf = null;
+  }
+
+  private scheduleOutputLevel(
+    samples: Float32Array,
+    playbackSampleRate: number,
+  ): void {
+    if (!this.onOutputLevel || samples.length === 0 || playbackSampleRate <= 0)
+      return;
+
+    const segmentMs = 80;
+    const now = performance.now();
+    const startAt = Math.max(now, this.outputLevelTailMs);
+    const startDelayMs = Math.max(0, startAt - now);
+    const samplesPerSegment = Math.max(
+      1,
+      Math.round((playbackSampleRate * segmentMs) / 1000),
+    );
+    const durationMs = (samples.length / playbackSampleRate) * 1000;
+    this.outputLevelTailMs = startAt + durationMs;
+
+    for (let offset = 0; offset < samples.length; offset += samplesPerSegment) {
+      const segmentIndex = Math.floor(offset / samplesPerSegment);
+      const level = computeAudioLevel(
+        samples.subarray(
+          offset,
+          Math.min(offset + samplesPerSegment, samples.length),
+        ),
+      );
+      this.setOutputLevelTimer(startDelayMs + segmentIndex * segmentMs, () => {
+        this.onOutputLevel?.(level);
+      });
+    }
+
+    const expectedTail = this.outputLevelTailMs;
+    this.setOutputLevelTimer(startDelayMs + durationMs + segmentMs, () => {
+      if (this.outputLevelTailMs <= expectedTail) {
+        this.outputLevelTailMs = 0;
+        this.onOutputLevel?.(0);
+      }
+    });
+  }
+
+  private setOutputLevelTimer(delayMs: number, callback: () => void): void {
+    const timer = window.setTimeout(() => {
+      this.outputLevelTimers.delete(timer);
+      if (!this.closed) callback();
+    }, delayMs);
+    this.outputLevelTimers.add(timer);
+  }
+
+  private clearOutputLevelMeter(): void {
+    for (const timer of this.outputLevelTimers) window.clearTimeout(timer);
+    this.outputLevelTimers.clear();
+    this.outputLevelTailMs = 0;
+    this.onOutputLevel?.(0);
   }
 }
 

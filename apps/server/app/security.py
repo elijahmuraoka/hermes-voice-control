@@ -17,9 +17,10 @@ class SessionRecord:
     expires_at: datetime
 
 class AuthManager:
-    def __init__(self, pin: str, ttl_seconds: int, store: Store):
+    def __init__(self, pin: str, ttl_seconds: int, store: Store, device_ttl_seconds: int = 7_776_000):
         self._pin_hash = hash_secret(pin)
         self._ttl_seconds = ttl_seconds
+        self._device_ttl_seconds = device_ttl_seconds
         self._store = store
         self._failures: dict[str, list[float]] = {}
 
@@ -49,6 +50,25 @@ class AuthManager:
         with self._store.connect() as conn:
             conn.execute("UPDATE sessions SET revoked_at=? WHERE id_hash=?", (now_iso(), hash_secret(token)))
 
+    def create_device(self) -> SessionRecord:
+        token = secrets.token_urlsafe(32)
+        token_hash = hash_secret(token)
+        expires = datetime.now(UTC) + timedelta(seconds=self._device_ttl_seconds)
+        with self._store.connect() as conn:
+            conn.execute("INSERT INTO devices(id_hash, created_at, expires_at) VALUES (?, ?, ?)", (token_hash, now_iso(), expires.isoformat()))
+        return SessionRecord(token=token, token_hash=token_hash, expires_at=expires)
+
+    def validate_device(self, token: str) -> bool:
+        with self._store.connect() as conn:
+            row = conn.execute("SELECT * FROM devices WHERE id_hash=?", (hash_secret(token),)).fetchone()
+        if not row or row["revoked_at"]:
+            return False
+        return datetime.fromisoformat(row["expires_at"]) >= datetime.now(UTC)
+
+    def revoke_device(self, token: str) -> None:
+        with self._store.connect() as conn:
+            conn.execute("UPDATE devices SET revoked_at=? WHERE id_hash=?", (now_iso(), hash_secret(token)))
+
     def validate(self, authorization: str | None = Header(default=None), hvc_session: str | None = Cookie(default=None)) -> str:
         token = hvc_session
         if authorization and authorization.lower().startswith("bearer "):
@@ -67,3 +87,7 @@ class AuthManager:
     @staticmethod
     def set_cookie(response: Response, token: str, expires_at: datetime, secure: bool = False) -> None:
         response.set_cookie("hvc_session", token, httponly=True, samesite="lax", secure=secure, expires=expires_at)
+
+    @staticmethod
+    def set_device_cookie(response: Response, token: str, expires_at: datetime, secure: bool = False) -> None:
+        response.set_cookie("hvc_device", token, httponly=True, samesite="lax", secure=secure, expires=expires_at)

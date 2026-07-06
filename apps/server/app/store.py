@@ -27,6 +27,7 @@ class Store:
         with self.connect() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS sessions (id_hash TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT);
+                CREATE TABLE IF NOT EXISTS devices (id_hash TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT);
                 CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, session_hash TEXT NOT NULL, tool TEXT NOT NULL, request_id TEXT, arguments_json TEXT NOT NULL, summary TEXT NOT NULL, risk TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, approved_at TEXT, rejected_at TEXT, executed_at TEXT);
                 CREATE TABLE IF NOT EXISTS tool_call_cancellations (session_hash TEXT NOT NULL, request_id TEXT NOT NULL, canceled_at TEXT NOT NULL, PRIMARY KEY(session_hash, request_id));
                 CREATE TABLE IF NOT EXISTS chat_jobs (id TEXT PRIMARY KEY, session_hash TEXT NOT NULL, request_id TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, cancelled_at TEXT, cancellation_requested INTEGER NOT NULL DEFAULT 0, result_json TEXT, error_json TEXT);

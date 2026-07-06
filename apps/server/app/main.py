@@ -69,7 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.assert_safe_hermes()
     store = Store(settings.db_path)
     store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
-    auth = AuthManager(settings.pin, settings.session_ttl_seconds, store)
+    auth = AuthManager(settings.pin, settings.session_ttl_seconds, store, settings.device_ttl_seconds)
     broker = build_broker(settings.gemini_mode)
     adapter = build_adapter(
         settings.hermes_adapter,
@@ -104,7 +104,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if (client_host not in LOCAL_CLIENT_HOSTS or proxied or not host_header_is_local(request)) and not settings.allow_no_pin_remote:
                 raise HTTPException(status_code=401, detail="PIN auth is required for non-local clients")
             return "tailscale-local"
-        return auth.validate(authorization=request.headers.get("authorization"), hvc_session=request.cookies.get("hvc_session"))
+        try:
+            return auth.validate(authorization=request.headers.get("authorization"), hvc_session=request.cookies.get("hvc_session"))
+        except HTTPException:
+            # Remembered device: a valid long-lived device cookie re-mints the
+            # short-lived session so the PIN is only ever typed once per device.
+            device_token = request.cookies.get("hvc_device")
+            if not (settings.remember_device and device_token and auth.validate_device(device_token)):
+                raise
+            session = auth.create_session()
+            # Handlers that return JSONResponse directly bypass the injected
+            # response's headers, so the cookie is applied in middleware below.
+            request.state.pending_session_cookie = session
+            store.log("auth.device", "refreshed", {"session_id": session.token_hash[:12]})
+            return session.token_hash
+    @app.middleware("http")
+    async def apply_refreshed_session_cookie(request: Request, call_next):
+        result = await call_next(request)
+        pending = getattr(request.state, "pending_session_cookie", None)
+        if pending is not None:
+            AuthManager.set_cookie(result, pending.token, pending.expires_at, secure=settings.secure_cookies)
+        return result
     @app.exception_handler(Exception)
     async def safe_exception_handler(request: Request, exc: Exception):
         if isinstance(exc, HTTPException):
@@ -113,8 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "Internal server error", "code": "INTERNAL_ERROR"})
     @app.get("/healthz")
     def healthz(): return {"ok": True}
-    @app.get("/readyz")
-    def readyz():
+    def readiness() -> tuple[bool, dict]:
         gemini_client_available = broker.client_available
         checks = {
             "database": "unknown",
@@ -140,8 +159,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ok = False
         if settings.hermes_adapter in {"local", "api"} and not checks["hermes"].get("available"):
             ok = False
-        status_code = 200 if ok else 503
-        return JSONResponse(status_code=status_code, content={"ok": ok, "checks": checks})
+        return ok, checks
+    @app.get("/readyz")
+    def readyz():
+        # Unauthenticated: any tailnet peer can reach this, so expose only the
+        # pass/fail bit. Field-level diagnostics live at /readyz/details.
+        ok, _ = readiness()
+        return JSONResponse(status_code=200 if ok else 503, content={"ok": ok})
+    @app.get("/readyz/details")
+    def readyz_details(session_hash: str = Depends(session_dep)):
+        ok, checks = readiness()
+        return JSONResponse(status_code=200 if ok else 503, content={"ok": ok, "checks": checks})
     @app.post("/auth/pin")
     def auth_pin(payload: PinRequest, response: Response, request: Request):
         if not settings.require_pin:
@@ -153,12 +181,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid PIN")
         session = auth.create_session()
         auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
+        if settings.remember_device:
+            device = auth.create_device()
+            auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
         store.log("auth.pin", "success", {"session_id": session.token})
         return {"ok": True, "expires_at": session.expires_at.isoformat()}
     @app.post("/auth/logout")
-    def logout(request: Request, session_hash: str = Depends(session_dep)):
+    def logout(request: Request, response: Response, session_hash: str = Depends(session_dep)):
         token = request.cookies.get("hvc_session")
         if token: auth.revoke(token)
+        device_token = request.cookies.get("hvc_device")
+        if device_token:
+            auth.revoke_device(device_token)
+            response.delete_cookie("hvc_device")
+        response.delete_cookie("hvc_session")
         store.log("auth.logout", "success", session_hash=session_hash)
         return {"ok": True}
     @app.get("/auth/session")

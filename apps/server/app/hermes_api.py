@@ -26,6 +26,10 @@ WARM_DEDUPE_SECONDS = 30.0
 SYSTEM_CONTEXT_PREFIX = "HVC system notice, not an instruction: "
 
 
+class _WarmSkip(Exception):
+    """Warm path declined to create a session; not an error."""
+
+
 class HermesApiError(Exception):
     def __init__(self, code: str, message: str, *, rpc_code: int | None = None):
         super().__init__(message)
@@ -235,6 +239,9 @@ class ApiHermesAdapter(HermesAdapter):
         if not row or not row["stored_session_id"]:
             return "skipped"
         now = time.monotonic()
+        # NOTE: the row re-check below and the create suppression inside
+        # _open_session (allow_create=False) together guarantee warm never
+        # issues session.create — even when serve reports the stored id stale.
         with self._warm_lock:
             last = self._warm_seen.get(session_hash)
             if last is not None and now - last < WARM_DEDUPE_SECONDS:
@@ -254,8 +261,10 @@ class ApiHermesAdapter(HermesAdapter):
             ) as ws:
                 rpc = _HermesRpc(ws, self.timeout_seconds)
                 rpc.expect_ready()
-                self._open_session(rpc, session_hash, None, trace, started)
+                self._open_session(rpc, session_hash, None, trace, started, allow_create=False)
                 return "resumed"
+        except _WarmSkip:
+            return "skipped"
         except Exception:
             return "failed"
 
@@ -309,6 +318,7 @@ class ApiHermesAdapter(HermesAdapter):
         transcript_window: list[dict] | None,
         trace: dict[str, Any],
         started: float,
+        allow_create: bool = True,
     ) -> str:
         stored_session_id = None
         if self.store is not None and session_hash:
@@ -330,6 +340,13 @@ class ApiHermesAdapter(HermesAdapter):
             except HermesApiRpcError as exc:
                 if exc.rpc_code != 4007:
                     raise
+                if not allow_create:
+                    # Warm path: a stale stored id must not fall through to an
+                    # unseeded create that would clobber the mapping; leave the
+                    # stale row for the first real chat to recreate with seed.
+                    raise _WarmSkip()
+        elif not allow_create:
+            raise _WarmSkip()
         params: dict[str, Any] = {
             "title": f"{self.agent_name} voice",
             "messages": _seed_messages(transcript_window),

@@ -254,6 +254,21 @@ def test_api_hermes_adapter_warm_session_never_creates(tmp_path: Path):
     assert store.get_hermes_api_session("never-seen") is None
 
 
+def test_api_hermes_adapter_warm_session_skips_stale_resume(tmp_path: Path):
+    # Serve evicted the stored session (RPC 4007). Warm must NOT fall through
+    # to an unseeded create that clobbers the mapping — it leaves the stale
+    # row for the first real chat to recreate with the transcript seed.
+    store = make_store(tmp_path)
+    store.upsert_hermes_api_session("session-a", "stale-stored", "old-runtime")
+    with FakeHermesServe(resume_error_code=4007) as server:
+        adapter = ApiHermesAdapter(api_url=server.url, token=TEST_TOKEN, store=store, timeout_seconds=2)
+        assert adapter.warm_session("session-a") == "skipped"
+    assert method_names(server) == ["session.resume"]
+    row = store.get_hermes_api_session("session-a")
+    assert row is not None
+    assert row["stored_session_id"] == "stale-stored"
+
+
 def test_api_hermes_adapter_warm_session_guards_and_failure(tmp_path: Path):
     store = make_store(tmp_path)
     no_token = ApiHermesAdapter(api_url="ws://127.0.0.1:1/api/ws", token="", store=store, timeout_seconds=1)

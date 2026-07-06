@@ -224,6 +224,23 @@ def test_agent_principal_stable_across_session_rotation(tmp_path):
     assert len(seen) == 2
     assert seen[0] == seen[1]
     assert seen[0].startswith("dev-")
+def test_pin_reentry_keeps_existing_device(tmp_path):
+    client = make_pin_client(tmp_path)
+    spy = _WarmSpyAdapter()
+    client.app.state.tools.adapter = spy
+    login(client)
+    assert spy.warmed.wait(2)
+    device = client.cookies.get("hvc_device")
+    first_principal = spy.calls[0]
+    spy.warmed.clear()
+    # Re-entering the PIN must not rotate the device (agent memory + job
+    # ownership are keyed to it).
+    res = client.post("/auth/pin", json={"pin": TEST_PIN})
+    assert res.status_code == 200
+    assert "hvc_device" not in res.headers.get("set-cookie", "")
+    assert client.cookies.get("hvc_device") == device
+    assert spy.warmed.wait(2)
+    assert spy.calls[-1] == first_principal
 def test_base_adapter_warm_session_is_noop():
     assert HermesAdapter().warm_session("abc") == "skipped"
 def test_readyz_unauthenticated_is_minimal(tmp_path):

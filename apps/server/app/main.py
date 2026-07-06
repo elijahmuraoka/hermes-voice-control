@@ -213,9 +213,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         auth.set_cookie(response, session.token, session.expires_at, secure=settings.secure_cookies)
         principal = session.token_hash
         if settings.remember_device:
-            device = auth.create_device()
-            auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
-            principal = f"dev-{hash_secret(device.token)}"
+            # Re-entering the PIN with a still-valid device cookie must not
+            # rotate the device: the device keys agent memory and job
+            # ownership, and rotation would silently reset both.
+            existing = device_principal(request)
+            if existing:
+                principal = existing
+            else:
+                device = auth.create_device()
+                auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
+                principal = f"dev-{hash_secret(device.token)}"
         store.log("auth.pin", "success", {"session_id": session.token})
         warm_hermes_session_async(principal)
         return {"ok": True, "expires_at": session.expires_at.isoformat()}

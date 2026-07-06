@@ -38,6 +38,11 @@ interface BrowserWindowWithDiagnostics {
   __HVC_DIAGNOSTICS__?: BrowserDiagnostics;
 }
 
+interface BrowserWindowWithHoldSmokeStats {
+  __hvcGetUserMediaCalls?: number;
+  __hvcGetUserMediaStops?: number;
+}
+
 test.use({
   permissions: ["microphone"],
   launchOptions: {
@@ -329,7 +334,27 @@ test("basic Hold submits recognized speech after normal pointer release", async 
     const win = window as typeof window & {
       SpeechRecognition?: new () => unknown;
       webkitSpeechRecognition?: new () => unknown;
-    };
+    } & BrowserWindowWithHoldSmokeStats;
+    win.__hvcGetUserMediaCalls = 0;
+    win.__hvcGetUserMediaStops = 0;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          win.__hvcGetUserMediaCalls = (win.__hvcGetUserMediaCalls ?? 0) + 1;
+          return {
+            getTracks: () => [
+              {
+                stop: () => {
+                  win.__hvcGetUserMediaStops =
+                    (win.__hvcGetUserMediaStops ?? 0) + 1;
+                },
+              },
+            ],
+          };
+        },
+      },
+    });
     class MockSpeechRecognition {
       continuous = false;
       interimResults = false;
@@ -400,6 +425,14 @@ test("basic Hold submits recognized speech after normal pointer release", async 
   await expect(
     page.getByRole("article").filter({ hasText: "browser smoke phrase" }),
   ).toBeVisible();
+  const permissionStats = await page.evaluate(() => {
+    const win = window as Window & BrowserWindowWithHoldSmokeStats;
+    return {
+      calls: win.__hvcGetUserMediaCalls ?? 0,
+      stops: win.__hvcGetUserMediaStops ?? 0,
+    };
+  });
+  expect(permissionStats).toEqual({ calls: 1, stops: 1 });
   expect(chatRequests).toEqual([
     expect.objectContaining({ message: "browser smoke phrase", job: true }),
   ]);

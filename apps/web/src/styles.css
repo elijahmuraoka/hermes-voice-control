@@ -119,16 +119,6 @@ input {
   font-size: 12px;
 }
 
-.hero-agent-kicker {
-  display: block;
-  margin-top: 8px;
-  color: rgba(246, 240, 232, 0.72);
-  font-family: Georgia, serif;
-  font-size: 20px;
-  line-height: 1.05;
-  letter-spacing: 0.02em;
-}
-
 .agent-connection {
   max-width: 230px;
   display: inline-flex;
@@ -203,6 +193,15 @@ input {
 .transcript-composer button:active,
 .voice-orb:active {
   transform: scale(0.96);
+}
+
+.control-row button:focus-visible,
+.auth-card button:focus-visible,
+.drawer-tab:focus-visible,
+.transcript-composer button:focus-visible {
+  outline: 2px solid rgba(157, 232, 255, 0.82);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(157, 232, 255, 0.11);
 }
 
 .auth-gate {
@@ -530,8 +529,27 @@ input {
   font-size: 14px;
 }
 
+.orb-notice {
+  width: min(100%, 420px);
+  margin-top: 14px;
+  border: 1px solid rgba(214, 179, 106, 0.28);
+  border-radius: 18px;
+  background: rgba(30, 24, 14, 0.68);
+  color: rgba(246, 240, 232, 0.9);
+  padding: 10px 13px;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.orb-notice.tone-warning {
+  border-color: rgba(255, 143, 112, 0.34);
+  background: rgba(42, 18, 11, 0.72);
+}
+
 .retry-pill {
-  min-height: 42px;
+  min-height: 44px;
   margin-top: 14px;
   border: 1px solid rgba(255, 143, 112, 0.34);
   border-radius: 999px;
@@ -738,7 +756,7 @@ input {
 }
 
 .message-action {
-  min-height: 34px;
+  min-height: 44px;
   margin-top: 12px;
   display: inline-flex;
   align-items: center;
@@ -856,17 +874,6 @@ input {
   text-wrap: pretty;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.001ms !important;
-  }
-}
-
 @keyframes breathe {
   50% {
     transform: scale(1.08);
@@ -943,9 +950,6 @@ input {
     border-radius: 28px;
     padding: 20px 16px calc(env(safe-area-inset-bottom) + 86px);
   }
-  .hero-agent-kicker {
-    font-size: 18px;
-  }
   .voice-orb {
     width: 72vw;
     height: 72vw;
@@ -1011,10 +1015,6 @@ input {
   }
   .eyebrow {
     font-size: 11px;
-  }
-  .hero-agent-kicker {
-    font-size: 17px;
-    max-width: 100%;
   }
   .state-copy p {
     font-size: 24px;

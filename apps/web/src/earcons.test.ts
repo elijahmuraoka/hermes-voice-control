@@ -99,6 +99,23 @@ describe("earcons", () => {
     expect(context.oscillators).toHaveLength(2);
   });
 
+  it("resumes a suspended unlocked context before playing", async () => {
+    const context = new FakeAudioContext();
+    const controller = createEarconController({
+      AudioContextCtor: function () {
+        return context;
+      } as unknown as typeof AudioContext,
+    });
+
+    await controller.unlock();
+    context.state = "suspended";
+    controller.play("reply");
+    await Promise.resolve();
+
+    expect(context.resume).toHaveBeenCalledTimes(2);
+    expect(context.oscillators).toHaveLength(1);
+  });
+
   it("keeps unlock as a no-op when AudioContext construction fails", async () => {
     class ThrowingAudioContext {
       constructor() {

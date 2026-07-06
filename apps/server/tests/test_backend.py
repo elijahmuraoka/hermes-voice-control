@@ -163,6 +163,38 @@ def test_logout_revokes_device_token(tmp_path):
     client.cookies.clear()
     client.cookies.set("hvc_device", device)
     assert client.get("/auth/session").status_code == 401
+class _WarmSpyAdapter(HermesAdapter):
+    def __init__(self):
+        self.calls: list = []
+        self.warmed = threading.Event()
+
+    def warm_session(self, session_hash=None):
+        self.calls.append(session_hash)
+        self.warmed.set()
+        return True
+def test_pin_unlock_warms_hermes_session(tmp_path):
+    client = make_pin_client(tmp_path)
+    spy = _WarmSpyAdapter()
+    client.app.state.tools.adapter = spy
+    login(client)
+    assert spy.warmed.wait(2)
+    assert len(spy.calls) == 1
+    assert isinstance(spy.calls[0], str) and len(spy.calls[0]) == 64
+def test_device_refresh_warms_new_hermes_session(tmp_path):
+    client = make_pin_client(tmp_path)
+    spy = _WarmSpyAdapter()
+    client.app.state.tools.adapter = spy
+    login(client)
+    assert spy.warmed.wait(2)
+    first = spy.calls[0]
+    spy.warmed.clear()
+    client.cookies.delete("hvc_session")
+    assert client.get("/auth/session").status_code == 200
+    assert spy.warmed.wait(2)
+    assert len(spy.calls) == 2
+    assert spy.calls[1] != first
+def test_base_adapter_warm_session_is_noop():
+    assert HermesAdapter().warm_session("abc") is False
 def test_readyz_unauthenticated_is_minimal(tmp_path):
     res = make_client(tmp_path).get("/readyz")
     assert res.status_code == 200

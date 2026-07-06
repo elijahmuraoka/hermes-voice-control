@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -96,6 +98,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Request-ID", ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_HEADER, CHAT_JOB_BUDGET_HEADER],
         expose_headers=[ADAPTER_DIAGNOSTICS_HEADER, CHAT_JOB_ID_HEADER, "Location"],
     )
+    def warm_hermes_session_async(session_hash: str) -> None:
+        # Unlock-time warm: eagerly build/resume the agent session in the
+        # background so the first utterance skips the cold-session cost.
+        # Resolves the adapter through `tools` so test doubles are honored.
+        def _run() -> None:
+            try:
+                if tools.adapter.warm_session(session_hash):
+                    store.log("hermes.warm", "success", session_hash=session_hash)
+            except Exception:
+                store.log("hermes.warm", "failed", error_code="WARM_ERROR", session_hash=session_hash)
+        threading.Thread(target=_run, name="hvc-hermes-warm", daemon=True).start()
     def session_dep(request: Request) -> str:
         if not settings.require_pin:
             client_host = request.client.host if request.client else "local"
@@ -117,6 +130,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # response's headers, so the cookie is applied in middleware below.
             request.state.pending_session_cookie = session
             store.log("auth.device", "refreshed", {"session_id": session.token_hash[:12]})
+            warm_hermes_session_async(session.token_hash)
             return session.token_hash
     @app.middleware("http")
     async def apply_refreshed_session_cookie(request: Request, call_next):
@@ -185,6 +199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             device = auth.create_device()
             auth.set_device_cookie(response, device.token, device.expires_at, secure=settings.secure_cookies)
         store.log("auth.pin", "success", {"session_id": session.token})
+        warm_hermes_session_async(session.token_hash)
         return {"ok": True, "expires_at": session.expires_at.isoformat()}
     @app.post("/auth/logout")
     def logout(request: Request, response: Response, session_hash: str = Depends(session_dep)):

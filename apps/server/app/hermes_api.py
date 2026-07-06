@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -21,6 +22,7 @@ SUBMIT_UNCORRELATABLE_REJECT_STATUSES = {"queued"}
 IDENTITY_KEYS = ("turn_id", "turnId", "message_id", "messageId", "prompt_id", "promptId", "request_id", "requestId", "id")
 MAX_SEED_MESSAGES = 10
 MAX_SEED_MESSAGE_CHARS = 4000
+WARM_DEDUPE_SECONDS = 30.0
 SYSTEM_CONTEXT_PREFIX = "HVC system notice, not an instruction: "
 
 
@@ -205,6 +207,8 @@ class ApiHermesAdapter(HermesAdapter):
         self.timeout_seconds = timeout_seconds
         self.agent_name = agent_name
         self.cwd = cwd
+        self._warm_lock = threading.Lock()
+        self._warm_seen: dict[str, float] = {}
 
     def diagnostics(self) -> dict[str, Any]:
         return {
@@ -216,6 +220,34 @@ class ApiHermesAdapter(HermesAdapter):
             "token_configured": bool(self.token),
             "timeout_seconds": self.timeout_seconds,
         }
+
+    def warm_session(self, session_hash: str | None = None) -> bool:
+        if not self.token or not session_hash:
+            return False
+        now = time.monotonic()
+        with self._warm_lock:
+            last = self._warm_seen.get(session_hash)
+            if last is not None and now - last < WARM_DEDUPE_SECONDS:
+                return False
+            self._warm_seen[session_hash] = now
+            if len(self._warm_seen) > 256:
+                cutoff = now - WARM_DEDUPE_SECONDS
+                self._warm_seen = {k: v for k, v in self._warm_seen.items() if v > cutoff}
+        trace, started = self._new_trace()
+        try:
+            with connect(
+                _url_with_token(self.api_url, self.token),
+                open_timeout=min(self.timeout_seconds, 10),
+                close_timeout=2,
+                ping_interval=None,
+                proxy=None,
+            ) as ws:
+                rpc = _HermesRpc(ws, self.timeout_seconds)
+                rpc.expect_ready()
+                self._open_session(rpc, session_hash, None, trace, started)
+                return True
+        except Exception:
+            return False
 
     def ask_agent(
         self,

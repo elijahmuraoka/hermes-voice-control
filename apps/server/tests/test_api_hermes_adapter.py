@@ -220,6 +220,29 @@ def test_api_hermes_adapter_does_not_spin_when_event_precedes_rpc_response(tmp_p
     assert partials == ["Ear", "Early"]
 
 
+def test_api_hermes_adapter_warm_session_creates_and_dedupes(tmp_path: Path):
+    store = make_store(tmp_path)
+    with FakeHermesServe() as server:
+        adapter = ApiHermesAdapter(api_url=server.url, token=TEST_TOKEN, store=store, timeout_seconds=2)
+        assert adapter.warm_session("session-a") is True
+        # A repeat within the dedupe window never reconnects.
+        assert adapter.warm_session("session-a") is False
+    assert method_names(server) == ["session.create"]
+    row = store.get_hermes_api_session("session-a")
+    assert row is not None
+    assert row["stored_session_id"] == "stored-1"
+
+
+def test_api_hermes_adapter_warm_session_requires_token_and_hash(tmp_path: Path):
+    no_token = ApiHermesAdapter(api_url="ws://127.0.0.1:1/api/ws", token="", store=None, timeout_seconds=1)
+    assert no_token.warm_session("session-a") is False
+    no_hash = ApiHermesAdapter(api_url="ws://127.0.0.1:1/api/ws", token="t", store=None, timeout_seconds=1)
+    assert no_hash.warm_session(None) is False
+    # Unreachable serve fails soft.
+    unreachable = ApiHermesAdapter(api_url="ws://127.0.0.1:1/api/ws", token="t", store=None, timeout_seconds=1)
+    assert unreachable.warm_session("session-b") is False
+
+
 def test_api_hermes_adapter_resumes_stored_session(tmp_path: Path):
     store = make_store(tmp_path)
     store.upsert_hermes_api_session("session-a", "stored-existing", "old-runtime")

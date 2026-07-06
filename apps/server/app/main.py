@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import struct
 import threading
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -9,7 +12,7 @@ from pydantic import BaseModel, Field
 from .adapters import build_adapter
 from .chat_jobs import ChatJobService
 from .config import CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX, CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN, LOCAL_CLIENT_HOSTS, Settings
-from .gemini import build_broker
+from .gemini import build_broker, build_transcriber
 from .security import AuthManager, hash_secret
 from .store import Store
 from .tools import ADAPTER_DIAGNOSTICS_HEADER, ADAPTER_DIAGNOSTICS_RESPONSE_KEY, ToolCallRequest, ToolCancelRequest, ToolService, adapter_diagnostics_headers
@@ -23,11 +26,22 @@ class TextMessage(BaseModel):
     transcript_window: list[dict] = Field(default_factory=list)
     job: bool = False
     interactive_budget_ms: int | None = Field(default=None, ge=CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN, le=CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX)
+class SttTranscribeRequest(BaseModel):
+    audio_chunks_base64: list[str] = Field(default_factory=list, max_length=4096)
+    audio_base64: str | None = None
+    mime_type: str = "audio/pcm;rate=16000"
+    sample_rate: int = Field(default=16_000, ge=8_000, le=48_000)
+    fallback_transcript: str = ""
 
 LOCAL_HOST_HEADERS = {"127.0.0.1", "localhost", "::1", "testserver"}
 CHAT_JOB_HEADER = "X-HVC-Chat-Job"
 CHAT_JOB_BUDGET_HEADER = "X-HVC-Chat-Budget-Ms"
 CHAT_JOB_ID_HEADER = "X-HVC-Chat-Job-Id"
+STT_PCM_MIME_TYPE = "audio/pcm;rate=16000"
+STT_WAV_MIME_TYPE = "audio/wav"
+STT_SAMPLE_RATE = 16_000
+STT_MAX_AUDIO_BYTES = 2_100_000
+STT_MAX_BASE64_CHARS = 2_900_000
 
 
 def host_header_is_local(request: Request) -> bool:
@@ -63,6 +77,84 @@ def chat_job_budget_ms(payload: TextMessage, request: Request, settings: Setting
         raise HTTPException(status_code=422, detail="Invalid chat job budget")
     return parsed
 
+def decoded_base64_length(value: str) -> int:
+    stripped = value.strip()
+    padding = len(stripped) - len(stripped.rstrip("="))
+    return max(0, (len(stripped) * 3) // 4 - padding)
+
+def decode_audio_base64(value: str) -> bytes:
+    stripped = value.strip()
+    if not stripped:
+        raise HTTPException(status_code=422, detail="Audio payload is required")
+    if len(stripped) > STT_MAX_BASE64_CHARS or decoded_base64_length(stripped) > STT_MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio payload is too large")
+    try:
+        decoded = base64.b64decode(stripped, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Audio payload must be base64") from exc
+    if len(decoded) > STT_MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio payload is too large")
+    if not decoded:
+        raise HTTPException(status_code=422, detail="Audio payload is required")
+    return decoded
+
+def decode_audio_chunks_base64(values: list[str]) -> bytes:
+    chunks: list[bytes] = []
+    estimated_total = 0
+    total = 0
+    for value in values:
+        stripped = value.strip()
+        if not stripped:
+            raise HTTPException(status_code=422, detail="Audio payload is required")
+        estimated_total += decoded_base64_length(stripped)
+        if estimated_total > STT_MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Audio payload is too large")
+        chunk = decode_audio_base64(stripped)
+        total += len(chunk)
+        if total > STT_MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Audio payload is too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+def wav_from_pcm16(pcm: bytes, sample_rate: int) -> bytes:
+    if sample_rate != STT_SAMPLE_RATE:
+        raise HTTPException(status_code=422, detail="Audio sample rate must be 16000")
+    if len(pcm) % 2:
+        raise HTTPException(status_code=422, detail="PCM16 audio must have an even byte length")
+    byte_rate = sample_rate * 2
+    data_size = len(pcm)
+    return b"".join(
+        [
+            b"RIFF",
+            struct.pack("<I", 36 + data_size),
+            b"WAVEfmt ",
+            struct.pack("<IHHIIHH", 16, 1, 1, sample_rate, byte_rate, 2, 16),
+            b"data",
+            struct.pack("<I", data_size),
+            pcm,
+        ]
+    )
+
+def stt_audio_from_payload(payload: SttTranscribeRequest) -> tuple[bytes, str]:
+    if payload.audio_chunks_base64:
+        if payload.mime_type != STT_PCM_MIME_TYPE:
+            raise HTTPException(status_code=415, detail="Hold-to-talk STT expects PCM16 16kHz audio")
+        return wav_from_pcm16(decode_audio_chunks_base64(payload.audio_chunks_base64), payload.sample_rate), STT_WAV_MIME_TYPE
+    if payload.audio_base64:
+        if payload.mime_type != STT_WAV_MIME_TYPE:
+            raise HTTPException(status_code=415, detail="Audio upload must be audio/wav")
+        audio = decode_audio_base64(payload.audio_base64)
+        if not (audio.startswith(b"RIFF") and audio[8:12] == b"WAVE"):
+            raise HTTPException(status_code=422, detail="Audio payload must be a WAV file")
+        return audio, STT_WAV_MIME_TYPE
+    raise HTTPException(status_code=422, detail="Audio payload is required")
+
+def stt_runtime_error_detail(exc: RuntimeError) -> str:
+    detail = str(exc)
+    if detail in {"Gemini API key is not configured", "google-genai is not installed"}:
+        return detail
+    return "Speech transcription is unavailable"
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.assert_safe_bind()
@@ -73,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
     auth = AuthManager(settings.pin, settings.session_ttl_seconds, store, settings.device_ttl_seconds)
     broker = build_broker(settings.gemini_mode)
+    transcriber = build_transcriber(settings.gemini_mode, settings.stt_provider)
     adapter = build_adapter(
         settings.hermes_adapter,
         settings.hermes_bin,
@@ -90,6 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.store = store
     app.state.tools = tools
     app.state.chat_jobs = chat_jobs
+    app.state.transcriber = transcriber
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.frontend_origins),
@@ -172,6 +266,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "gemini_voice_name": getattr(broker, "voice_name", None),
             "gemini_api_key_configured": broker.api_key_configured,
             "gemini_client_available": gemini_client_available,
+            "stt_provider": transcriber.provider,
             "hermes_adapter": settings.hermes_adapter,
             "hermes": adapter.diagnostics(),
             "pin_required": settings.require_pin,
@@ -251,6 +346,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/gemini/status")
     def gemini_status(session_hash: str = Depends(session_dep)):
         return {"mode": broker.mode, "api_key_configured": broker.api_key_configured}
+    @app.post("/stt/transcribe")
+    def stt_transcribe(payload: SttTranscribeRequest, session_hash: str = Depends(session_dep)):
+        audio, mime_type = stt_audio_from_payload(payload)
+        try:
+            result = transcriber.transcribe(
+                audio,
+                mime_type,
+                fallback_transcript=payload.fallback_transcript,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=stt_runtime_error_detail(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Speech transcription failed") from exc
+        return {
+            "transcript": result.transcript,
+            "provider": result.provider,
+            "model": result.model,
+            "fallback": result.fallback,
+        }
     @app.get("/tools")
     def list_tools(session_hash: str = Depends(session_dep)): return {"tools": tools.list_tools()}
     @app.post("/tools/call")

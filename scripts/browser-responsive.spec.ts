@@ -83,6 +83,18 @@ async function stubUnlockedSession(page: Page) {
       body: JSON.stringify({ authenticated: true }),
     });
   });
+  await page.route("**/stt/transcribe", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        transcript: "browser smoke phrase",
+        provider: "gemini",
+        model: "gemini-smoke",
+        fallback: false,
+      }),
+    });
+  });
 }
 
 async function waitForDrawerOpen(page: Page) {
@@ -432,7 +444,7 @@ test("basic Hold submits recognized speech after normal pointer release", async 
       stops: win.__hvcGetUserMediaStops ?? 0,
     };
   });
-  expect(permissionStats).toEqual({ calls: 1, stops: 1 });
+  expect(permissionStats).toEqual({ calls: 2, stops: 2 });
   expect(chatRequests).toEqual([
     expect.objectContaining({ message: "browser smoke phrase", job: true }),
   ]);

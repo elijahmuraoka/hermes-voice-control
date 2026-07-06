@@ -1,6 +1,7 @@
 import type {
   ChatJobStatus,
   ReadyzResponse,
+  SpeechTranscriptionResponse,
   TextChatResponse,
   TranscriptEntry,
 } from "./types";
@@ -22,6 +23,7 @@ export class ApiRequestTimeoutError extends Error {
 }
 
 const TEXT_JOB_CREATE_TIMEOUT_MS = 15000;
+export const SPEECH_TRANSCRIPTION_TIMEOUT_MS = 4000;
 const textRequestId = () =>
   `text-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
@@ -122,6 +124,38 @@ export async function sendText(
       (error instanceof DOMException && error.name === "AbortError")
     ) {
       throw new ApiRequestTimeoutError("Text chat request did not start");
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+export async function transcribeSpeechAudio(
+  audioChunksBase64: string[],
+  fallbackTranscript: string,
+  timeoutMs = SPEECH_TRANSCRIPTION_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await jsonFetch<SpeechTranscriptionResponse>("/stt/transcribe", {
+      method: "POST",
+      signal: controller.signal,
+      body: JSON.stringify({
+        audio_chunks_base64: audioChunksBase64,
+        fallback_transcript: fallbackTranscript,
+      }),
+    });
+  } catch (error) {
+    if (
+      timedOut ||
+      (error instanceof DOMException && error.name === "AbortError")
+    ) {
+      throw new ApiRequestTimeoutError("");
     }
     throw error;
   } finally {

@@ -79,6 +79,11 @@ const host = process.env.HVC_HOST ?? "127.0.0.1";
 const port = intEnv("HVC_PORT", 8765, { min: 1, max: 65535 });
 const geminiMode = process.env.HVC_GEMINI_MODE ?? "mock";
 const geminiVoiceName = process.env.HVC_GEMINI_VOICE_NAME ?? "Charon";
+const sttProvider =
+  process.env.HVC_STT_PROVIDER ??
+  (geminiMode === "real" && (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)
+    ? "gemini"
+    : "browser");
 const hermesAdapter = process.env.HVC_HERMES_ADAPTER ?? "mock";
 const agentName = process.env.HVC_AGENT_NAME ?? process.env.VITE_HVC_AGENT_NAME ?? "Hermes Agent";
 const requirePin = boolEnv("HVC_REQUIRE_PIN", false);
@@ -99,6 +104,10 @@ const hermesApiTokenConfigured = Boolean(process.env.HVC_HERMES_API_TOKEN || pro
 
 if (!["mock", "real"].includes(geminiMode)) {
   errors.push("HVC_GEMINI_MODE must be mock or real.");
+}
+
+if (!["gemini", "browser"].includes(sttProvider)) {
+  errors.push("HVC_STT_PROVIDER must be gemini or browser.");
 }
 
 if (!/^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(geminiVoiceName)) {
@@ -166,6 +175,7 @@ const result = {
     port,
     geminiMode,
     geminiVoiceName,
+    sttProvider,
     hermesAdapter,
     hermesApiUrl: hermesAdapter === "api" ? hermesApiUrl : undefined,
     hermesApiTokenConfigured: hermesAdapter === "api" ? hermesApiTokenConfigured : undefined,

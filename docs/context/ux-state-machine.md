@@ -23,9 +23,16 @@ Rules:
   shows browser-recognized interim words in the transcript, finalizes through
   backend STT when configured, and submits the final text through `/chat/text`
   background jobs on release.
-- Basic hold-to-talk shows a one-time disclosure when the operator switches back
-  from Live because it uses browser interim recognition plus authenticated
-  backend transcription.
+- Basic hold-to-talk shows a one-time disclosure before the first held turn,
+  including the default mode path. The disclosure must name the configured
+  transcription provider; Gemini STT means held audio is sent to Google Gemini
+  through the authenticated backend.
+- Basic hold-to-talk caps STT upload audio at roughly 60 seconds. When the cap
+  trips, the transcript shows a lightweight notice and sends the browser text
+  immediately on release instead of uploading audio that will be discarded.
+- Basic hold-to-talk keeps the finalizing state visible while backend STT runs.
+  The timeout scales with captured audio duration and falls back to browser text
+  rather than stranding the turn.
 - Live mode starts the Gemini Live realtime session and exposes Live-only
   controls such as mute and spoken completion notices.
 - Opening transcript never ends the call.

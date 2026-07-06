@@ -20,6 +20,7 @@ import {
 import {
   ApiError,
   ApiRequestTimeoutError,
+  SPEECH_TRANSCRIPTION_TIMEOUT_MS,
   cancelTextJob,
   getReadyz,
   getSession,
@@ -82,6 +83,9 @@ const SPOKEN_COMPLETION_RESTORE_DELAY_MS = 2500;
 const SPOKEN_COMPLETION_RESTORE_CHECK_MS = 250;
 const SPOKEN_COMPLETION_MAX_DURATION_MS = 10000;
 const BASIC_HOLD_STT_AUDIO_BYTE_LIMIT = 1_920_000;
+const BASIC_HOLD_STT_SAMPLE_BYTES_PER_SECOND = 16_000 * 2;
+const BASIC_HOLD_STT_TIMEOUT_PER_SECOND_MS = 150;
+const BASIC_HOLD_STT_TIMEOUT_MAX_MS = 12_000;
 const SESSION_EXPIRED_MESSAGE = "Session expired. Enter your private PIN again.";
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
@@ -135,6 +139,7 @@ type SpeechCaptureState = {
   audioChunksBase64: string[];
   audioBytes: number;
   audioCapped: boolean;
+  audioCapNotified: boolean;
   entryId: string | null;
   finalText: string;
   interimText: string;
@@ -291,6 +296,7 @@ export default function App() {
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const speechRecognitionDisclosureShownRef = useRef(false);
+  const sttProviderRef = useRef("gemini");
   const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
   const sessionGenerationRef = useRef(0);
   const connectingRef = useRef(false);
@@ -417,7 +423,11 @@ export default function App() {
     setAgentConnection(checkingAgentConnection);
     getReadyz()
       .then((readyz) => {
-        if (!cancelled) setAgentConnection(agentConnectionFromReadyz(readyz));
+        if (!cancelled) {
+          const provider = readyz.checks?.stt_provider?.trim();
+          if (provider) sttProviderRef.current = provider;
+          setAgentConnection(agentConnectionFromReadyz(readyz));
+        }
       })
       .catch(() => {
         if (!cancelled)
@@ -1040,12 +1050,19 @@ export default function App() {
     return "Microphone blocked. Allow mic access, then hold again.";
   }
 
+  function basicHoldDisclosureMessage() {
+    const provider = sttProviderRef.current;
+    if (provider === "browser")
+      return "Hold-to-talk sends held audio to the private backend, then uses browser text.";
+    if (provider === "mock")
+      return "Hold-to-talk records held audio for mock transcription, then sends text.";
+    return "Hold-to-talk sends held audio to Google Gemini for transcription, then sends text.";
+  }
+
   function discloseBasicHoldTranscription() {
     if (speechRecognitionDisclosureShownRef.current) return;
     speechRecognitionDisclosureShownRef.current = true;
-    appendSystem(
-      "Basic Hold sends held audio to private STT, then sends text.",
-    );
+    appendSystem(basicHoldDisclosureMessage());
   }
 
   async function primeBasicHoldMicrophonePermission({
@@ -1096,6 +1113,14 @@ export default function App() {
     capture.audio = null;
   }
 
+  function notifySpeechCaptureAudioCapped(capture: SpeechCaptureState) {
+    if (capture.audioCapNotified) return;
+    capture.audioCapNotified = true;
+    appendSystem(
+      "Captured the first 60 seconds. Release to send, or start another turn for the rest.",
+    );
+  }
+
   function startSpeechCaptureAudio(capture: SpeechCaptureState) {
     let audio: BrowserGeminiAudio;
     try {
@@ -1117,6 +1142,7 @@ export default function App() {
           (chunk.data.endsWith("==") ? 2 : chunk.data.endsWith("=") ? 1 : 0);
         if (capture.audioBytes + bytes > BASIC_HOLD_STT_AUDIO_BYTE_LIMIT) {
           capture.audioCapped = true;
+          notifySpeechCaptureAudioCapped(capture);
           return;
         }
         capture.audioBytes += bytes;
@@ -1297,9 +1323,36 @@ export default function App() {
     dispatch({ type: "RECOVER" });
   }
 
+  function failFinishedSpeechCapture(capture: SpeechCaptureState, message: string) {
+    if (capture.entryId) {
+      setEntries((items) =>
+        items.map((entry) =>
+          entry.id === capture.entryId
+            ? { ...entry, status: "failed", text: message }
+            : entry,
+        ),
+      );
+    } else {
+      appendSystem(message, "failed");
+    }
+  }
+
+  function speechTranscriptionTimeoutMs(audioBytes: number) {
+    const seconds = audioBytes / BASIC_HOLD_STT_SAMPLE_BYTES_PER_SECOND;
+    return Math.min(
+      BASIC_HOLD_STT_TIMEOUT_MAX_MS,
+      SPEECH_TRANSCRIPTION_TIMEOUT_MS +
+        Math.ceil(seconds * BASIC_HOLD_STT_TIMEOUT_PER_SECOND_MS),
+    );
+  }
+
   function submitFinishedSpeechCapture(capture: SpeechCaptureState, text: string) {
     if (!text) {
       cancelEmptySpeechCapture(capture);
+      return;
+    }
+    if (!canUsePrivateSession()) {
+      failFinishedSpeechCapture(capture, SESSION_EXPIRED_MESSAGE);
       return;
     }
     if (capture.entryId) {
@@ -1318,6 +1371,7 @@ export default function App() {
     capture: SpeechCaptureState,
     browserText: string,
     audioChunksBase64: string[],
+    audioBytes: number,
     audioCapped: boolean,
   ) {
     if (capture.entryId) {
@@ -1335,14 +1389,19 @@ export default function App() {
     }
     try {
       let finalText = browserText;
+      if (audioCapped && browserText) {
+        submitFinishedSpeechCapture(capture, finalText);
+        return;
+      }
       if (audioChunksBase64.length > 0) {
         try {
           const result = await transcribeSpeechAudio(
             audioChunksBase64,
             browserText,
+            speechTranscriptionTimeoutMs(audioBytes),
           );
           const transcript = result.transcript.trim();
-          if (transcript && !(audioCapped && browserText)) finalText = transcript;
+          if (transcript) finalText = transcript;
         } catch (error) {
           if (isAuthFailure(error)) {
             if (capture.entryId) {
@@ -1372,6 +1431,7 @@ export default function App() {
     capture.finished = true;
     const text = speechCaptureText(capture);
     const audioChunksBase64 = capture.audioChunksBase64.slice();
+    const audioBytes = capture.audioBytes;
     const audioCapped = capture.audioCapped;
     clearSpeechCapture(capture);
 
@@ -1381,7 +1441,13 @@ export default function App() {
     }
     speechFinalizingRef.current = true;
     dispatch({ type: "POINTER_UP" });
-    void finalizeSpeechCaptureTranscript(capture, text, audioChunksBase64, audioCapped);
+    void finalizeSpeechCaptureTranscript(
+      capture,
+      text,
+      audioChunksBase64,
+      audioBytes,
+      audioCapped,
+    );
   }
 
   function startBasicHoldRecognition(press: PressState): boolean {
@@ -1407,6 +1473,7 @@ export default function App() {
       audioChunksBase64: [],
       audioBytes: 0,
       audioCapped: false,
+      audioCapNotified: false,
       entryId: null,
       finalText: "",
       interimText: "",
@@ -1475,6 +1542,7 @@ export default function App() {
       press.holding = false;
       return false;
     }
+    discloseBasicHoldTranscription();
 
     if (
       basicHoldMicPermissionPrimedRef.current ||

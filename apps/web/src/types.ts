@@ -41,6 +41,7 @@ export interface ReadyzResponse {
   ok: boolean;
   checks?: {
     hermes_adapter?: string;
+    stt_provider?: string;
     hermes?: HermesAdapterDiagnostics;
   };
 }

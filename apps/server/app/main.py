@@ -147,6 +147,12 @@ def stt_audio_from_payload(payload: SttTranscribeRequest) -> tuple[bytes, str]:
         return audio, STT_WAV_MIME_TYPE
     raise HTTPException(status_code=422, detail="Audio payload is required")
 
+def stt_runtime_error_detail(exc: RuntimeError) -> str:
+    detail = str(exc)
+    if detail in {"Gemini API key is not configured", "google-genai is not installed"}:
+        return detail
+    return "Speech transcription is unavailable"
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.assert_safe_bind()
@@ -306,7 +312,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 fallback_transcript=payload.fallback_transcript,
             )
         except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise HTTPException(status_code=503, detail=stt_runtime_error_detail(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail="Speech transcription failed") from exc
         return {

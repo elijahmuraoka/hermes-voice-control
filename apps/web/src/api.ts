@@ -23,7 +23,7 @@ export class ApiRequestTimeoutError extends Error {
 }
 
 const TEXT_JOB_CREATE_TIMEOUT_MS = 15000;
-const SPEECH_TRANSCRIPTION_TIMEOUT_MS = 4000;
+export const SPEECH_TRANSCRIPTION_TIMEOUT_MS = 4000;
 const textRequestId = () =>
   `text-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 

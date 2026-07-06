@@ -545,6 +545,27 @@ def test_real_gemini_stt_transcribes_without_exposing_secret(tmp_path, monkeypat
     assert "transcribed words" not in logs
     assert PCM_CHUNK not in logs
 
+def test_real_gemini_stt_runtime_errors_use_generic_detail(tmp_path, monkeypatch):
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            raise RuntimeError("provider leaked internal diagnostic")
+    class FakeClient:
+        def __init__(self, api_key):
+            self.models = FakeModels()
+    fake_genai = types.SimpleNamespace(Client=FakeClient)
+    fake_google = types.ModuleType("google")
+    fake_google.genai = fake_genai
+    monkeypatch.setitem(sys.modules, "google", fake_google)
+    monkeypatch.setenv("GEMINI_API_KEY", "super-secret-gemini-key")
+
+    client = TestClient(create_app(Settings(pin=TEST_PIN, db_path=tmp_path / "stt-runtime.sqlite3", gemini_mode="real", stt_provider="gemini")))
+    res = client.post("/stt/transcribe", json={"audio_chunks_base64": [PCM_CHUNK]})
+
+    assert res.status_code == 503
+    assert res.json() == {"detail": "Speech transcription is unavailable"}
+    assert "provider leaked internal diagnostic" not in res.text
+    assert "super-secret-gemini-key" not in res.text
+
 def test_tool_allowlist_and_mock_agent(tmp_path):
     client = make_client(tmp_path)
     denied = client.post("/tools/call", json={"request_id": "r1", "tool": "shell", "arguments": {}}); assert denied.status_code == 403

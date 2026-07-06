@@ -117,9 +117,11 @@ export class GeminiLiveSession {
   }
 
   async connect(): Promise<void> {
+    if (this.sessionClosed) throw new Error("client disconnect");
     this.emitStatus("connecting");
     this.clientInitiatedClose = false;
     const token = await this.tokenProvider();
+    if (this.sessionClosed) throw new Error("client disconnect");
     this.callbacks.onToken?.({
       expires_at: token.expires_at,
       mode: token.mode,
@@ -241,8 +243,12 @@ export class GeminiLiveSession {
 
   resume(): void {
     this.hasFirstProviderResponse = false;
-    void this.audio?.resume?.();
+    void this.audio?.resume?.().catch(() => undefined);
     this.emitDiagnostics("session_resume");
+  }
+
+  isConnected(): boolean {
+    return !this.sessionClosed && this.socket?.readyState === SOCKET_OPEN;
   }
 
   disconnect(): void {
@@ -253,6 +259,11 @@ export class GeminiLiveSession {
     this.socket = undefined;
     if (socket) {
       this.clientInitiatedClose = true;
+      this.emitSessionClose({
+        reason: "client_disconnect",
+        closeCode: 1000,
+        closeReason: "client disconnect",
+      });
       socket.close(1000, "client disconnect");
     } else {
       this.emitSessionClose({ reason: "client_disconnect" });

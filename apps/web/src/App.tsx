@@ -304,7 +304,7 @@ export default function App() {
     spokenCompletionNotificationsEnabled,
     setSpokenCompletionNotificationsEnabled,
   ] = useState(readSpokenCompletionNotificationsEnabled);
-  const [finalizingNudge, setFinalizingNudge] = useState(false);
+  const [finalizingNudgeKey, setFinalizingNudgeKey] = useState(0);
   const stateRef = useRef(state);
   const authStateRef = useRef(authState);
   const voiceModeRef = useRef(voiceMode);
@@ -516,6 +516,7 @@ export default function App() {
     if (finalizingNudgeTimerRef.current === null) return;
     window.clearTimeout(finalizingNudgeTimerRef.current);
     finalizingNudgeTimerRef.current = null;
+    setFinalizingNudgeKey(0);
   }
 
   async function refreshAgentConnection({
@@ -524,13 +525,15 @@ export default function App() {
     if (authStateRef.current !== "authenticated") return;
     const requestId = readyzRequestRef.current + 1;
     readyzRequestRef.current = requestId;
-    if (checking) setAgentConnection(checkingAgentConnection);
+    if (checking && !reconnectingRef.current)
+      setAgentConnection(checkingAgentConnection);
     const readyz = await getReadyz();
     if (
       requestId !== readyzRequestRef.current ||
       authStateRef.current !== "authenticated"
     )
       return;
+    if (reconnectingRef.current) return;
     const provider = readyz.checks?.stt_provider?.trim();
     if (provider) sttProviderRef.current = provider;
     setAgentConnection(agentConnectionFromReadyz(readyz));
@@ -539,19 +542,33 @@ export default function App() {
   function handleVisibleReturn() {
     void refreshAgentConnection();
     void updateWakeLock();
-    if (canAutoReconnectLive()) {
-      sessionRef.current?.resume();
-      scheduleLiveReconnect("App returned.");
+    const session = sessionRef.current;
+    if (session && liveCaptureIsActive()) {
+      session.resume();
+      if (session.isConnected()) return;
     }
+    if (canAutoReconnectLive()) scheduleLiveReconnect("App returned.");
   }
+
+  const activeWakeLockStates = new Set([
+    "connecting",
+    "listening",
+    "user-speaking",
+    "hold-to-talk",
+    "agent-thinking",
+    "agent-speaking",
+    "finalizing",
+    "reconnecting",
+  ]);
 
   function shouldHoldWakeLock(): boolean {
     if (authStateRef.current !== "authenticated") return false;
-    if (stateRef.current.callState === "hold-to-talk") return true;
+    const callState = stateRef.current.callState;
+    if (callState === "hold-to-talk" || callState === "finalizing") return true;
     return (
       voiceModeRef.current === "live" &&
       liveDesiredRef.current &&
-      !["idle", "error"].includes(stateRef.current.callState)
+      activeWakeLockStates.has(callState)
     );
   }
 
@@ -784,7 +801,7 @@ export default function App() {
       !captureReadyRef.current ||
       current.inputMode !== "hands-free" ||
       current.isMuted ||
-      ["idle", "paused", "muted", "connecting", "error"].includes(
+      ["idle", "paused", "muted", "connecting", "reconnecting", "error"].includes(
         current.callState,
       )
     );
@@ -1223,6 +1240,7 @@ export default function App() {
     markCaptureNotReady();
     pressRef.current = emptyPress();
     connectingRef.current = false;
+    sessionGenerationRef.current += 1;
     if (sessionRef.current) {
       endingRef.current = true;
       sessionRef.current.setHoldToTalk(false);
@@ -1552,10 +1570,10 @@ export default function App() {
 
   function nudgeFinalizingHold() {
     clearFinalizingNudgeTimer();
-    setFinalizingNudge(true);
+    setFinalizingNudgeKey((key) => key + 1);
     finalizingNudgeTimerRef.current = window.setTimeout(() => {
       finalizingNudgeTimerRef.current = null;
-      setFinalizingNudge(false);
+      setFinalizingNudgeKey(0);
     }, FINALIZING_NUDGE_MS);
   }
 
@@ -1631,6 +1649,7 @@ export default function App() {
             dispatch({ type: "RECOVER" });
             return;
           }
+          void refreshAgentConnection();
           // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
         }
       }
@@ -2135,7 +2154,21 @@ export default function App() {
   async function connectLiveSession(sessionGeneration: number) {
     const session = createLiveSession(sessionGeneration);
     sessionRef.current = session;
-    await session.connect();
+    try {
+      await session.connect();
+    } catch (error) {
+      if (sessionRef.current === session) sessionRef.current = null;
+      throw error;
+    }
+    if (
+      !isCurrentSessionGeneration(sessionGeneration) ||
+      sessionRef.current !== session ||
+      !liveSessionDesired()
+    ) {
+      if (sessionRef.current === session) sessionRef.current = null;
+      disconnectLiveSession(session);
+      throw new Error("voice connection cancelled");
+    }
   }
 
   function nextSessionGeneration(): number {
@@ -2146,8 +2179,10 @@ export default function App() {
   }
 
   function cancelLiveReconnectForUserIntent() {
-    if (!reconnectingRef.current) return;
+    if (!reconnectingRef.current && !connectingRef.current) return;
     sessionGenerationRef.current += 1;
+    connectingRef.current = false;
+    liveDesiredRef.current = false;
     finishLiveReconnect();
     const previousSession = sessionRef.current;
     sessionRef.current = null;
@@ -2168,10 +2203,12 @@ export default function App() {
     )
       return;
     if (!reconnectingRef.current) {
+      sessionGenerationRef.current += 1;
+      sessionLossHandledGenerationRef.current = 0;
       reconnectingRef.current = true;
       reconnectStartedAtRef.current = Date.now();
       reconnectAttemptRef.current = 0;
-      appendSystem(`${reason} Reconnecting voice...`, "working");
+      appendSystem(reconnectNoticeCopy(reason), "working");
     }
     stopVoiceTurnWatch();
     resetHoldSpeechState();
@@ -2206,7 +2243,6 @@ export default function App() {
         Math.min(attempt - 1, RECONNECT_DELAYS_MS.length - 1)
       ];
     dispatch({ type: "RECONNECT", attempt });
-    void refreshAgentConnection();
 
     if (!canEnableMicrophoneCapture()) {
       const elapsedMs = Date.now() - reconnectStartedAtRef.current;
@@ -2239,9 +2275,15 @@ export default function App() {
       }
       finishLiveReconnect();
       appendSystem("Voice reconnected.");
+      void refreshAgentConnection();
     } catch (error) {
+      if (!isCurrentSessionGeneration(sessionGeneration)) return;
       sessionRef.current = null;
       markCaptureNotReady();
+      if (!canAutoReconnectLive()) {
+        finishLiveReconnect();
+        return;
+      }
       if (isAuthFailure(error)) {
         finishLiveReconnect();
         requireAuth(SESSION_EXPIRED_MESSAGE);
@@ -2255,7 +2297,8 @@ export default function App() {
       }
       queueLiveReconnectAttempt(delayMs);
     } finally {
-      connectingRef.current = false;
+      if (isCurrentSessionGeneration(sessionGeneration))
+        connectingRef.current = false;
     }
   }
 
@@ -2269,6 +2312,12 @@ export default function App() {
   function failLiveReconnect() {
     finishLiveReconnect();
     liveDesiredRef.current = false;
+    setAgentConnection({
+      state: "unavailable",
+      label: "Voice disconnected",
+      detail: "Tap to retry",
+    });
+    void refreshAgentConnection();
     appendSystem(
       "Voice could not reconnect. Retry.",
       "failed",
@@ -2277,6 +2326,12 @@ export default function App() {
       type: "ERROR",
       error: "Voice disconnected. Retry.",
     });
+  }
+
+  function reconnectNoticeCopy(reason: string) {
+    if (/token/i.test(reason)) return "Refreshing voice connection...";
+    if (/app returned/i.test(reason)) return "Restoring voice connection...";
+    return "Restoring voice connection...";
   }
 
   function handleLiveSessionLoss(sessionGeneration: number, reason: string) {
@@ -2421,6 +2476,11 @@ export default function App() {
 
     try {
       await connectLiveSession(sessionGeneration);
+      if (
+        !isCurrentSessionGeneration(sessionGeneration) ||
+        !liveSessionDesired()
+      )
+        return;
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -2429,6 +2489,11 @@ export default function App() {
       if (isCurrentSessionGeneration(sessionGeneration)) {
         diagnosticsRef.current?.mark("session_error", { message: errorMessage });
       }
+      if (
+        !isCurrentSessionGeneration(sessionGeneration) ||
+        !liveSessionDesired()
+      )
+        return;
       sessionRef.current = null;
       markCaptureNotReady();
       if (isAuthFailure(error)) {
@@ -2444,7 +2509,8 @@ export default function App() {
           `Could not prepare ${agentNounLower} voice. Confirm you are on the private network and try again.`,
       });
     } finally {
-      connectingRef.current = false;
+      if (isCurrentSessionGeneration(sessionGeneration))
+        connectingRef.current = false;
     }
   }
 
@@ -2481,6 +2547,7 @@ export default function App() {
     clearTokenReconnectTimer();
     finishLiveReconnect();
     sessionGenerationRef.current += 1;
+    connectingRef.current = false;
     liveDesiredRef.current = false;
     stopVoiceTurnWatch();
     resetHoldSpeechState();
@@ -2847,7 +2914,8 @@ export default function App() {
           onPointerUp={handlePointerUp}
           onPointerCancel={cancelPress}
           onRetry={handleRetry}
-          nudging={finalizingNudge}
+          nudging={finalizingNudgeKey > 0}
+          nudgeKey={finalizingNudgeKey}
           agentName={agentName}
         />
         <div className="control-row">

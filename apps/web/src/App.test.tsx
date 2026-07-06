@@ -132,6 +132,7 @@ interface TestVoiceSession {
       response: Record<string, unknown>;
     }) => void;
   };
+  connected: boolean;
   disconnect: ReturnType<typeof vi.fn>;
   resume: ReturnType<typeof vi.fn>;
   setMicrophoneEnabled: ReturnType<typeof vi.fn>;
@@ -395,6 +396,7 @@ vi.mock("./realtime", () => {
   class MockRealtimeVoiceSession {
     options: any;
     callbacks: any;
+    connected = false;
     connect = vi.fn(async () => {
       if (realtimeMock.connectError) throw realtimeMock.connectError;
       if (realtimeMock.emitTokenBeforeGate) {
@@ -416,8 +418,12 @@ vi.mock("./realtime", () => {
         this.callbacks.onStatus?.("setup-complete");
         this.callbacks.onStatus?.("listening");
       }
+      this.connected = true;
     });
-    disconnect = vi.fn();
+    disconnect = vi.fn(() => {
+      this.connected = false;
+    });
+    isConnected = vi.fn(() => this.connected);
     resume = vi.fn();
     setMicrophoneEnabled = vi.fn();
     setHoldToTalk = vi.fn();
@@ -2068,6 +2074,10 @@ describe("App", () => {
     expect(speech.utterances[0].text).not.toContain("porch lights");
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
 
+    await act(async () => {
+      await Promise.resolve();
+    });
+
     speech.finish();
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
 
@@ -3092,6 +3102,13 @@ describe("App", () => {
     );
     expect(first.setHoldToTalk).toHaveBeenCalledWith(false);
     expect(first.disconnect).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      first.callbacks.onClose?.();
+    });
+
+    expect(screen.queryByText("Voice closed.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Voice session disconnected.")).not.toBeInTheDocument();
   });
 
   it("ignores stale session diagnostics and close callbacks after a new call starts", async () => {
@@ -3933,6 +3950,46 @@ describe("App", () => {
     expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
   });
 
+  it("does not let stale reconnect cleanup clear a newer Live session", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    const staleReconnectGate = createConnectGate();
+    realtimeMock.connectGate = staleReconnectGate;
+    vi.useFakeTimers();
+
+    await act(async () => {
+      first.callbacks.onClose?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+    expect(realtimeMock.instances).toHaveLength(2);
+    const staleReconnect = realtimeMock.instances[1];
+
+    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
+    expect(staleReconnect.disconnect).toHaveBeenCalledTimes(1);
+    realtimeMock.connectGate = null;
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 3, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 3 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(realtimeMock.instances).toHaveLength(3);
+    const freshSession = realtimeMock.instances[2];
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+
+    staleReconnectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(freshSession.disconnect).not.toHaveBeenCalled();
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+  });
+
   it("does not revive a delayed reconnect after switching to Hold", async () => {
     installSpeechRecognitionMock();
     await renderUnlockedApp();
@@ -3993,6 +4050,65 @@ describe("App", () => {
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
     );
     expect(realtimeMock.instances).toHaveLength(1);
+  });
+
+  it("does not revive a delayed initial Live connection after the transcript is focused", async () => {
+    realtimeMock.connectGate = createConnectGate();
+    await renderUnlockedApp();
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
+    await waitFor(() =>
+      expect(screen.getByText("Connecting voice...")).toBeInTheDocument(),
+    );
+    const first = realtimeMock.instances[0];
+
+    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
+    expect(first.disconnect).toHaveBeenCalledTimes(1);
+
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
+    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+  });
+
+  it("does not let stale initial Live cleanup clear a newer Live session", async () => {
+    installSpeechRecognitionMock();
+    const staleConnectGate = createConnectGate();
+    realtimeMock.connectGate = staleConnectGate;
+    await renderUnlockedApp();
+    fireEvent.click(screen.getByRole("button", { name: /^Live$/ }));
+    await waitFor(() =>
+      expect(screen.getByText("Connecting voice...")).toBeInTheDocument(),
+    );
+    const staleInitial = realtimeMock.instances[0];
+
+    fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
+    expect(staleInitial.disconnect).toHaveBeenCalledTimes(1);
+    realtimeMock.connectGate = null;
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 4, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 4 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(realtimeMock.instances).toHaveLength(2);
+    const freshSession = realtimeMock.instances[1];
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+
+    staleConnectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
+    expect(freshSession.disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("defers token refresh reconnect while the initial Live connection is pending", async () => {
@@ -4079,6 +4195,7 @@ describe("App", () => {
       screen.getByText(/Voice could not reconnect/i),
     ).toBeInTheDocument();
     expect(screen.getByText("Tap to retry")).toBeInTheDocument();
+    expect(screen.queryByText("Reconnecting...")).not.toBeInTheDocument();
   });
 
   it("does not reconnect after a deliberate Live end", async () => {
@@ -4133,9 +4250,38 @@ describe("App", () => {
     expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
   });
 
-  it("reconnects and resumes audio after returning from the background", async () => {
+  it("resumes audio without reconnecting a healthy session after returning from the background", async () => {
     await renderUnlockedApp();
     const first = await startListeningVoice();
+    vi.useFakeTimers();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(first.resume).toHaveBeenCalledTimes(1);
+    expect(realtimeMock.instances).toHaveLength(1);
+    expect(screen.queryByText("Voice reconnected.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Restoring voice connection/i)).not.toBeInTheDocument();
+  });
+
+  it("reconnects after returning when the Live session is dead", async () => {
+    await renderUnlockedApp();
+    const first = await startListeningVoice();
+    first.connected = false;
     realtimeMock.connectGate = createConnectGate();
     vi.useFakeTimers();
 
@@ -4168,7 +4314,7 @@ describe("App", () => {
     expect(screen.getByText("Voice reconnected.")).toBeInTheDocument();
   });
 
-  it("downgrades the connection chip when a Live session errors", async () => {
+  it("keeps the connection chip in reconnecting state while Live recovers", async () => {
     await renderUnlockedApp();
     const session = await startListeningVoice();
     readyzOk = false;
@@ -4180,8 +4326,37 @@ describe("App", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText("Backend unreachable")).toBeInTheDocument(),
+      expect(screen.getByText("Reconnecting...")).toBeInTheDocument(),
     );
+  });
+
+  it("does not let stale readyz responses overwrite reconnecting status", async () => {
+    readyzDeferred = createConnectGate();
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    realtimeMock.connectGate = createConnectGate();
+
+    await act(async () => {
+      session.callbacks.onError?.(new Error("socket failed"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByText("Reconnecting...")).toBeInTheDocument(),
+    );
+
+    readyzDeferred.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Reconnecting...")).toBeInTheDocument();
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
   });
 
   it("disconnects an errored Live session before reconnecting", async () => {
@@ -4272,6 +4447,55 @@ describe("App", () => {
       await Promise.resolve();
     });
     expect(orb.className).toContain("is-nudging");
+
+    sttDeferred.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+  });
+
+  it("keeps the screen wake lock while hold-to-talk is finalizing", async () => {
+    const speech = installSpeechRecognitionMock();
+    sttPostMode = "deferred";
+    sttDeferred = createConnectGate();
+    const wakeLockRelease = vi.fn(async () => undefined);
+    const wakeLockRequest = vi.fn(async () => ({
+      release: wakeLockRelease,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    Object.defineProperty(navigator, "wakeLock", {
+      configurable: true,
+      value: { request: wakeLockRequest },
+    });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(wakeLockRequest).toHaveBeenCalledTimes(1);
+    audioMock.instances[0].emit("AAECAw==");
+    act(() => speech.instances[0].emitResult("browser words", true));
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(wakeLockRelease).not.toHaveBeenCalled();
 
     sttDeferred.resolve();
     await act(async () => {

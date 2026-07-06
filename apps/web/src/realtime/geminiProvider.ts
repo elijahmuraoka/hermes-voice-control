@@ -48,6 +48,10 @@ class GeminiRealtimeVoiceSession implements RealtimeVoiceSession {
     return this.session.connect();
   }
 
+  isConnected(): boolean {
+    return this.session.isConnected();
+  }
+
   resume(): void {
     this.session.resume();
   }

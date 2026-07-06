@@ -128,6 +128,7 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
           "listening",
           "user-speaking",
           "hold-to-talk",
+          "connecting",
           "finalizing",
           "agent-thinking",
           "reconnecting",

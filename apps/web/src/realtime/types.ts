@@ -65,6 +65,7 @@ export interface RealtimeVoiceSessionOptions {
 
 export interface RealtimeVoiceSession {
   connect(): Promise<void>;
+  isConnected(): boolean;
   resume(): void;
   interrupt(): void;
   abandonPendingResponse(): void;

@@ -48,11 +48,13 @@ class MockAudio implements GeminiLiveAudio {
   chunks: PcmChunk[] = [];
   played: Array<{ base64: string; rate?: number }> = [];
   captureEnabled: boolean[] = [];
+  startCaptureCalls = 0;
   interrupted = 0;
   closed = 0;
   private onChunk?: (chunk: PcmChunk) => void;
 
   async startCapture(onChunk: (chunk: PcmChunk) => void) {
+    this.startCaptureCalls += 1;
     this.onChunk = onChunk;
   }
 
@@ -94,6 +96,40 @@ async function connectOpenedSession(
 }
 
 describe("GeminiLiveSession", () => {
+  it("does not open a websocket or mic after disconnect during token fetch", async () => {
+    let resolveToken!: (token: {
+      token: string;
+      expires_at: string;
+      mode: string;
+    }) => void;
+    const audio = new MockAudio();
+    const webSocketFactory = vi.fn(() => new MockWebSocket());
+    const session = new GeminiLiveSession(
+      {},
+      {
+        tokenProvider: async () =>
+          new Promise((resolve) => {
+            resolveToken = resolve;
+          }),
+        webSocketFactory,
+        audio,
+      },
+    );
+
+    const connected = session.connect();
+    await Promise.resolve();
+    session.disconnect();
+    resolveToken({
+      token: "ephemeral/token",
+      expires_at: "2026-01-01T00:00:00Z",
+      mode: "real",
+    });
+
+    await expect(connected).rejects.toThrow(/client disconnect/i);
+    expect(webSocketFactory).not.toHaveBeenCalled();
+    expect(audio.startCaptureCalls).toBe(0);
+  });
+
   it("connects with an ephemeral token and sends setup as the first websocket message", async () => {
     const ws = new MockWebSocket();
     const statuses: string[] = [];

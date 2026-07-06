@@ -10,6 +10,7 @@ interface Props {
   onPointerCancel: React.PointerEventHandler<HTMLButtonElement>;
   onRetry: () => void;
   nudging?: boolean;
+  nudgeKey?: number;
 }
 export function VoiceOrb({
   state,
@@ -20,8 +21,11 @@ export function VoiceOrb({
   onPointerCancel,
   onRetry,
   nudging = false,
+  nudgeKey = 0,
 }: Props) {
-  const cls = `voice-orb state-${state.callState}${nudging ? " is-nudging" : ""}`;
+  const cls = `voice-orb state-${state.callState}${
+    nudging ? ` is-nudging nudge-${nudgeKey % 2}` : ""
+  }`;
   const label = voiceStateLabel(state, mode, agentName);
   const helperText = subcopy(state.callState, mode, agentName);
   return (
@@ -44,6 +48,7 @@ export function VoiceOrb({
       <div className="state-copy">
         <p>{label}</p>
         {helperText ? <span>{helperText}</span> : null}
+        {nudging ? <span className="sr-only">Still finalizing.</span> : null}
         {state.callState === "error" ? (
           <button type="button" className="retry-pill" onClick={onRetry}>
             Tap to retry

@@ -124,8 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "Internal server error", "code": "INTERNAL_ERROR"})
     @app.get("/healthz")
     def healthz(): return {"ok": True}
-    @app.get("/readyz")
-    def readyz():
+    def readiness() -> tuple[bool, dict]:
         gemini_client_available = broker.client_available
         checks = {
             "database": "unknown",
@@ -151,8 +150,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ok = False
         if settings.hermes_adapter == "local" and not checks["hermes"].get("available"):
             ok = False
-        status_code = 200 if ok else 503
-        return JSONResponse(status_code=status_code, content={"ok": ok, "checks": checks})
+        return ok, checks
+    @app.get("/readyz")
+    def readyz():
+        # Unauthenticated: any tailnet peer can reach this, so expose only the
+        # pass/fail bit. Field-level diagnostics live at /readyz/details.
+        ok, _ = readiness()
+        return JSONResponse(status_code=200 if ok else 503, content={"ok": ok})
+    @app.get("/readyz/details")
+    def readyz_details(session_hash: str = Depends(session_dep)):
+        ok, checks = readiness()
+        return JSONResponse(status_code=200 if ok else 503, content={"ok": ok, "checks": checks})
     @app.post("/auth/pin")
     def auth_pin(payload: PinRequest, response: Response, request: Request):
         if not settings.require_pin:

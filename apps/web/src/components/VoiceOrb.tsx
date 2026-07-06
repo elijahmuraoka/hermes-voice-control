@@ -52,7 +52,7 @@ function voiceStateLabel(
 ): string {
   if (mode === "live") return stateLabel(state, agentName);
   if (state.callState === "idle") return `Hold to talk to ${agentName}`;
-  if (state.callState === "agent-thinking") return "Sending your words...";
+  if (state.callState === "agent-thinking") return "Sending...";
   return stateLabel(state, agentName);
 }
 

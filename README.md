@@ -3,10 +3,9 @@
 Hermes Voice Control is a private-by-default browser voice surface for talking
 to your Hermes agent from a phone or laptop.
 
-The app keeps the experience simple: open the page, tap the orb for Live voice,
-or switch to Hold mode when basic push-to-talk dictation is enough. The visible
-agent name is configurable, so each setup can use the name of its own Hermes
-agent.
+The app keeps the experience simple: open the page, hold the orb for
+push-to-talk, or switch to Live for hands-free voice. The visible agent name is
+configurable, so each setup can use the name of its own Hermes agent.
 
 <p align="center">
   <img src="docs/assets/screenshots/mobile-idle.png" width="260" alt="Hermes Voice Control mobile voice screen for a Hermes agent" />
@@ -20,8 +19,9 @@ agent.
 
 - Mobile-first voice UI centered on a single agent orb.
 - Gemini Live mode for hands-free conversation, mute, and barge-in gestures.
-- Optional basic hold-to-talk dictation that sends recognized speech through the
-  same reliable background chat job path as typed messages.
+- Basic hold-to-talk dictation with browser interim text, Gemini STT
+  finalization, and the same reliable background chat job path as typed
+  messages.
 - Text fallback for moments when voice is not right.
 - Persistent transcript drawer for conversation state and recovery.
 - Backend-issued Gemini Live ephemeral tokens so long-lived API keys never reach
@@ -37,7 +37,8 @@ agent.
 Browser voice UI
   -> FastAPI auth/access layer
   -> Gemini ephemeral token broker and Gemini Live websocket session
-  -> optional basic hold-to-talk speech recognition + /chat/text jobs
+  -> basic hold-to-talk browser interim text + backend Gemini STT
+  -> /chat/text jobs
   -> allowlisted backend tool calls
   -> Hermes agent adapter
   -> speakable answer or recorded confirmation proposal
@@ -56,8 +57,9 @@ freeform Gemini answer.
 ## Tech Stack
 
 - **Frontend:** React, TypeScript, Vite, Vitest.
-- **Audio:** Web Audio API worklets for Gemini Live capture, resampling, and PCM
-  playback; browser speech recognition for opt-in basic hold-to-talk.
+- **Audio:** Web Audio API worklets for Gemini Live and Basic Hold capture,
+  resampling, and PCM playback; browser speech recognition for interim Basic
+  Hold text and fallback.
 - **Realtime model path:** Gemini Live websocket protocol.
 - **Backend:** FastAPI, Pydantic, SQLite, uv.
 - **Tool boundary:** allowlisted agent-answer tool calls, read-only confirmation
@@ -80,8 +82,9 @@ Hermes Voice Control is designed for private use before public exposure:
 - Agent-answer tool calls are read-only by default.
 - Action-like requests can become confirmation records; approval records intent
   only and does not execute external actions in v1.
-- Basic Hold uses the browser's own speech recognition implementation before
-  sending text to Hermes. Use it only on trusted operator browsers.
+- Basic Hold records audio only while held, finalizes the transcript through the
+  authenticated backend STT path when configured, then sends text to Hermes. Use
+  it only on trusted operator browsers.
 
 ## Quick Start
 

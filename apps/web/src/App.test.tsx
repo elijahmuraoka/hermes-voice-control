@@ -27,12 +27,13 @@ const audioMock = vi.hoisted(() => ({
     emit: (data?: string) => void;
   }>,
   startError: null as Error | null,
+  startGate: null as { promise: Promise<void>; resolve: () => void } | null,
 }));
 
 let sessionAuthenticated = true;
 let chatAuthExpired = false;
 let chatPostMode: "fast" | "job" | "never" = "fast";
-let sttPostMode: "fast" | "error" | "never" | "deferred" = "fast";
+let sttPostMode: "fast" | "error" | "never" | "deferred" | "auth" = "fast";
 let sttTranscript = "gemini transcript";
 let sttRequests: unknown[] = [];
 let sttDeferred: { promise: Promise<void>; resolve: () => void } | null = null;
@@ -427,6 +428,7 @@ vi.mock("./audio", async (importOriginal) => {
     private onChunk: ((chunk: { data: string; mimeType: typeof actual.GEMINI_INPUT_MIME_TYPE }) => void) | null = null;
     startCapture = vi.fn(async (onChunk: (chunk: { data: string; mimeType: typeof actual.GEMINI_INPUT_MIME_TYPE }) => void) => {
       if (audioMock.startError) throw audioMock.startError;
+      if (audioMock.startGate) await audioMock.startGate.promise;
       this.onChunk = onChunk;
     });
     stopCapture = vi.fn();
@@ -467,6 +469,7 @@ describe("App", () => {
     chatCancelStatuses.clear();
     audioMock.instances = [];
     audioMock.startError = null;
+    audioMock.startGate = null;
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: createStorageMock(),
@@ -567,6 +570,12 @@ describe("App", () => {
         if (requestUrl.includes("/stt/transcribe")) {
           const body = init?.body ? JSON.parse(String(init.body)) : {};
           sttRequests.push(body);
+          if (sttPostMode === "auth") {
+            return new Response(JSON.stringify({ detail: "Session expired" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           if (sttPostMode === "error") {
             return new Response(JSON.stringify({ detail: "STT failed" }), {
               status: 503,
@@ -843,6 +852,18 @@ describe("App", () => {
     expect(screen.getByText("Holding to talk")).toBeInTheDocument();
   });
 
+  it("discloses Basic Hold transcription when switching back from Live", async () => {
+    installSpeechRecognitionMock();
+    await renderUnlockedApp();
+    await switchToLiveMode();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
+
+    expect(
+      screen.getByText(/Basic Hold sends held audio to private STT/i),
+    ).toBeInTheDocument();
+  });
+
   it("assembles one hold utterance across aggressive recognition restarts", async () => {
     const speech = installSpeechRecognitionMock();
     await renderUnlockedApp();
@@ -917,7 +938,7 @@ describe("App", () => {
       }),
     ]);
     expect(screen.getByText("browser guess")).toBeInTheDocument();
-    expect(screen.getByText("Sending your words...")).toBeInTheDocument();
+    expect(screen.getByText("Sending...")).toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
 
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -941,6 +962,143 @@ describe("App", () => {
       ]),
     );
     expect(screen.getByText("gemini corrected phrase")).toBeInTheDocument();
+  });
+
+  it("stops buffering STT audio immediately on basic hold release", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    sttTranscript = "gemini released transcript";
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    audioMock.instances[0].emit("AAECAw==");
+    act(() => speech.instances[0].emitResult("browser text", true));
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    expect(audioMock.instances[0].stopCapture).toHaveBeenCalledTimes(1);
+    audioMock.instances[0].emit("BAUGBw==");
+
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    await waitFor(() =>
+      expect(sttRequests).toEqual([
+        expect.objectContaining({ audio_chunks_base64: ["AAECAw=="] }),
+      ]),
+    );
+    expect(chatTextBodies).toEqual([
+      expect.objectContaining({ message: "gemini released transcript" }),
+    ]);
+  });
+
+  it("closes STT audio again when capture setup resolves after release", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    audioMock.startGate = createConnectGate();
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    expect(audioMock.instances).toHaveLength(1);
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    expect(audioMock.instances[0].close).toHaveBeenCalledTimes(1);
+
+    audioMock.startGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(audioMock.instances[0].close).toHaveBeenCalledTimes(2);
+    expect(speech.instances[0].stop).toHaveBeenCalledTimes(1);
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("keeps the full browser transcript when basic hold STT audio is capped", async () => {
+    const speech = installSpeechRecognitionMock();
+    sttTranscript = "gemini truncated transcript";
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const largeChunk = "A".repeat(1_600_000);
+    audioMock.instances[0].emit(largeChunk);
+    audioMock.instances[0].emit(largeChunk);
+    act(() =>
+      speech.instances[0].emitResult("browser transcript with the full tail", true),
+    );
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(
+      (sttRequests[0] as { audio_chunks_base64: string[] }).audio_chunks_base64,
+    ).toEqual([largeChunk]);
+    expect(chatTextBodies).toEqual([
+      expect.objectContaining({
+        message: "browser transcript with the full tail",
+      }),
+    ]);
+  });
+
+  it("opens the PIN gate when basic hold STT auth expires", async () => {
+    installSpeechRecognitionMock();
+    sttPostMode = "auth";
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    audioMock.instances[0].emit("AAECAw==");
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toHaveLength(1);
+    expect(chatTextBodies).toHaveLength(0);
+    expect(screen.getByLabelText("Private PIN")).toBeInTheDocument();
+    expect(
+      screen.getByText("Session expired. Enter your private PIN again."),
+    ).toBeInTheDocument();
   });
 
   it("falls back to browser transcript when Gemini STT times out", async () => {
@@ -1317,7 +1475,11 @@ describe("App", () => {
 
     const orb = screen.getByLabelText(/Voice orb/);
     fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
-    act(() => vi.advanceTimersByTime(230));
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
 
     view.unmount();
@@ -1325,6 +1487,7 @@ describe("App", () => {
 
     expect(speech.instances[0].abort).toHaveBeenCalledTimes(1);
     expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
+    expect(audioMock.instances[0].stopCapture).toHaveBeenCalledTimes(1);
   });
 
   it("keeps Live connected when basic hold speech recognition is unavailable", async () => {
@@ -1339,7 +1502,7 @@ describe("App", () => {
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Hold$/ })).toBeInTheDocument();
     expect(
-      screen.getByText(/Basic hold-to-talk needs browser speech recognition/i),
+      screen.getByText(/Hold mode needs browser speech recognition/i),
     ).toBeInTheDocument();
   });
 

@@ -9,7 +9,8 @@ Phone/laptop browser over localhost or Tailscale
   -> Gemini ephemeral token broker
   -> browser realtime provider adapter
   -> browser Gemini Live websocket session
-  -> optional basic hold-to-talk speech recognition and /chat/text job lifecycle
+  -> basic hold-to-talk browser interim text and backend Gemini STT
+  -> /chat/text job lifecycle
   -> Gemini tool call normalization
   -> backend tool policy and cancellation checks
   -> Hermes agent adapter
@@ -27,11 +28,11 @@ chat and Basic Hold.
 
 - `apps/web`: React voice UI, orb state machine, audio worklets, realtime
   provider boundary, Gemini Live protocol wrapper, opt-in basic hold-to-talk
-  speech recognition, local diagnostics recorder, transcript drawer, and text
-  fallback.
+  audio capture with browser interim text, local diagnostics recorder,
+  transcript drawer, and text fallback.
 - `apps/server`: FastAPI auth/session layer, Gemini token broker, tool allowlist,
-  SQLite store, confirmation records, readiness/log controls, and Hermes adapter
-  implementations.
+  Gemini STT transcription endpoint, SQLite store, confirmation records,
+  readiness/log controls, and Hermes adapter implementations.
 - `scripts/browser-responsive.spec.ts`: Playwright responsive/browser smoke with
   fake microphone permission and screenshot capture.
 - `scripts/e2e-real-gemini-live.mjs`: credentialed Gemini Live smoke that mints
@@ -44,9 +45,10 @@ The browser never receives long-lived Gemini/Google API keys, Hermes state, or
 direct local-tool access. It receives backend-issued Gemini ephemeral tokens and
 can ask the backend to run only allowlisted HVC tools.
 
-Basic hold-to-talk is an explicit browser speech-recognition mode. It sends the
-recognized text through the backend chat job lifecycle, but the recognition
-itself is owned by the operator's browser implementation.
+Basic hold-to-talk records audio only while the operator holds the orb. Browser
+speech recognition provides interim text and fallback; the authenticated backend
+STT path can finalize the transcript before it enters the same chat job
+lifecycle as typed messages. Audio is not persisted to disk.
 
 No-PIN mode is a localhost development convenience. Remote/proxied access
 without a PIN is blocked unless `HVC_ALLOW_NO_PIN_REMOTE=true` is set

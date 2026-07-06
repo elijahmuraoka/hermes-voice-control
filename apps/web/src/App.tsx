@@ -81,15 +81,17 @@ const SPOKEN_COMPLETION_NOTICE_TEXT = "Done. Background reply is ready.";
 const SPOKEN_COMPLETION_RESTORE_DELAY_MS = 2500;
 const SPOKEN_COMPLETION_RESTORE_CHECK_MS = 250;
 const SPOKEN_COMPLETION_MAX_DURATION_MS = 10000;
+const BASIC_HOLD_STT_AUDIO_BYTE_LIMIT = 1_920_000;
+const SESSION_EXPIRED_MESSAGE = "Session expired. Enter your private PIN again.";
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
   return [
     `You are the realtime voice transport for ${currentAgentName}.`,
-    "For every user request that needs an answer, call ask_agent with the user's latest words before giving a user-facing response.",
-    "Include recent transcript context when it helps the Hermes agent understand the request.",
+    "For requests needing an answer, call ask_agent with the user's latest words before responding.",
+    "Include recent transcript context when useful.",
     `Do not answer from your own model knowledge as ${currentAgentName}.`,
-    "After ask_agent returns, speak the returned speakable answer naturally and do not mention tool calls.",
-    "If the request appears to require permission or external action, still call ask_agent so the configured Hermes agent can explain the next step.",
+    "After ask_agent returns, speak its answer naturally without mentioning tools.",
+    "If permission or external action may be needed, call ask_agent so the Hermes agent can explain next steps.",
   ].join(" ");
 }
 
@@ -131,6 +133,8 @@ type SpeechCaptureState = {
   recognition: BrowserSpeechRecognition;
   audio: BrowserGeminiAudio | null;
   audioChunksBase64: string[];
+  audioBytes: number;
+  audioCapped: boolean;
   entryId: string | null;
   finalText: string;
   interimText: string;
@@ -286,6 +290,7 @@ export default function App() {
   const speechFinalizingRef = useRef(false);
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
+  const speechRecognitionDisclosureShownRef = useRef(false);
   const diagnosticsRef = useRef<HvcDiagnosticsRecorder | null>(null);
   const sessionGenerationRef = useRef(0);
   const connectingRef = useRef(false);
@@ -363,7 +368,7 @@ export default function App() {
       if (activeSpeechCapture) {
         activeSpeechCapture.finished = true;
         activeSpeechCapture.aborting = true;
-        speechCaptureRef.current = null;
+        clearSpeechCapture(activeSpeechCapture);
         try {
           activeSpeechCapture.recognition.abort();
         } catch {
@@ -825,7 +830,7 @@ export default function App() {
     } catch (error) {
       clearTextJobPollTimer(jobId);
       if (isAuthFailure(error)) {
-        requireAuth("Session expired. Enter your private PIN again.");
+        requireAuth(SESSION_EXPIRED_MESSAGE);
         dispatch({ type: "RECOVER" });
         return;
       }
@@ -888,7 +893,7 @@ export default function App() {
     } catch (error) {
       if (isAuthFailure(error)) {
         clearTextJobPollTimer(jobId);
-        requireAuth("Session expired. Enter your private PIN again.");
+        requireAuth(SESSION_EXPIRED_MESSAGE);
         dispatch({ type: "RECOVER" });
         return;
       }
@@ -1028,11 +1033,19 @@ export default function App() {
   }
 
   function speechRecognitionUnavailableMessage() {
-    return "Basic hold-to-talk needs browser speech recognition here. You can switch to Live mode or type in the transcript.";
+    return "Hold mode needs browser speech recognition. Switch to Live or type.";
   }
 
   function speechRecognitionPermissionMessage() {
-    return "Microphone permission was blocked. Allow microphone access for this site, then hold the orb again.";
+    return "Microphone blocked. Allow mic access, then hold again.";
+  }
+
+  function discloseBasicHoldTranscription() {
+    if (speechRecognitionDisclosureShownRef.current) return;
+    speechRecognitionDisclosureShownRef.current = true;
+    appendSystem(
+      "Basic Hold sends held audio to private STT, then sends text.",
+    );
   }
 
   async function primeBasicHoldMicrophonePermission({
@@ -1093,12 +1106,29 @@ export default function App() {
     capture.audio = audio;
     void audio
       .startCapture((chunk) => {
-        if (speechCaptureRef.current !== capture || capture.finished) return;
-        if (capture.audioChunksBase64.length < 1500)
-          capture.audioChunksBase64.push(chunk.data);
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.releaseRequested
+        )
+          return;
+        const bytes =
+          Math.floor((chunk.data.length * 3) / 4) -
+          (chunk.data.endsWith("==") ? 2 : chunk.data.endsWith("=") ? 1 : 0);
+        if (capture.audioBytes + bytes > BASIC_HOLD_STT_AUDIO_BYTE_LIMIT) {
+          capture.audioCapped = true;
+          return;
+        }
+        capture.audioBytes += bytes;
+        capture.audioChunksBase64.push(chunk.data);
       })
       .then(() => {
-        if (speechCaptureRef.current !== capture || capture.finished)
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.releaseRequested ||
+          capture.audio !== audio
+        )
           audio.close();
       })
       .catch(() => {
@@ -1154,10 +1184,10 @@ export default function App() {
     if (error === "not-allowed" || error === "service-not-allowed")
       return speechRecognitionPermissionMessage();
     if (error === "audio-capture")
-      return "I could not reach a microphone in this browser. Check the input device, then try again or type in the transcript.";
+      return "I could not reach the microphone. Check the input, then try again or type.";
     if (error === "language-not-supported")
-      return "This browser does not support speech recognition for your current language. Switch to Live or type in the transcript.";
-    return "Browser speech recognition stopped before it understood you. Try again, switch to Live, or type in the transcript.";
+      return "This browser cannot recognize that language. Switch to Live or type.";
+    return "Browser speech recognition stopped early. Try again, switch to Live, or type.";
   }
 
   function isBlockingSpeechRecognitionError(error: string) {
@@ -1288,6 +1318,7 @@ export default function App() {
     capture: SpeechCaptureState,
     browserText: string,
     audioChunksBase64: string[],
+    audioCapped: boolean,
   ) {
     if (capture.entryId) {
       setEntries((items) =>
@@ -1311,8 +1342,22 @@ export default function App() {
             browserText,
           );
           const transcript = result.transcript.trim();
-          if (transcript) finalText = transcript;
-        } catch {
+          if (transcript && !(audioCapped && browserText)) finalText = transcript;
+        } catch (error) {
+          if (isAuthFailure(error)) {
+            if (capture.entryId) {
+              setEntries((items) =>
+                items.map((entry) =>
+                  entry.id === capture.entryId
+                    ? { ...entry, text: browserText || SESSION_EXPIRED_MESSAGE, status: "failed" }
+                    : entry,
+                ),
+              );
+            }
+            requireAuth(SESSION_EXPIRED_MESSAGE);
+            dispatch({ type: "RECOVER" });
+            return;
+          }
           // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
         }
       }
@@ -1327,6 +1372,7 @@ export default function App() {
     capture.finished = true;
     const text = speechCaptureText(capture);
     const audioChunksBase64 = capture.audioChunksBase64.slice();
+    const audioCapped = capture.audioCapped;
     clearSpeechCapture(capture);
 
     if (!text && audioChunksBase64.length === 0) {
@@ -1335,7 +1381,7 @@ export default function App() {
     }
     speechFinalizingRef.current = true;
     dispatch({ type: "POINTER_UP" });
-    void finalizeSpeechCaptureTranscript(capture, text, audioChunksBase64);
+    void finalizeSpeechCaptureTranscript(capture, text, audioChunksBase64, audioCapped);
   }
 
   function startBasicHoldRecognition(press: PressState): boolean {
@@ -1359,6 +1405,8 @@ export default function App() {
       recognition,
       audio: null,
       audioChunksBase64: [],
+      audioBytes: 0,
+      audioCapped: false,
       entryId: null,
       finalText: "",
       interimText: "",
@@ -1482,6 +1530,7 @@ export default function App() {
       return;
     }
     capture.releaseRequested = true;
+    stopSpeechCaptureAudio(capture);
     if (capture.ended) {
       finishSpeechCapture(capture);
       return;
@@ -1511,6 +1560,7 @@ export default function App() {
     }
     endCall();
     setVoiceModeImmediate("push-to-talk");
+    discloseBasicHoldTranscription();
     void primeBasicHoldMicrophonePermission();
   }
 
@@ -1801,7 +1851,7 @@ export default function App() {
         if (!isCurrentSessionGeneration(sessionGeneration)) return;
         markCaptureNotReady();
         if (isAuthFailure(error)) {
-          requireAuth("Session expired. Enter your private PIN again.");
+          requireAuth(SESSION_EXPIRED_MESSAGE);
           dispatch({ type: "RECOVER" });
           return;
         }
@@ -1870,7 +1920,7 @@ export default function App() {
       sessionRef.current = null;
       markCaptureNotReady();
       if (isAuthFailure(error)) {
-        requireAuth("Session expired. Enter your private PIN again.");
+        requireAuth(SESSION_EXPIRED_MESSAGE);
         dispatch({ type: "RECOVER" });
         return;
       }
@@ -2214,7 +2264,7 @@ export default function App() {
       }, 900);
     } catch (error) {
       if (isAuthFailure(error)) {
-        requireAuth("Session expired. Enter your private PIN again.");
+        requireAuth(SESSION_EXPIRED_MESSAGE);
         dispatch({ type: "RECOVER" });
         return;
       }

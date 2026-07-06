@@ -197,7 +197,7 @@ class RealGeminiSttTranscriber(GeminiSttTranscriber):
         response = client.models.generate_content(
             model=self.model,
             contents=[instruction, audio_part],
-            config={"temperature": 0, "max_output_tokens": 256},
+            config={"temperature": 0, "max_output_tokens": 2048},
         )
         transcript = extract_response_text(response).strip()
         return TranscriptionResult(transcript, self.provider, self.model)

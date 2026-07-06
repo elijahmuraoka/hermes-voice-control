@@ -538,7 +538,7 @@ def test_real_gemini_stt_transcribes_without_exposing_secret(tmp_path, monkeypat
     }
     assert captured["api_key"] == "super-secret-gemini-key"
     assert captured["model"] == "gemini-test-stt"
-    assert captured["config"] == {"temperature": 0, "max_output_tokens": 256}
+    assert captured["config"] == {"temperature": 0, "max_output_tokens": 2048}
     assert "Transcribe the provided audio verbatim" in captured["contents"][0]
     assert "super-secret-gemini-key" not in res.text
     logs = client.get("/logs").text

@@ -133,7 +133,7 @@ for (const viewport of viewports) {
     await expect(endButton).toHaveCount(0);
     await expect(page.getByText(`Hold to talk to ${AGENT_NAME}`)).toBeVisible();
     await expect(
-      page.getByLabel(/Agent connection: Agent connected/),
+      page.getByLabel(/Agent connection: Ready/),
     ).toBeVisible();
     if (viewport.width <= DRAWER_BREAKPOINT) {
       await expect(textInput).toBeHidden();

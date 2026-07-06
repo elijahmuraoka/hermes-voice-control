@@ -8,6 +8,9 @@ interface Props {
   onPointerDown: React.PointerEventHandler<HTMLButtonElement>;
   onPointerUp: React.PointerEventHandler<HTMLButtonElement>;
   onPointerCancel: React.PointerEventHandler<HTMLButtonElement>;
+  onRetry: () => void;
+  nudging?: boolean;
+  nudgeKey?: number;
 }
 export function VoiceOrb({
   state,
@@ -16,8 +19,13 @@ export function VoiceOrb({
   onPointerDown,
   onPointerUp,
   onPointerCancel,
+  onRetry,
+  nudging = false,
+  nudgeKey = 0,
 }: Props) {
-  const cls = `voice-orb state-${state.callState}`;
+  const cls = `voice-orb state-${state.callState}${
+    nudging ? ` is-nudging nudge-${nudgeKey % 2}` : ""
+  }`;
   const label = voiceStateLabel(state, mode, agentName);
   const helperText = subcopy(state.callState, mode, agentName);
   return (
@@ -40,6 +48,12 @@ export function VoiceOrb({
       <div className="state-copy">
         <p>{label}</p>
         {helperText ? <span>{helperText}</span> : null}
+        {nudging ? <span className="sr-only">Still finalizing.</span> : null}
+        {state.callState === "error" ? (
+          <button type="button" className="retry-pill" onClick={onRetry}>
+            Tap to retry
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -60,30 +74,34 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
   if (mode === "push-to-talk") {
     switch (callState) {
       case "idle":
-        return "Hold the orb, speak, then release.";
+        return "Hold, speak.";
       case "hold-to-talk":
-        return "Release to send this turn.";
+        return "Release to send.";
+      case "finalizing":
+        return "Finalizing";
       case "agent-thinking":
-        return `${agentName} is working in the transcript.`;
+        return `${agentName} is working.`;
       case "error":
-        return "Open transcript for recovery details.";
+        return "Retry voice.";
       default:
         return "";
     }
   }
   switch (callState) {
     case "hold-to-talk":
-      return "Release to finish the turn.";
+      return "Release to finish.";
     case "listening":
-      return "Tap to pause. Hold for a longer thought.";
+      return "Tap to pause.";
     case "paused":
       return `Tap the orb to resume ${agentName}.`;
     case "agent-speaking":
-      return "Hold the orb to barge in.";
+      return "Hold to interrupt.";
     case "agent-thinking":
       return "One moment.";
+    case "reconnecting":
+      return "Keeping voice alive.";
     case "error":
-      return "Open transcript for recovery details.";
+      return "Retry voice.";
     default:
       return "";
   }

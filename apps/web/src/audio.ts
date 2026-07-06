@@ -12,6 +12,7 @@ export interface GeminiLiveAudio {
   stopCapture(): void;
   setCaptureEnabled(enabled: boolean): void;
   playPcm16Base64(base64: string, sourceSampleRate?: number): Promise<void>;
+  resume(): Promise<void>;
   interrupt(): void;
   close(): void;
 }
@@ -111,6 +112,7 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
   private playbackNode?: AudioWorkletNode;
   private mediaStream?: MediaStream;
   private captureEnabled = true;
+  private closed = false;
 
   constructor(options: BrowserGeminiAudioOptions = {}) {
     const AudioContextCtor =
@@ -126,11 +128,12 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
   }
 
   async startCapture(onChunk: (chunk: PcmChunk) => void): Promise<void> {
+    if (this.closed) return;
     if (this.captureNode) return;
     if (!this.mediaDevices)
       throw new Error("MediaDevices is not available in this browser");
 
-    this.mediaStream = await this.mediaDevices.getUserMedia({
+    const mediaStream = await this.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
         echoCancellation: true,
@@ -138,12 +141,33 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
         autoGainControl: true,
       },
     });
-    this.captureContext = new this.AudioContextCtor();
-    await this.captureContext.audioWorklet.addModule(this.captureWorkletUrl);
+    if (this.closed) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    let captureContext: AudioContext;
+    try {
+      captureContext = new this.AudioContextCtor();
+    } catch (error) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      throw error;
+    }
+    try {
+      await captureContext.audioWorklet.addModule(this.captureWorkletUrl);
+    } catch (error) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      void captureContext.close();
+      throw error;
+    }
+    if (this.closed) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      void captureContext.close();
+      return;
+    }
+    this.mediaStream = mediaStream;
+    this.captureContext = captureContext;
 
-    const source = this.captureContext.createMediaStreamSource(
-      this.mediaStream,
-    );
+    const source = this.captureContext.createMediaStreamSource(this.mediaStream);
     this.captureNode = new AudioWorkletNode(
       this.captureContext,
       "audio-capture-processor",
@@ -200,11 +224,19 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     node.port.postMessage(samples, [samples.buffer]);
   }
 
+  async resume(): Promise<void> {
+    await Promise.all([
+      resumeAudioContext(this.captureContext),
+      resumeAudioContext(this.playbackContext),
+    ]);
+  }
+
   interrupt(): void {
     this.playbackNode?.port.postMessage("interrupt");
   }
 
   close(): void {
+    this.closed = true;
     this.stopCapture();
     this.interrupt();
     this.playbackNode?.disconnect();
@@ -229,6 +261,12 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     this.playbackNode.connect(this.playbackContext.destination);
     return this.playbackNode;
   }
+}
+
+async function resumeAudioContext(context?: AudioContext): Promise<void> {
+  const state = context?.state as AudioContextState | "interrupted" | undefined;
+  if (!context || (state !== "suspended" && state !== "interrupted")) return;
+  await context.resume();
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {

@@ -219,6 +219,8 @@ def extract_response_text(response: object) -> str:
     )
 
 def build_transcriber(gemini_mode: str, stt_provider: str) -> GeminiSttTranscriber:
+    if stt_provider == "browser":
+        return BrowserFallbackTranscriber()
     if gemini_mode == "mock":
         return MockGeminiSttTranscriber()
     if stt_provider == "gemini":

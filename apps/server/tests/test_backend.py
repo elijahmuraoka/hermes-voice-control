@@ -24,8 +24,8 @@ def make_client(tmp_path: Path, **overrides) -> TestClient:
     return TestClient(create_app(settings))
 def make_real_gemini_client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(Settings(pin=TEST_PIN, db_path=tmp_path / "test-real-gemini.sqlite3", gemini_mode="real")))
-def make_pin_client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, allow_logs_endpoint=True, db_path=tmp_path / "test-pin.sqlite3")))
+def make_pin_client(tmp_path: Path, **overrides) -> TestClient:
+    return TestClient(create_app(Settings(pin=TEST_PIN, require_pin=True, allow_logs_endpoint=True, db_path=tmp_path / "test-pin.sqlite3", **overrides)))
 def login(client: TestClient) -> str:
     res = client.post("/auth/pin", json={"pin": TEST_PIN})
     assert res.status_code == 200
@@ -434,7 +434,7 @@ def test_stt_transcribe_requires_auth_in_pin_mode(tmp_path):
     assert res.status_code == 401
 
 def test_mock_stt_transcribe_returns_deterministic_transcript(tmp_path):
-    client = make_pin_client(tmp_path)
+    client = make_pin_client(tmp_path, stt_provider="gemini")
     login(client)
     res = client.post(
         "/stt/transcribe",
@@ -465,10 +465,31 @@ def test_browser_stt_provider_returns_fallback_signal(tmp_path, monkeypatch):
         "fallback": True,
     }
 
+def test_browser_stt_provider_is_honored_in_mock_mode(tmp_path):
+    client = make_pin_client(tmp_path, stt_provider="browser")
+    login(client)
+    res = client.post(
+        "/stt/transcribe",
+        json={"audio_chunks_base64": [PCM_CHUNK], "fallback_transcript": "browser guess"},
+    )
+    assert res.status_code == 200
+    assert res.json() == {
+        "transcript": "",
+        "provider": "browser",
+        "model": None,
+        "fallback": True,
+    }
+
 def test_stt_transcribe_rejects_oversized_audio(tmp_path):
     client = make_client(tmp_path)
     oversized = base64.b64encode(b"\x00" * 2_100_001).decode("ascii")
     res = client.post("/stt/transcribe", json={"audio_chunks_base64": [oversized]})
+    assert res.status_code == 413
+
+def test_stt_transcribe_rejects_cumulative_oversized_chunks(tmp_path):
+    client = make_client(tmp_path)
+    chunk = base64.b64encode(b"\x00" * 1_050_001).decode("ascii")
+    res = client.post("/stt/transcribe", json={"audio_chunks_base64": [chunk, chunk]})
     assert res.status_code == 413
 
 @pytest.mark.parametrize(

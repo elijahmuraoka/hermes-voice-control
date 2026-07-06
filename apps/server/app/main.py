@@ -96,6 +96,24 @@ def decode_audio_base64(value: str) -> bytes:
         raise HTTPException(status_code=422, detail="Audio payload is required")
     return decoded
 
+def decode_audio_chunks_base64(values: list[str]) -> bytes:
+    chunks: list[bytes] = []
+    estimated_total = 0
+    total = 0
+    for value in values:
+        stripped = value.strip()
+        if not stripped:
+            raise HTTPException(status_code=422, detail="Audio payload is required")
+        estimated_total += decoded_base64_length(stripped)
+        if estimated_total > STT_MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Audio payload is too large")
+        chunk = decode_audio_base64(stripped)
+        total += len(chunk)
+        if total > STT_MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Audio payload is too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 def wav_from_pcm16(pcm: bytes, sample_rate: int) -> bytes:
     if sample_rate != STT_SAMPLE_RATE:
         raise HTTPException(status_code=422, detail="Audio sample rate must be 16000")
@@ -119,11 +137,7 @@ def stt_audio_from_payload(payload: SttTranscribeRequest) -> tuple[bytes, str]:
     if payload.audio_chunks_base64:
         if payload.mime_type != STT_PCM_MIME_TYPE:
             raise HTTPException(status_code=415, detail="Hold-to-talk STT expects PCM16 16kHz audio")
-        chunks = [decode_audio_base64(chunk) for chunk in payload.audio_chunks_base64]
-        total_bytes = sum(len(chunk) for chunk in chunks)
-        if total_bytes > STT_MAX_AUDIO_BYTES:
-            raise HTTPException(status_code=413, detail="Audio payload is too large")
-        return wav_from_pcm16(b"".join(chunks), payload.sample_rate), STT_WAV_MIME_TYPE
+        return wav_from_pcm16(decode_audio_chunks_base64(payload.audio_chunks_base64), payload.sample_rate), STT_WAV_MIME_TYPE
     if payload.audio_base64:
         if payload.mime_type != STT_WAV_MIME_TYPE:
             raise HTTPException(status_code=415, detail="Audio upload must be audio/wav")

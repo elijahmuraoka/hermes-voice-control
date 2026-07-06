@@ -29,6 +29,7 @@ const audioMock = vi.hoisted(() => ({
     close: ReturnType<typeof vi.fn>;
     emit: (data?: string) => void;
   }>,
+  createError: null as Error | null,
   startError: null as Error | null,
   startGate: null as { promise: Promise<void>; resolve: () => void } | null,
 }));
@@ -53,6 +54,7 @@ let chatTextBodies: unknown[] = [];
 let restoreNavigatorMediaDevices: (() => void) | null = null;
 let readyzOk = true;
 let readyzHermesAvailable = true;
+let readyzSttProvider = "gemini";
 let readyzDeferred: { promise: Promise<void>; resolve: () => void } | null = null;
 
 interface MockSpeechUtterance {
@@ -288,7 +290,8 @@ function speechResults(
 
 function installSpeechRecognitionMock({
   stopEnds = true,
-}: { stopEnds?: boolean } = {}): {
+  startThrows = false,
+}: { stopEnds?: boolean; startThrows?: boolean } = {}): {
   instances: MockSpeechRecognitionInstance[];
 } {
   const instances: MockSpeechRecognitionInstance[] = [];
@@ -301,7 +304,9 @@ function installSpeechRecognitionMock({
     onresult: ((event: MockSpeechRecognitionEvent) => void) | null = null;
     onerror: ((event: MockSpeechRecognitionErrorEvent) => void) | null = null;
     onend: (() => void) | null = null;
-    start = vi.fn();
+    start = vi.fn(() => {
+      if (startThrows) throw new Error("speech recognition unavailable");
+    });
     stop = vi.fn(() => {
       if (stopEnds) this.onend?.();
     });
@@ -455,9 +460,11 @@ vi.mock("./audio", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./audio")>();
   class MockBrowserGeminiAudio {
     private onChunk: ((chunk: { data: string; mimeType: typeof actual.GEMINI_INPUT_MIME_TYPE }) => void) | null = null;
+    private closed = false;
     startCapture = vi.fn(async (onChunk: (chunk: { data: string; mimeType: typeof actual.GEMINI_INPUT_MIME_TYPE }) => void) => {
       if (audioMock.startError) throw audioMock.startError;
       if (audioMock.startGate) await audioMock.startGate.promise;
+      if (this.closed) return;
       this.onChunk = onChunk;
     });
     stopCapture = vi.fn();
@@ -465,11 +472,16 @@ vi.mock("./audio", async (importOriginal) => {
     playPcm16Base64 = vi.fn(async () => undefined);
     resume = vi.fn(async () => undefined);
     interrupt = vi.fn();
-    close = vi.fn(() => this.stopCapture());
+    close = vi.fn(() => {
+      this.closed = true;
+      this.stopCapture();
+    });
     emit(data = "AAECAw==") {
+      if (this.closed) return;
       this.onChunk?.({ data, mimeType: actual.GEMINI_INPUT_MIME_TYPE });
     }
     constructor() {
+      if (audioMock.createError) throw audioMock.createError;
       audioMock.instances.push(this);
     }
   }
@@ -513,6 +525,7 @@ describe("App", () => {
     chatTextBodies = [];
     readyzOk = true;
     readyzHermesAvailable = true;
+    readyzSttProvider = "gemini";
     readyzDeferred = null;
     earconMock.plays = [];
     earconMock.unlocks = 0;
@@ -520,6 +533,7 @@ describe("App", () => {
     chatJobStatuses.clear();
     chatCancelStatuses.clear();
     audioMock.instances = [];
+    audioMock.createError = null;
     audioMock.startError = null;
     audioMock.startGate = null;
     Object.defineProperty(window, "localStorage", {
@@ -540,7 +554,7 @@ describe("App", () => {
               checks: {
                 hermes_adapter: "api",
                 hermes: { kind: "api", available: readyzHermesAvailable },
-                stt_provider: "gemini",
+                stt_provider: readyzSttProvider,
               },
             }),
             {
@@ -721,7 +735,7 @@ describe("App", () => {
   function switchToBasicHoldMode() {
     const holdButton = screen.queryByRole("button", { name: /^Hold$/ });
     if (holdButton) fireEvent.click(holdButton);
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
   }
 
   async function switchToLiveMode(): Promise<TestVoiceSession> {
@@ -852,7 +866,7 @@ describe("App", () => {
     await renderUnlockedApp();
     vi.useFakeTimers();
 
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Mute$/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Live$/ })).toBeInTheDocument();
 
@@ -1021,6 +1035,493 @@ describe("App", () => {
       ]),
     );
     expect(screen.getByText("gemini corrected phrase")).toBeInTheDocument();
+  });
+
+  it("keeps hold-to-talk alive when recognition service is unavailable and Gemini STT can transcribe", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    sttTranscript = "gemini transcript from standalone pwa";
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => speech.instances[0].emitError("service-not-allowed"));
+    await act(async () => {
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    audioMock.instances[0].emit("AAECAw==");
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+    expect(screen.queryByText(/Microphone blocked/i)).not.toBeInTheDocument();
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toEqual([
+      expect.objectContaining({
+        audio_chunks_base64: ["AAECAw=="],
+        fallback_transcript: "",
+      }),
+    ]);
+    await waitFor(() =>
+      expect(chatTextBodies).toEqual([
+        expect.objectContaining({
+          message: "gemini transcript from standalone pwa",
+        }),
+      ]),
+    );
+  });
+
+  it("uses PCM-only hold-to-talk when browser speech recognition is missing and Gemini STT can transcribe", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    sttTranscript = "gemini transcript without browser recognition";
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(audioMock.instances).toHaveLength(1);
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+    audioMock.instances[0].emit("AAECAw==");
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toHaveLength(1);
+    await waitFor(() =>
+      expect(chatTextBodies).toEqual([
+        expect.objectContaining({
+          message: "gemini transcript without browser recognition",
+        }),
+      ]),
+    );
+  });
+
+  it("stops PCM-only audio immediately on release before audio startup settles", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    audioMock.startGate = createConnectGate();
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(audioMock.instances).toHaveLength(1);
+
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    expect(audioMock.instances[0].close).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
+    expect(sttRequests).toHaveLength(0);
+
+    audioMock.startGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    audioMock.instances[0].emit("AAECAw==");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toHaveLength(0);
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("disables PCM-only hold when later readiness no longer confirms server STT", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+
+    readyzSttProvider = "";
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText(
+        "Hold-to-talk needs browser speech recognition here. Use Live or type.",
+      ),
+    ).toBeInTheDocument();
+    expect(audioMock.instances).toHaveLength(0);
+    expect(sttRequests).toHaveLength(0);
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("does not enter PCM-only hold when readiness is unhealthy", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    readyzOk = false;
+    readyzSttProvider = "gemini";
+    await renderUnlockedApp();
+    await waitFor(() =>
+      expect(screen.getByText("Backend unreachable")).toBeInTheDocument(),
+    );
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText(
+        "Hold-to-talk needs browser speech recognition here. Use Live or type.",
+      ),
+    ).toBeInTheDocument();
+    expect(audioMock.instances).toHaveLength(0);
+    expect(sttRequests).toHaveLength(0);
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("does not keep PCM-only hold enabled after the browser goes offline", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    act(() => window.dispatchEvent(new Event("offline")));
+    expect(screen.getByText("Offline")).toBeInTheDocument();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText(
+        "Hold-to-talk needs browser speech recognition here. Use Live or type.",
+      ),
+    ).toBeInTheDocument();
+    expect(audioMock.instances).toHaveLength(0);
+    expect(sttRequests).toHaveLength(0);
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("preserves captured PCM when recognition service errors after release", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    sttTranscript = "gemini transcript after late recognition error";
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    audioMock.instances[0].emit("AAECAw==");
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    act(() => speech.instances[0].emitError("service-not-allowed"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toEqual([
+      expect.objectContaining({ audio_chunks_base64: ["AAECAw=="] }),
+    ]);
+    await waitFor(() =>
+      expect(chatTextBodies).toEqual([
+        expect.objectContaining({
+          message: "gemini transcript after late recognition error",
+        }),
+      ]),
+    );
+    expect(screen.queryByText(/could not start microphone audio/i)).not.toBeInTheDocument();
+  });
+
+  it("enters hold state when recognition start falls back to PCM-only", async () => {
+    installSpeechRecognitionMock({ startThrows: true });
+    sttTranscript = "gemini transcript after start fallback";
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Holding to talk")).toBeInTheDocument();
+    expect(audioMock.instances).toHaveLength(1);
+    audioMock.instances[0].emit("AAECAw==");
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toEqual([
+      expect.objectContaining({ audio_chunks_base64: ["AAECAw=="] }),
+    ]);
+    await waitFor(() =>
+      expect(chatTextBodies).toEqual([
+        expect.objectContaining({
+          message: "gemini transcript after start fallback",
+        }),
+      ]),
+    );
+  });
+
+  it("surfaces PCM-only hold-to-talk transcription errors without treating speech as silence", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    sttPostMode = "error";
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    audioMock.instances[0].emit("AAECAw==");
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toHaveLength(1);
+    expect(chatTextBodies).toHaveLength(0);
+    expect(
+      screen.getByText(
+        "Hold-to-talk could not transcribe that. Try again, use Live, or type.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
+  });
+
+  it("surfaces PCM-only hold-to-talk transcription timeouts without treating speech as silence", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    sttPostMode = "never";
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    audioMock.instances[0].emit("AAECAw==");
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4100);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toHaveLength(1);
+    expect(chatTextBodies).toHaveLength(0);
+    expect(
+      screen.getByText(
+        "Hold-to-talk could not transcribe that. Try again, use Live, or type.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
+  });
+
+  it("does not enter PCM-only hold before server STT provider is confirmed", async () => {
+    readyzDeferred = createConnectGate();
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    await renderUnlockedApp();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText(
+        "Hold-to-talk needs browser speech recognition here. Use Live or type.",
+      ),
+    ).toBeInTheDocument();
+    expect(audioMock.instances).toHaveLength(0);
+    expect(sttRequests).toHaveLength(0);
+    expect(chatTextBodies).toHaveLength(0);
+
+    readyzDeferred.resolve();
+  });
+
+  it("fails PCM-only hold when microphone audio capture cannot start", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    audioMock.startError = new Error("audio worklet unavailable");
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText("Hold-to-talk could not start microphone audio. Use Live or type."),
+    ).toBeInTheDocument();
+    expect(sttRequests).toHaveLength(0);
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("does not enter hold state when recognition fallback setup fails", async () => {
+    installSpeechRecognitionMock({ startThrows: true });
+    audioMock.createError = new Error("audio context unavailable");
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText("Hold-to-talk could not start microphone audio. Use Live or type."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
+    expect(audioMock.instances).toHaveLength(0);
+    expect(sttRequests).toHaveLength(0);
+    expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("keeps browser-provider hold failures honest when recognition service is unavailable", async () => {
+    readyzSttProvider = "browser";
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+
+    act(() => speech.instances[0].emitError("service-not-allowed"));
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText(
+        "Hold-to-talk needs browser speech recognition here. Use Live or type.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Microphone blocked/i)).not.toBeInTheDocument();
+    expect(chatTextBodies).toHaveLength(0);
+    expect(sttRequests).toHaveLength(0);
+  });
+
+  it("still fails hold-to-talk on real microphone permission denial", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+    });
+
+    act(() => speech.instances[0].emitError("not-allowed"));
+    vi.useRealTimers();
+
+    expect(
+      screen.getByText("Microphone blocked. Allow mic access, then hold again."),
+    ).toBeInTheDocument();
+    expect(chatTextBodies).toHaveLength(0);
+    expect(sttRequests).toHaveLength(0);
   });
 
   it("stops buffering STT audio immediately on basic hold release", async () => {
@@ -1493,7 +1994,7 @@ describe("App", () => {
     vi.useRealTimers();
 
     expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
   });
 
@@ -1553,7 +2054,7 @@ describe("App", () => {
 
     expect(speech.instances[0].start).toHaveBeenCalledTimes(3);
     expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
     expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
   });
@@ -1602,7 +2103,7 @@ describe("App", () => {
 
     expect(speech.instances[0].stop).toHaveBeenCalledTimes(1);
     expect(screen.getByText("I didn't catch that.")).toBeInTheDocument();
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
     expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
   });
@@ -1621,7 +2122,7 @@ describe("App", () => {
     fireEvent.pointerCancel(orb, { pointerId: 1 });
 
     expect(speech.instances[0].abort).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
     expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
   });
@@ -1653,9 +2154,11 @@ describe("App", () => {
   });
 
   it("keeps Live connected when basic hold speech recognition is unavailable", async () => {
+    readyzSttProvider = "browser";
     vi.stubGlobal("SpeechRecognition", undefined);
     vi.stubGlobal("webkitSpeechRecognition", undefined);
     await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
     const session = await startListeningVoice();
 
     fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
@@ -1664,7 +2167,7 @@ describe("App", () => {
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Hold$/ })).toBeInTheDocument();
     expect(
-      screen.getByText(/Hold mode needs browser speech recognition/i),
+      screen.getByText(/Hold-to-talk needs browser speech recognition here/i),
     ).toBeInTheDocument();
   });
 
@@ -1681,7 +2184,7 @@ describe("App", () => {
     act(() => vi.advanceTimersByTime(230));
 
     expect(recognition.instances).toHaveLength(0);
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
     expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
   });
 
@@ -1739,7 +2242,7 @@ describe("App", () => {
       screen.getByRole("button", { name: /Cancel background reply/i }),
     ).toBeInTheDocument();
     expect(input).not.toBeDisabled();
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Live$/ })).toBeInTheDocument();
 
     await act(async () => {
@@ -2543,7 +3046,7 @@ describe("App", () => {
           await vi.advanceTimersByTimeAsync(230);
         });
         fireEvent.pointerUp(orb, { pointerId: 2 });
-        expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+        expect(screen.getByText("Thinking.")).toBeInTheDocument();
       },
     ],
     [
@@ -3272,19 +3775,19 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     fireEvent.pointerUp(orb, { pointerId: 2 });
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     fireEvent.focus(screen.getByLabelText("Type a message to your Hermes agent"));
 
     expect(
-      screen.queryByText("Finishing your turn..."),
+      screen.queryByText("Thinking."),
     ).not.toBeInTheDocument();
     expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("turn-complete"));
 
     expect(
-      screen.queryByText("Finishing your turn..."),
+      screen.queryByText("Thinking."),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
   });
@@ -3311,7 +3814,7 @@ describe("App", () => {
     );
     const micCallsBeforeRecovery =
       realtimeMock.instances[0].setMicrophoneEnabled.mock.calls.length;
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(3500));
 
@@ -3427,7 +3930,7 @@ describe("App", () => {
     ).toBeLessThan(
       realtimeMock.instances[0].setHoldToTalk.mock.invocationCallOrder.at(-1),
     );
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
   });
 
   it("recovers immediately when the provider completes a silent hold turn", async () => {
@@ -3462,7 +3965,7 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     fireEvent.pointerUp(orb, { pointerId: 2 });
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(1000));
     fireEvent.pointerDown(orb, { pointerId: 3, button: 0 });
@@ -3489,7 +3992,7 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     fireEvent.pointerUp(orb, { pointerId: 2 });
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(1000));
     fireEvent.pointerDown(orb, { pointerId: 3, button: 0 });
@@ -3498,7 +4001,7 @@ describe("App", () => {
     act(() => realtimeMock.instances[0].callbacks.onStatus("turn-complete"));
 
     expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(3500));
 
@@ -3519,7 +4022,7 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     fireEvent.pointerUp(orb, { pointerId: 2 });
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(1000));
     fireEvent.pointerDown(orb, { pointerId: 3, button: 0 });
@@ -3588,7 +4091,7 @@ describe("App", () => {
     act(() => session.callbacks.onStatus("turn-complete"));
 
     expect(screen.getAllByText("I didn't catch that.")).toHaveLength(1);
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(3500));
     expect(screen.getAllByText("I didn't catch that.")).toHaveLength(2);
@@ -3611,7 +4114,7 @@ describe("App", () => {
     fireEvent.pointerDown(orb, { pointerId: 3, button: 0 });
     act(() => vi.advanceTimersByTime(230));
     fireEvent.pointerUp(orb, { pointerId: 3 });
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => session.callbacks.onStatus("agent-speaking"));
 
@@ -3724,7 +4227,7 @@ describe("App", () => {
     act(() => vi.advanceTimersByTime(3500));
 
     expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("turn-complete"));
 
@@ -3800,14 +4303,14 @@ describe("App", () => {
     expect(
       screen.queryByText(/did not return a response/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(14000));
 
     expect(
       screen.queryByText(/did not return a response/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Finishing your turn...")).toBeInTheDocument();
+    expect(screen.getByText("Thinking.")).toBeInTheDocument();
 
     act(() => {
       realtimeMock.instances[0].callbacks.onToolResponse?.({
@@ -4059,7 +4562,7 @@ describe("App", () => {
     vi.useRealTimers();
 
     expect(screen.queryByText("Voice reconnected.")).not.toBeInTheDocument();
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
   });
 
   it("does not schedule reconnect while the initial Live connection is pending", async () => {
@@ -4258,7 +4761,7 @@ describe("App", () => {
 
     expect(realtimeMock.instances).toHaveLength(1);
     expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
   });
 
   it("does not reconnect or resume a parked idle Live session on visibility return", async () => {
@@ -4444,8 +4947,12 @@ describe("App", () => {
   });
 
   it("keeps the retry pill in hold mode instead of starting Live", async () => {
+    readyzSttProvider = "browser";
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
     const user = userEvent.setup();
     await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
     const orb = screen.getByLabelText(/Voice orb/);
     vi.useFakeTimers();
 
@@ -4460,7 +4967,7 @@ describe("App", () => {
     await user.click(screen.getByText("Tap to retry"));
 
     expect(realtimeMock.instances).toHaveLength(0);
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
   });
 
   it("shows finalizing feedback and nudges blocked hold attempts", async () => {
@@ -4578,7 +5085,7 @@ describe("App", () => {
     expect(earconMock.plays.filter((name) => name === "session-end")).toHaveLength(
       1,
     );
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
   });
 
   it("does not play a session-end sound when switching to Hold after Live setup failed", async () => {
@@ -4600,6 +5107,6 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /^Hold$/ }));
 
     expect(earconMock.plays).not.toContain("session-end");
-    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
   });
 });

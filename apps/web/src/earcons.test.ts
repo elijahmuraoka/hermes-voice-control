@@ -71,13 +71,16 @@ describe("earcons", () => {
     expect(context.close).toHaveBeenCalledTimes(1);
   });
 
-  it("allows first-gesture playback while resume is still settling", async () => {
+  it("queues first-gesture playback until resume settles", async () => {
     let resume!: () => void;
     const context = new FakeAudioContext();
     context.resume = vi.fn(
       () =>
         new Promise<void>((resolve) => {
-          resume = resolve;
+          resume = () => {
+            context.state = "running";
+            resolve();
+          };
         }),
     );
     const controller = createEarconController({
@@ -89,9 +92,11 @@ describe("earcons", () => {
     const unlocking = controller.unlock();
     controller.play("send");
 
-    expect(context.oscillators).toHaveLength(2);
+    expect(context.oscillators).toHaveLength(0);
     resume();
     await unlocking;
+
+    expect(context.oscillators).toHaveLength(2);
   });
 
   it("keeps unlock as a no-op when AudioContext construction fails", async () => {

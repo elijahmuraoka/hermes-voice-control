@@ -10,6 +10,8 @@ export interface EarconControllerOptions {
   AudioContextCtor?: typeof AudioContext;
 }
 
+const PENDING_EARCON_MAX_AGE_MS = 750;
+
 type ToneStep = {
   frequency: number;
   start: number;
@@ -36,35 +38,64 @@ export function createEarconController(
   const AudioContextCtor = options.AudioContextCtor ?? globalThis.AudioContext;
   let context: AudioContext | null = null;
   let unlocked = false;
+  let unlocking: Promise<void> | null = null;
+  let pendingEarcon: { name: EarconName; queuedAt: number } | null = null;
 
-  async function unlock() {
-    if (!AudioContextCtor) return;
-    try {
-      context ??= new AudioContextCtor();
-    } catch {
-      context = null;
-      unlocked = false;
-      return;
-    }
-    unlocked = true;
-    if (context.state === "suspended") {
-      try {
-        await context.resume();
-      } catch {
-        unlocked = false;
-      }
-    }
-  }
-
-  function play(name: EarconName) {
-    if (!unlocked || !context) return;
+  function playNow(name: EarconName) {
+    if (!context) return;
     const startAt = context.currentTime;
     for (const tone of EARCONS[name]) scheduleTone(context, startAt, tone);
   }
 
+  function flushPendingEarcon() {
+    if (!pendingEarcon) return;
+    const pending = pendingEarcon;
+    pendingEarcon = null;
+    if (Date.now() - pending.queuedAt > PENDING_EARCON_MAX_AGE_MS) return;
+    playNow(pending.name);
+  }
+
+  function unlock(): Promise<void> {
+    if (unlocking) return unlocking;
+    if (!AudioContextCtor) return Promise.resolve();
+    unlocking = (async () => {
+      try {
+        context ??= new AudioContextCtor();
+      } catch {
+        context = null;
+        unlocked = false;
+        return;
+      }
+      if (context.state === "suspended") {
+        try {
+          await context.resume();
+        } catch {
+          pendingEarcon = null;
+          unlocked = false;
+          return;
+        }
+      }
+      unlocked = true;
+      flushPendingEarcon();
+    })().finally(() => {
+      unlocking = null;
+    });
+    return unlocking;
+  }
+
+  function play(name: EarconName) {
+    if (!context) return;
+    if (!unlocked) {
+      if (unlocking) pendingEarcon = { name, queuedAt: Date.now() };
+      return;
+    }
+    playNow(name);
+  }
+
   function close() {
     unlocked = false;
-    void context?.close();
+    pendingEarcon = null;
+    void context?.close().catch(() => undefined);
     context = null;
   }
 

@@ -117,14 +117,16 @@ export function VoiceOrb({
   }, [nudgeKey, nudging]);
 
   return (
-    <div className="orb-stage" aria-live="polite" aria-atomic="true">
+    <div className="orb-stage">
       <button
         ref={orbRef}
         type="button"
         className={cls}
         data-nudge-key={nudging ? nudgeKey : undefined}
         aria-label={`Voice orb: ${label}`}
-        aria-pressed={state.callState === "hold-to-talk"}
+        aria-pressed={
+          mode === "push-to-talk" ? state.callState === "hold-to-talk" : undefined
+        }
         aria-roledescription="voice orb"
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
@@ -139,7 +141,7 @@ export function VoiceOrb({
         <span className="orb-wave w2" />
       </button>
       <h1 className="orb-agent-title">{agentName}</h1>
-      <div className="state-copy">
+      <div className="state-copy" aria-live="polite" aria-atomic="true">
         <p>{label}</p>
         {helperText ? <span>{helperText}</span> : null}
         {nudging ? (
@@ -162,9 +164,9 @@ function voiceStateLabel(
   mode: VoiceMode,
   agentName: string,
 ): string {
+  if (state.callState === "agent-thinking") return "Thinking.";
   if (mode === "live") return stateLabel(state, agentName);
-  if (state.callState === "idle") return `Hold to talk to ${agentName}`;
-  if (state.callState === "agent-thinking") return "Sending...";
+  if (state.callState === "idle") return "Hold to talk.";
   return stateLabel(state, agentName);
 }
 
@@ -176,9 +178,9 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
       case "hold-to-talk":
         return "Release to send.";
       case "finalizing":
-        return "Finalizing";
+        return "Polishing your words.";
       case "agent-thinking":
-        return `${agentName} is working.`;
+        return "Getting the reply.";
       case "error":
         return "Retry voice.";
       default:
@@ -195,7 +197,7 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
     case "agent-speaking":
       return "Hold to interrupt.";
     case "agent-thinking":
-      return "One moment.";
+      return "Getting the reply.";
     case "reconnecting":
       return "Keeping voice alive.";
     case "error":

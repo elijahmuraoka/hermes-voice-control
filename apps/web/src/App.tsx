@@ -57,7 +57,11 @@ import {
   saveSpokenCompletionNotificationsEnabled,
 } from "./completionNotificationPreference";
 import { agentName, agentNounLower } from "./config";
-import { createEarconController, type EarconName } from "./earcons";
+import {
+  createEarconController,
+  type EarconController,
+  type EarconName,
+} from "./earcons";
 import {
   createHvcDiagnosticsRecorder,
   exposeHvcDiagnostics,
@@ -154,8 +158,10 @@ type TextJobEntryMeta = {
 };
 
 type SpeechCaptureState = {
-  recognition: BrowserSpeechRecognition;
+  recognition: BrowserSpeechRecognition | null;
   audio: BrowserGeminiAudio | null;
+  audioStartSettled: boolean;
+  audioStartFailed: boolean;
   audioChunksBase64: string[];
   audioBytes: number;
   audioCapped: boolean;
@@ -314,7 +320,8 @@ export default function App() {
   const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
   const speechFinalizingRef = useRef(false);
   const orbLevelRef = useRef(0);
-  const earconsRef = useRef(createEarconController());
+  const earconsRef = useRef<EarconController | null>(null);
+  const sttProviderConfirmedRef = useRef(false);
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const speechRecognitionDisclosureShownRef = useRef(false);
@@ -422,14 +429,14 @@ export default function App() {
       clearReadyzRefreshInterval();
       clearFinalizingNudgeTimer();
       void releaseWakeLock();
-      earconsRef.current.close();
+      earconsRef.current?.close();
       const activeSpeechCapture = speechCaptureRef.current;
       if (activeSpeechCapture) {
         activeSpeechCapture.finished = true;
         activeSpeechCapture.aborting = true;
         clearSpeechCapture(activeSpeechCapture);
         try {
-          activeSpeechCapture.recognition.abort();
+          activeSpeechCapture.recognition?.abort();
         } catch {
           // The browser may already have ended recognition during teardown.
         }
@@ -474,12 +481,14 @@ export default function App() {
       return;
     }
     const online = () => void refreshAgentConnection();
-    const offline = () =>
+    const offline = () => {
+      sttProviderConfirmedRef.current = false;
       setAgentConnection({
         state: "unavailable",
         label: "Offline",
         detail: "Browser network is offline",
       });
+    };
     void refreshAgentConnection({ checking: true });
     readyzRefreshIntervalRef.current = window.setInterval(
       () => void refreshAgentConnection(),
@@ -529,11 +538,16 @@ export default function App() {
   }
 
   function unlockEarcons() {
+    earconsRef.current ??= createEarconController();
     void earconsRef.current.unlock();
   }
 
   function playEarcon(name: EarconName) {
-    earconsRef.current.play(name);
+    earconsRef.current?.play(name);
+  }
+
+  function playTextReplyEarcon() {
+    if (voiceModeRef.current === "push-to-talk") playEarcon("reply");
   }
 
   async function refreshAgentConnection({
@@ -551,8 +565,13 @@ export default function App() {
     )
       return;
     if (reconnectingRef.current) return;
-    const provider = readyz.checks?.stt_provider?.trim();
-    if (provider) sttProviderRef.current = provider;
+    const provider = readyz.ok ? readyz.checks?.stt_provider?.trim() : "";
+    if (provider) {
+      sttProviderRef.current = provider;
+      sttProviderConfirmedRef.current = true;
+    } else {
+      sttProviderConfirmedRef.current = false;
+    }
     setAgentConnection(agentConnectionFromReadyz(readyz));
   }
 
@@ -1019,7 +1038,7 @@ export default function App() {
         restored: false,
       });
       if (!meta.restored) {
-        playEarcon("reply");
+        playTextReplyEarcon();
         speakBackgroundCompletionNotice(SPOKEN_COMPLETION_NOTICE_TEXT);
       }
       finishTextJob(status.job_id, { keepRecoveryId: true });
@@ -1283,11 +1302,21 @@ export default function App() {
   }
 
   function speechRecognitionUnavailableMessage() {
-    return "Hold mode needs browser speech recognition. Switch to Live or type.";
+    return "Hold-to-talk needs browser speech recognition here. Use Live or type.";
   }
 
   function speechRecognitionPermissionMessage() {
     return "Microphone blocked. Allow mic access, then hold again.";
+  }
+
+  function speechTranscriptionFailureMessage() {
+    return "Hold-to-talk could not transcribe that. Try again, use Live, or type.";
+  }
+
+  function speechAudioCaptureMessage(error?: unknown) {
+    if (error instanceof DOMException && error.name === "NotAllowedError")
+      return speechRecognitionPermissionMessage();
+    return "Hold-to-talk could not start microphone audio. Use Live or type.";
   }
 
   function basicHoldDisclosureMessage() {
@@ -1303,6 +1332,13 @@ export default function App() {
     if (speechRecognitionDisclosureShownRef.current) return;
     speechRecognitionDisclosureShownRef.current = true;
     appendSystem(basicHoldDisclosureMessage());
+  }
+
+  function serverSttCanTranscribeHold() {
+    return (
+      sttProviderConfirmedRef.current &&
+      ["gemini", "mock"].includes(sttProviderRef.current)
+    );
   }
 
   async function primeBasicHoldMicrophonePermission({
@@ -1361,12 +1397,13 @@ export default function App() {
     );
   }
 
-  function startSpeechCaptureAudio(capture: SpeechCaptureState) {
+  function startSpeechCaptureAudio(capture: SpeechCaptureState): boolean {
     let audio: BrowserGeminiAudio;
     try {
       audio = new BrowserGeminiAudio({ onInputLevel: updateOrbLevel });
     } catch {
-      return;
+      capture.audioStartFailed = true;
+      return false;
     }
     capture.audio = audio;
     void audio
@@ -1374,7 +1411,7 @@ export default function App() {
         if (
           speechCaptureRef.current !== capture ||
           capture.finished ||
-          capture.releaseRequested
+          (capture.releaseRequested && capture.recognition)
         )
           return;
         const bytes =
@@ -1387,20 +1424,35 @@ export default function App() {
         }
         capture.audioBytes += bytes;
         capture.audioChunksBase64.push(chunk.data);
+        if (capture.releaseRequested && !capture.recognition)
+          finishSpeechCapture(capture);
       })
       .then(() => {
+        capture.audioStartSettled = true;
         if (
           speechCaptureRef.current !== capture ||
           capture.finished ||
-          capture.releaseRequested ||
           capture.audio !== audio
         )
           audio.close();
+        if (
+          speechCaptureRef.current === capture &&
+          !capture.finished &&
+          capture.releaseRequested &&
+          !capture.recognition &&
+          capture.audioChunksBase64.length > 0
+        )
+          finishSpeechCapture(capture);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        capture.audioStartSettled = true;
+        capture.audioStartFailed = true;
         if (capture.audio === audio) capture.audio = null;
         audio.close();
+        if (!capture.recognition)
+          failSpeechCapture(capture, speechAudioCaptureMessage(error));
       });
+    return true;
   }
 
   function updateSpeechCaptureEntry(
@@ -1447,25 +1499,57 @@ export default function App() {
   }
 
   function recognitionErrorMessage(error: string) {
-    if (error === "not-allowed" || error === "service-not-allowed")
+    if (error === "not-allowed")
       return speechRecognitionPermissionMessage();
     if (error === "audio-capture")
       return "I could not reach the microphone. Check the input, then try again or type.";
+    if (error === "service-not-allowed")
+      return speechRecognitionUnavailableMessage();
     if (error === "language-not-supported")
       return "This browser cannot recognize that language. Switch to Live or type.";
     return "Browser speech recognition stopped early. Try again, switch to Live, or type.";
   }
 
-  function isBlockingSpeechRecognitionError(error: string) {
-    return (
-      error === "not-allowed" ||
-      error === "service-not-allowed" ||
-      error === "audio-capture" ||
-      error === "language-not-supported"
-    );
+  function isMicrophoneBlockingSpeechRecognitionError(error: string) {
+    return error === "not-allowed" || error === "audio-capture";
+  }
+
+  function isSpeechRecognitionEnhancerUnavailableError(error: string) {
+    return error === "service-not-allowed" || error === "language-not-supported";
+  }
+
+  function disableSpeechRecognitionEnhancer(
+    capture: SpeechCaptureState,
+    recognition: BrowserSpeechRecognition,
+  ): boolean {
+    if (capture.recognition !== recognition) return false;
+    if (capture.releaseRequested && capture.audioChunksBase64.length > 0) {
+      capture.recognition = null;
+      capture.ended = true;
+      try {
+        recognition.abort();
+      } catch {
+        // The browser may already have ended recognition.
+      }
+      finishSpeechCapture(capture);
+      return false;
+    }
+    if (capture.audioStartFailed || !capture.audio) {
+      failSpeechCapture(capture, speechAudioCaptureMessage());
+      return false;
+    }
+    capture.recognition = null;
+    capture.ended = true;
+    try {
+      recognition.abort();
+    } catch {
+      // The browser may already have ended recognition.
+    }
+    return true;
   }
 
   function restartSpeechCapture(capture: SpeechCaptureState) {
+    if (!capture.recognition) return false;
     if (capture.restartAttempts >= BASIC_HOLD_SPEECH_RESTART_LIMIT)
       return false;
     capture.restartAttempts += 1;
@@ -1510,7 +1594,7 @@ export default function App() {
     capture.aborting = true;
     clearSpeechCapture(capture);
     try {
-      capture.recognition.abort();
+      capture.recognition?.abort();
     } catch {
       // The browser may already have ended recognition.
     }
@@ -1531,7 +1615,7 @@ export default function App() {
     capture.aborting = true;
     clearSpeechCapture(capture);
     try {
-      capture.recognition.abort();
+      capture.recognition?.abort();
     } catch {
       // The browser may already have ended recognition.
     }
@@ -1672,6 +1756,11 @@ export default function App() {
             return;
           }
           void refreshAgentConnection();
+          if (!browserText) {
+            failFinishedSpeechCapture(capture, speechTranscriptionFailureMessage());
+            dispatch({ type: "RECOVER" });
+            return;
+          }
           // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
         }
       }
@@ -1718,7 +1807,7 @@ export default function App() {
       return false;
     }
     const recognition = createSpeechRecognition();
-    if (!recognition) {
+    if (!recognition && !serverSttCanTranscribeHold()) {
       press.holding = false;
       appendSystem(speechRecognitionUnavailableMessage(), "failed");
       dispatch({ type: "ERROR", error: "Hold-to-talk is not available here." });
@@ -1728,6 +1817,8 @@ export default function App() {
     const capture: SpeechCaptureState = {
       recognition,
       audio: null,
+      audioStartSettled: false,
+      audioStartFailed: false,
       audioChunksBase64: [],
       audioBytes: 0,
       audioCapped: false,
@@ -1745,44 +1836,75 @@ export default function App() {
     };
     speechCaptureRef.current = capture;
 
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
-    recognition.maxAlternatives = 1;
-    recognition.onresult = (event) => {
-      if (speechCaptureRef.current !== capture || capture.finished) return;
-      const next = readSpeechRecognitionTranscript(event);
-      capture.finalText = [capture.finalText, next.finalText]
-        .map((part) => part.trim())
-        .filter(Boolean)
-        .join(" ");
-      capture.interimText = next.interimText;
-      if (speechCaptureText(capture)) capture.restartAttempts = 0;
-      updateSpeechCaptureEntry(capture, speechCaptureText(capture));
-    };
-    recognition.onerror = (event) => {
-      if (speechCaptureRef.current !== capture || capture.finished) return;
-      if (event.error === "aborted" && (capture.stopping || capture.aborting))
-        return;
-      if (event.error === "no-speech") return;
-      if (!isBlockingSpeechRecognitionError(event.error)) return;
-      failSpeechCapture(capture, recognitionErrorMessage(event.error));
-    };
-    recognition.onend = () => {
-      if (speechCaptureRef.current !== capture || capture.finished) return;
-      settleEndedSpeechCapture(capture);
-    };
-
-    try {
-      recognition.start();
-    } catch {
-      failSpeechCapture(
-        capture,
-        "Speech recognition could not start in this browser. Switch to Live mode or type in the transcript.",
-      );
+    if (!startSpeechCaptureAudio(capture) && !recognition) {
+      failSpeechCapture(capture, speechAudioCaptureMessage());
       return false;
     }
-    startSpeechCaptureAudio(capture);
+
+    if (recognition) {
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-US";
+      recognition.maxAlternatives = 1;
+      recognition.onresult = (event) => {
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.recognition !== recognition
+        )
+          return;
+        const next = readSpeechRecognitionTranscript(event);
+        capture.finalText = [capture.finalText, next.finalText]
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(" ");
+        capture.interimText = next.interimText;
+        if (speechCaptureText(capture)) capture.restartAttempts = 0;
+        updateSpeechCaptureEntry(capture, speechCaptureText(capture));
+      };
+      recognition.onerror = (event) => {
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.recognition !== recognition
+        )
+          return;
+        if (event.error === "aborted" && (capture.stopping || capture.aborting))
+          return;
+        if (event.error === "no-speech") return;
+        if (isMicrophoneBlockingSpeechRecognitionError(event.error)) {
+          failSpeechCapture(capture, recognitionErrorMessage(event.error));
+          return;
+        }
+        if (!isSpeechRecognitionEnhancerUnavailableError(event.error)) return;
+        if (serverSttCanTranscribeHold()) {
+          disableSpeechRecognitionEnhancer(capture, recognition);
+          return;
+        }
+        failSpeechCapture(capture, recognitionErrorMessage(event.error));
+      };
+      recognition.onend = () => {
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.recognition !== recognition
+        )
+          return;
+        settleEndedSpeechCapture(capture);
+      };
+
+      try {
+        recognition.start();
+      } catch {
+        if (serverSttCanTranscribeHold()) {
+          if (!disableSpeechRecognitionEnhancer(capture, recognition))
+            return false;
+        } else {
+          failSpeechCapture(capture, speechRecognitionUnavailableMessage());
+          return false;
+        }
+      }
+    }
 
     press.activated = true;
     dispatch({ type: "POINTER_DOWN" });
@@ -1842,7 +1964,7 @@ export default function App() {
       capture.aborting = true;
       clearSpeechCapture(capture);
       try {
-        capture.recognition.abort();
+        capture.recognition?.abort();
       } catch {
         // The browser may already have ended recognition.
       }
@@ -1859,6 +1981,11 @@ export default function App() {
       return;
     }
     capture.releaseRequested = true;
+    if (!capture.recognition) {
+      stopSpeechCaptureAudio(capture);
+      finishSpeechCapture(capture);
+      return;
+    }
     stopSpeechCaptureAudio(capture);
     if (capture.ended) {
       finishSpeechCapture(capture);
@@ -1883,7 +2010,7 @@ export default function App() {
 
   function switchToPushToTalkMode() {
     if (isSpokenCompletionNoticeBlockingCapture()) return;
-    if (!browserSupportsSpeechRecognition()) {
+    if (!browserSupportsSpeechRecognition() && !serverSttCanTranscribeHold()) {
       appendSystem(speechRecognitionUnavailableMessage(), "failed");
       return;
     }
@@ -1967,7 +2094,6 @@ export default function App() {
 
     if (event.final) {
       delete transcriptDraftsRef.current[event.role];
-      if (event.role === "agent") playEarcon("reply");
     }
   }
 
@@ -2181,7 +2307,10 @@ export default function App() {
     });
   }
 
-  async function connectLiveSession(sessionGeneration: number) {
+  async function connectLiveSession(
+    sessionGeneration: number,
+    { playStartEarcon = false }: { playStartEarcon?: boolean } = {},
+  ) {
     const session = createLiveSession(sessionGeneration);
     sessionRef.current = session;
     try {
@@ -2199,7 +2328,7 @@ export default function App() {
       disconnectLiveSession(session);
       throw new Error("voice connection cancelled");
     }
-    playEarcon("session-start");
+    if (playStartEarcon) playEarcon("session-start");
   }
 
   function nextSessionGeneration(): number {
@@ -2521,7 +2650,7 @@ export default function App() {
     dispatch({ type: "CONNECT" });
 
     try {
-      await connectLiveSession(sessionGeneration);
+      await connectLiveSession(sessionGeneration, { playStartEarcon: true });
       if (
         !isCurrentSessionGeneration(sessionGeneration) ||
         !liveSessionDesired()
@@ -2913,7 +3042,7 @@ export default function App() {
           at: Date.now(),
         },
       ]);
-      playEarcon("reply");
+      playTextReplyEarcon();
       dispatch({ type: "SPEAK" });
       window.setTimeout(() => {
         completeTextTurn(submitFocusEpoch);

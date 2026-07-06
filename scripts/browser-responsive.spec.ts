@@ -28,7 +28,7 @@ const stateCaptures = [
     name: "idle",
     callState: "idle",
     level: "0",
-    label: `Hold to talk to ${AGENT_NAME}`,
+    label: "Hold to talk.",
     helper: "Hold, speak.",
   },
   {
@@ -42,15 +42,15 @@ const stateCaptures = [
     name: "thinking",
     callState: "agent-thinking",
     level: "0.28",
-    label: `${AGENT_NAME} is thinking`,
-    helper: `${AGENT_NAME} is working.`,
+    label: "Thinking.",
+    helper: "Getting the reply.",
   },
   {
     name: "finalizing",
     callState: "finalizing",
     level: "0.34",
     label: "Finalizing",
-    helper: "Finalizing",
+    helper: "Polishing your words.",
   },
   {
     name: "reconnecting",
@@ -121,6 +121,7 @@ async function stubUnlockedSession(page: Page) {
         checks: {
           hermes_adapter: "api",
           hermes: { kind: "api", available: true },
+          stt_provider: "gemini",
         },
       }),
     });
@@ -162,6 +163,7 @@ async function applyVisualState(
   await page.evaluate((nextState) => {
     const orb = document.querySelector<HTMLButtonElement>(".voice-orb");
     const copy = document.querySelector<HTMLElement>(".state-copy");
+    const chip = document.querySelector<HTMLElement>(".agent-connection");
     const label = copy?.querySelector("p");
     const helper = copy?.querySelector("span:not(.sr-only)");
     if (!orb || !copy || !label) return;
@@ -172,6 +174,27 @@ async function applyVisualState(
     orb.style.setProperty("--orb-level", nextState.level);
     label.textContent = nextState.label;
     if (helper) helper.textContent = nextState.helper;
+    if (chip) {
+      chip.classList.remove(
+        "state-checking",
+        "state-connected",
+        "state-degraded",
+        "state-unavailable",
+      );
+      const strong = chip.querySelector("strong");
+      const small = chip.querySelector("small");
+      if (nextState.callState === "error") {
+        chip.classList.add("state-unavailable");
+        chip.setAttribute("aria-label", "Agent connection: Backend unreachable");
+        if (strong) strong.textContent = "Backend unreachable";
+        if (small) small.textContent = "Check the private connection";
+      } else {
+        chip.classList.add("state-connected");
+        chip.setAttribute("aria-label", "Agent connection: Ready");
+        if (strong) strong.textContent = "Ready";
+        if (small) small.textContent = "Agent reachable";
+      }
+    }
     if (nextState.callState === "error" && !copy.querySelector(".retry-pill")) {
       const retry = document.createElement("button");
       retry.type = "button";
@@ -207,7 +230,7 @@ for (const viewport of viewports) {
     await expect(muteButton).toHaveCount(0);
     await expect(liveButton).toBeVisible();
     await expect(endButton).toHaveCount(0);
-    await expect(page.getByText(`Hold to talk to ${AGENT_NAME}`)).toBeVisible();
+    await expect(page.getByText("Hold to talk.")).toBeVisible();
     await expect(
       page.getByLabel(/Agent connection: Ready/),
     ).toBeVisible();

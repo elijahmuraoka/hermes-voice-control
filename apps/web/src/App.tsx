@@ -71,6 +71,7 @@ const uid = () => Math.random().toString(36).slice(2);
 const HOLD_DELAY_MS = 220;
 const NO_SPEECH_TIMEOUT_MS = 3500;
 const BASIC_HOLD_SPEECH_RESTART_LIMIT = 2;
+const BASIC_HOLD_RELEASE_WATCHDOG_MS = 2000;
 const INITIAL_RESPONSE_TIMEOUT_MS = 14000;
 const TOOL_RESPONSE_TIMEOUT_MS = 95000;
 const TEXT_JOB_POLL_MS = 1400;
@@ -133,6 +134,7 @@ type SpeechCaptureState = {
   finished: boolean;
   releaseRequested: boolean;
   restartAttempts: number;
+  releaseWatchdogTimer: number | null;
   stopping: boolean;
   aborting: boolean;
 };
@@ -1110,7 +1112,14 @@ export default function App() {
     );
   }
 
+  function clearSpeechCaptureReleaseWatchdog(capture: SpeechCaptureState) {
+    if (capture.releaseWatchdogTimer === null) return;
+    window.clearTimeout(capture.releaseWatchdogTimer);
+    capture.releaseWatchdogTimer = null;
+  }
+
   function clearSpeechCapture(capture: SpeechCaptureState) {
+    clearSpeechCaptureReleaseWatchdog(capture);
     if (speechCaptureRef.current === capture) speechCaptureRef.current = null;
   }
 
@@ -1155,8 +1164,20 @@ export default function App() {
       return;
     }
     if (restartSpeechCapture(capture)) return;
-    if (!speechCaptureText(capture))
+    finishSpeechCapture(capture);
+  }
+
+  function armSpeechCaptureReleaseWatchdog(capture: SpeechCaptureState) {
+    clearSpeechCaptureReleaseWatchdog(capture);
+    capture.releaseWatchdogTimer = window.setTimeout(() => {
+      if (
+        speechCaptureRef.current !== capture ||
+        capture.finished ||
+        !capture.releaseRequested
+      )
+        return;
       finishSpeechCapture(capture);
+    }, BASIC_HOLD_RELEASE_WATCHDOG_MS);
   }
 
   function abortActiveSpeechCapture() {
@@ -1264,6 +1285,7 @@ export default function App() {
       finished: false,
       releaseRequested: false,
       restartAttempts: 0,
+      releaseWatchdogTimer: null,
       stopping: false,
       aborting: false,
     };
@@ -1381,6 +1403,7 @@ export default function App() {
       finishSpeechCapture(capture);
       return;
     }
+    armSpeechCaptureReleaseWatchdog(capture);
     try {
       capture.stopping = true;
       capture.recognition.stop();

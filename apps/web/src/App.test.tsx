@@ -841,6 +841,52 @@ describe("App", () => {
     expect(screen.getByText("hello from hold")).toBeInTheDocument();
   });
 
+  it("sends basic hold capture when release onend is dropped", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    act(() => speech.instances[0].emitResult("send despite dropped onend", true));
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+
+    expect(chatTextBodies).toHaveLength(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+      await Promise.resolve();
+    });
+
+    expect(chatTextBodies[0]).toEqual(
+      expect.objectContaining({ message: "send despite dropped onend" }),
+    );
+    expect(screen.getByText("send despite dropped onend")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+    });
+
+    fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    expect(speech.instances).toHaveLength(2);
+    act(() => speech.instances[1].emitResult("second hold still works", true));
+    fireEvent.pointerUp(orb, { pointerId: 2 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(chatTextBodies[1]).toEqual(
+      expect.objectContaining({ message: "second hold still works" }),
+    );
+    expect(screen.getByText("second hold still works")).toBeInTheDocument();
+  });
+
   it("does not replace a released basic hold capture before the browser ends it", async () => {
     const speech = installSpeechRecognitionMock({ stopEnds: false });
     await renderUnlockedApp();
@@ -1000,6 +1046,35 @@ describe("App", () => {
     expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
     expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
     expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("sends accumulated basic hold text when silent restarts exhaust the limit", async () => {
+    const speech = installSpeechRecognitionMock({ stopEnds: false });
+    await renderUnlockedApp();
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    act(() => vi.advanceTimersByTime(230));
+    act(() => speech.instances[0].emitResult("captured before pause", true));
+
+    await act(async () => {
+      speech.instances[0].onend?.();
+      speech.instances[0].onend?.();
+      speech.instances[0].onend?.();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(speech.instances[0].start).toHaveBeenCalledTimes(3);
+    await waitFor(() =>
+      expect(chatTextBodies[0]).toEqual(
+        expect.objectContaining({ message: "captured before pause" }),
+      ),
+    );
+    expect(screen.getByText("captured before pause")).toBeInTheDocument();
+    expect(screen.queryByText("Holding to talk")).not.toBeInTheDocument();
   });
 
   it("returns silent basic hold-to-talk turns to idle instead of fake listening", async () => {

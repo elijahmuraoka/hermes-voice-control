@@ -94,6 +94,8 @@ const frontendOrigins = (process.env.HVC_FRONTEND_ORIGINS ?? "http://127.0.0.1:5
   .map((origin) => origin.trim())
   .filter(Boolean);
 const hermesTimeoutSeconds = intEnv("HVC_HERMES_TIMEOUT_SECONDS", 90, { min: 1, max: 600 });
+const hermesApiUrl = process.env.HVC_HERMES_API_URL ?? "ws://127.0.0.1:9119/api/ws";
+const hermesApiTokenConfigured = Boolean(process.env.HVC_HERMES_API_TOKEN || process.env.HERMES_DASHBOARD_SESSION_TOKEN);
 
 if (!["mock", "real"].includes(geminiMode)) {
   errors.push("HVC_GEMINI_MODE must be mock or real.");
@@ -103,8 +105,8 @@ if (!/^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(geminiVoiceName)) {
   errors.push("HVC_GEMINI_VOICE_NAME must be a Gemini prebuilt voice name.");
 }
 
-if (!["mock", "local"].includes(hermesAdapter)) {
-  errors.push("HVC_HERMES_ADAPTER must be mock or local.");
+if (!["mock", "local", "api"].includes(hermesAdapter)) {
+  errors.push("HVC_HERMES_ADAPTER must be mock, local, or api.");
 }
 
 if (!localHosts.has(host) && !allowRemoteBind) {
@@ -143,6 +145,20 @@ if (hermesAdapter === "local" && !commandExists(process.env.HVC_HERMES_BIN ?? "h
   errors.push("HVC_HERMES_ADAPTER=local requires HVC_HERMES_BIN to resolve to an executable.");
 }
 
+if (hermesAdapter === "api") {
+  if (!hermesApiTokenConfigured) {
+    errors.push("HVC_HERMES_ADAPTER=api requires HVC_HERMES_API_TOKEN or HERMES_DASHBOARD_SESSION_TOKEN.");
+  }
+  try {
+    const parsedHermesApiUrl = new URL(hermesApiUrl);
+    if (parsedHermesApiUrl.protocol !== "ws:" || !localHosts.has(parsedHermesApiUrl.hostname)) {
+      errors.push("HVC_HERMES_API_URL must be a loopback ws:// URL.");
+    }
+  } catch {
+    errors.push("HVC_HERMES_API_URL must be a valid loopback ws:// URL.");
+  }
+}
+
 const result = {
   ok: errors.length === 0,
   mode: {
@@ -151,6 +167,8 @@ const result = {
     geminiMode,
     geminiVoiceName,
     hermesAdapter,
+    hermesApiUrl: hermesAdapter === "api" ? hermesApiUrl : undefined,
+    hermesApiTokenConfigured: hermesAdapter === "api" ? hermesApiTokenConfigured : undefined,
     agentName,
     hermesTimeoutSeconds,
     requirePin,

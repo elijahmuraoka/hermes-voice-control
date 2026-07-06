@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "localhost", "::1", "testclient"}
@@ -64,6 +65,9 @@ class Settings:
     hermes_adapter: str = "mock"
     agent_name: str = "Hermes Agent"
     hermes_bin: str = "hermes"
+    hermes_api_url: str = "ws://127.0.0.1:9119/api/ws"
+    hermes_api_token: str = ""
+    hermes_api_cwd: str = ""
     hermes_timeout_seconds: int = 90
     allow_remote_bind: bool = False
     allow_no_pin_remote: bool = False
@@ -91,6 +95,9 @@ class Settings:
             hermes_adapter=os.getenv("HVC_HERMES_ADAPTER", "mock"),
             agent_name=os.getenv("HVC_AGENT_NAME", os.getenv("VITE_HVC_AGENT_NAME", "Hermes Agent")),
             hermes_bin=os.getenv("HVC_HERMES_BIN", "hermes"),
+            hermes_api_url=os.getenv("HVC_HERMES_API_URL", "ws://127.0.0.1:9119/api/ws"),
+            hermes_api_token=os.getenv("HVC_HERMES_API_TOKEN", os.getenv("HERMES_DASHBOARD_SESSION_TOKEN", "")),
+            hermes_api_cwd=os.getenv("HVC_HERMES_API_CWD", ""),
             hermes_timeout_seconds=env_int("HVC_HERMES_TIMEOUT_SECONDS", 90),
             allow_remote_bind=env_bool("HVC_ALLOW_REMOTE_BIND", False),
             allow_no_pin_remote=env_bool("HVC_ALLOW_NO_PIN_REMOTE", False),
@@ -119,3 +126,7 @@ class Settings:
             raise RuntimeError("HVC_HERMES_TIMEOUT_SECONDS must be between 1 and 600 seconds")
         if not CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN <= self.chat_job_interactive_budget_ms <= CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX:
             raise RuntimeError("HVC_CHAT_JOB_INTERACTIVE_BUDGET_MS must be between 0 and 30000 milliseconds")
+        if self.hermes_adapter == "api":
+            parts = urlsplit(self.hermes_api_url)
+            if parts.scheme != "ws" or (parts.hostname or "") not in LOCAL_HOSTS:
+                raise RuntimeError("HVC_HERMES_API_URL must be a loopback ws:// URL")

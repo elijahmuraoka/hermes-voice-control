@@ -127,7 +127,15 @@ class ChatJobService:
                 tool=req.tool,
                 request_id=req.request_id,
             )
-            result = self.tools.call(internal_req, session_hash, include_adapter_diagnostics=include_adapter_diagnostics)
+            def on_partial(partial_text: str) -> None:
+                self.store.update_chat_job_partial(job_id, session_hash, partial_text)
+
+            result = self.tools.call(
+                internal_req,
+                session_hash,
+                include_adapter_diagnostics=include_adapter_diagnostics,
+                on_partial=on_partial,
+            )
             result["request_id"] = req.request_id
             if self._preserve_cancelled_job(job_id, session_hash, req, running):
                 return
@@ -273,6 +281,8 @@ def public_chat_job(row: Any) -> dict[str, Any]:
     }
     if row["state"] in {"complete", "needs_permission"} and row["result_json"]:
         item["result"] = json.loads(row["result_json"])
+    if row["state"] in {"queued", "thinking"} and "partial_text" in row.keys() and row["partial_text"]:
+        item["partial_text"] = row["partial_text"]
     if row["state"] == "failed" and row["error_json"]:
         item["error"] = json.loads(row["error_json"])
     return item

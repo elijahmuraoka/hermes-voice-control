@@ -174,7 +174,7 @@ cookies, PINs, and authorization headers.
 See [Diagnostics](docs/context/diagnostics.md) for launch budgets and provider
 bakeoff reuse.
 
-## Optional Local Hermes Agent Adapter
+## Optional Hermes Agent Adapters
 
 The default Hermes agent adapter is mock. To connect a local Hermes-compatible
 CLI or agent wrapper, set:
@@ -187,6 +187,23 @@ HVC_HERMES_BIN=/absolute/path/to/hermes
 The local adapter invokes `hermes chat -Q -q <prompt> --toolsets safe`, treats
 the prompt as read-only, and surfaces timeout/cancellation/launch errors
 without hanging the browser session.
+
+For a stateful Hermes serve bridge, run Hermes serve locally and point HVC at
+its loopback websocket:
+
+```bash
+HVC_HERMES_ADAPTER=api
+HVC_HERMES_API_URL=ws://127.0.0.1:9119/api/ws
+HVC_HERMES_API_TOKEN=<same-token-used-by-hermes-serve>
+# or provide HERMES_DASHBOARD_SESSION_TOKEN instead of HVC_HERMES_API_TOKEN
+```
+
+The API adapter keeps the browser behind the HVC backend, persists the Hermes
+stored session id per private HVC session, streams partial replies into the
+background chat job state, and surfaces Hermes approval requests as
+operator-needed states rather than approving them automatically. API mode is
+intentionally loopback-only so the dashboard token is never sent to a remote
+websocket.
 
 ## Production Controls
 

@@ -71,7 +71,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     store.prune_audit_logs(settings.audit_log_retention_days, settings.audit_log_max_rows)
     auth = AuthManager(settings.pin, settings.session_ttl_seconds, store, settings.device_ttl_seconds)
     broker = build_broker(settings.gemini_mode)
-    adapter = build_adapter(settings.hermes_adapter, settings.hermes_bin, settings.hermes_timeout_seconds, settings.agent_name)
+    adapter = build_adapter(
+        settings.hermes_adapter,
+        settings.hermes_bin,
+        settings.hermes_timeout_seconds,
+        settings.agent_name,
+        store=store,
+        hermes_api_url=settings.hermes_api_url,
+        hermes_api_token=settings.hermes_api_token,
+        hermes_api_cwd=settings.hermes_api_cwd,
+    )
     tools = ToolService(store, adapter)
     chat_jobs = ChatJobService(store, tools)
     app = FastAPI(title="Hermes Voice Control", version="0.1.0")
@@ -148,7 +157,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ok = False
         if broker.mode == "real" and (not broker.api_key_configured or not gemini_client_available):
             ok = False
-        if settings.hermes_adapter == "local" and not checks["hermes"].get("available"):
+        if settings.hermes_adapter in {"local", "api"} and not checks["hermes"].get("available"):
             ok = False
         return ok, checks
     @app.get("/readyz")

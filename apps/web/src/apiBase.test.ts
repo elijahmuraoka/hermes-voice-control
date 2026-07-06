@@ -181,7 +181,7 @@ describe("apiBase", () => {
     expect(chatBody).toEqual(
       expect.objectContaining({
         job: true,
-        interactive_budget_ms: 0,
+        interactive_budget_ms: 750,
         message: "slow",
         mode: "quick",
       }),

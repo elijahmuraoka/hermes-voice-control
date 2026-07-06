@@ -98,6 +98,8 @@ const RECONNECT_GIVE_UP_MS = 45_000;
 const TOKEN_RECONNECT_LEEWAY_MS = 5_000;
 const TOKEN_RECONNECT_DEFER_MS = 1_000;
 const FINALIZING_NUDGE_MS = 620;
+const ORB_NOTICE_MS = 7000;
+const ORB_CAP_NOTICE_MS = 12000;
 const MAX_BROWSER_TIMER_MS = 2_147_483_647;
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
@@ -127,6 +129,11 @@ type AgentConnection = {
   state: AgentConnectionState;
   label: string;
   detail: string;
+};
+
+type OrbNotice = {
+  text: string;
+  tone: "info" | "warning";
 };
 
 type WakeLockSentinelLike = {
@@ -203,12 +210,26 @@ const checkingAgentConnection: AgentConnection = {
 };
 
 function agentConnectionFromReadyz(readyz: ReadyzResponse): AgentConnection {
+  if (readyz.authExpired) {
+    return {
+      state: "unavailable",
+      label: "Locked",
+      detail: "Enter PIN again",
+    };
+  }
   const hermes = readyz.checks?.hermes;
-  if (readyz.ok && hermes?.available !== false) {
+  if (readyz.ok && hermes?.available === true) {
     return {
       state: "connected",
       label: "Ready",
       detail: "Agent reachable",
+    };
+  }
+  if (readyz.ok && !readyz.checks) {
+    return {
+      state: "degraded",
+      label: "Checking",
+      detail: "Agent status unknown",
     };
   }
   if (readyz.ok) {
@@ -220,8 +241,8 @@ function agentConnectionFromReadyz(readyz: ReadyzResponse): AgentConnection {
   }
   return {
     state: "unavailable",
-    label: "Backend unreachable",
-    detail: "Check the private connection",
+    label: "Voice unavailable",
+    detail: "Check the private app",
   };
 }
 
@@ -312,6 +333,7 @@ export default function App() {
     setSpokenCompletionNotificationsEnabled,
   ] = useState(readSpokenCompletionNotificationsEnabled);
   const [finalizingNudgeKey, setFinalizingNudgeKey] = useState(0);
+  const [orbNotice, setOrbNotice] = useState<OrbNotice | null>(null);
   const stateRef = useRef(state);
   const authStateRef = useRef(authState);
   const voiceModeRef = useRef(voiceMode);
@@ -344,6 +366,7 @@ export default function App() {
   const wakeLockRequestingRef = useRef(false);
   const finalizingNudgeTimerRef = useRef<number | null>(null);
   const finalizingNudgeSequenceRef = useRef(0);
+  const orbNoticeTimerRef = useRef<number | null>(null);
   const transcriptDraftsRef = useRef<
     Partial<Record<RealtimeTranscriptEvent["role"], string>>
   >({});
@@ -428,6 +451,7 @@ export default function App() {
       clearTokenReconnectTimer();
       clearReadyzRefreshInterval();
       clearFinalizingNudgeTimer();
+      clearOrbNoticeTimer();
       void releaseWakeLock();
       earconsRef.current?.close();
       const activeSpeechCapture = speechCaptureRef.current;
@@ -533,6 +557,27 @@ export default function App() {
     setFinalizingNudgeKey(0);
   }
 
+  function clearOrbNoticeTimer() {
+    if (orbNoticeTimerRef.current === null) return;
+    window.clearTimeout(orbNoticeTimerRef.current);
+    orbNoticeTimerRef.current = null;
+  }
+
+  function showOrbNotice(
+    text: string,
+    {
+      tone = "info",
+      durationMs = ORB_NOTICE_MS,
+    }: { tone?: OrbNotice["tone"]; durationMs?: number } = {},
+  ) {
+    clearOrbNoticeTimer();
+    setOrbNotice({ text, tone });
+    orbNoticeTimerRef.current = window.setTimeout(() => {
+      orbNoticeTimerRef.current = null;
+      setOrbNotice(null);
+    }, durationMs);
+  }
+
   function updateOrbLevel(level: number) {
     orbLevelRef.current = Math.max(orbLevelRef.current, level);
   }
@@ -540,6 +585,10 @@ export default function App() {
   function unlockEarcons() {
     earconsRef.current ??= createEarconController();
     void earconsRef.current.unlock();
+  }
+
+  function resumeEarcons() {
+    void earconsRef.current?.unlock();
   }
 
   function playEarcon(name: EarconName) {
@@ -565,17 +614,23 @@ export default function App() {
     )
       return;
     if (reconnectingRef.current) return;
+    if (readyz.authExpired) {
+      setAgentConnection(agentConnectionFromReadyz(readyz));
+      requireAuth(SESSION_EXPIRED_MESSAGE);
+      return;
+    }
     const provider = readyz.ok ? readyz.checks?.stt_provider?.trim() : "";
     if (provider) {
       sttProviderRef.current = provider;
       sttProviderConfirmedRef.current = true;
-    } else {
+    } else if (readyz.hasDetails && (!readyz.ok || readyz.checks)) {
       sttProviderConfirmedRef.current = false;
     }
     setAgentConnection(agentConnectionFromReadyz(readyz));
   }
 
   function handleVisibleReturn() {
+    resumeEarcons();
     void refreshAgentConnection();
     void updateWakeLock();
     const session = sessionRef.current;
@@ -1322,7 +1377,7 @@ export default function App() {
   function basicHoldDisclosureMessage() {
     const provider = sttProviderRef.current;
     if (provider === "browser")
-      return "Hold-to-talk sends held audio to the private backend, then uses browser text.";
+      return "Hold-to-talk uses this browser's speech text when cloud transcription is off.";
     if (provider === "mock")
       return "Hold-to-talk records held audio for mock transcription, then sends text.";
     return "Hold-to-talk sends held audio to Google Gemini for transcription, then sends text.";
@@ -1331,7 +1386,9 @@ export default function App() {
   function discloseBasicHoldTranscription() {
     if (speechRecognitionDisclosureShownRef.current) return;
     speechRecognitionDisclosureShownRef.current = true;
-    appendSystem(basicHoldDisclosureMessage());
+    const message = basicHoldDisclosureMessage();
+    appendSystem(message);
+    showOrbNotice(message, { durationMs: ORB_NOTICE_MS });
   }
 
   function serverSttCanTranscribeHold() {
@@ -1392,9 +1449,10 @@ export default function App() {
   function notifySpeechCaptureAudioCapped(capture: SpeechCaptureState) {
     if (capture.audioCapNotified) return;
     capture.audioCapNotified = true;
-    appendSystem(
-      "Captured the first 60 seconds. Release to send, or start another turn for the rest.",
-    );
+    const message =
+      "Captured the first 60 seconds. Release to send, or start another turn for the rest.";
+    appendSystem(message);
+    showOrbNotice(message, { tone: "warning", durationMs: ORB_CAP_NOTICE_MS });
   }
 
   function startSpeechCaptureAudio(capture: SpeechCaptureState): boolean {
@@ -2474,18 +2532,29 @@ export default function App() {
     liveDesiredRef.current = false;
     setAgentConnection({
       state: "unavailable",
-      label: "Voice disconnected",
-      detail: "Tap to retry",
+      label: "Voice offline",
+      detail: "Retry when ready",
     });
     void refreshAgentConnection();
-    appendSystem(
-      "Voice could not reconnect. Retry.",
-      "failed",
-    );
+    appendSystem("Voice disconnected.", "failed");
     dispatch({
       type: "ERROR",
-      error: "Voice disconnected. Retry.",
+      error: "Voice disconnected.",
     });
+  }
+
+  function stopLiveReconnect() {
+    if (!reconnectingRef.current && stateRef.current.callState !== "reconnecting")
+      return;
+    clearReconnectTimer();
+    clearTokenReconnectTimer();
+    finishLiveReconnect();
+    sessionGenerationRef.current += 1;
+    connectingRef.current = false;
+    liveDesiredRef.current = false;
+    markCaptureNotReady();
+    appendSystem("Stopped reconnecting.");
+    dispatch({ type: "RECOVER" });
   }
 
   function reconnectNoticeCopy(reason: string) {
@@ -2495,7 +2564,8 @@ export default function App() {
   }
 
   function liveVoiceFailureCopy(reason: string) {
-    if (/unsupported realtime provider/i.test(reason)) return reason;
+    if (/unsupported realtime provider/i.test(reason))
+      return "Voice is not configured for this browser. Use Hold or type.";
     if (/permission|notallowed|microphone/i.test(reason))
       return "Microphone permission is needed to use voice.";
     if (/token=|session_id=|secret|api[_ -]?key/i.test(reason))
@@ -2745,6 +2815,10 @@ export default function App() {
     if (!canUsePrivateSession()) return;
     const current = stateRef.current;
     if (current.inputMode === "text") return;
+    if (current.callState === "reconnecting") {
+      stopLiveReconnect();
+      return;
+    }
     if (current.callState === "idle" || current.callState === "error") {
       void startCall();
       return;
@@ -3075,7 +3149,6 @@ export default function App() {
         <header className="topbar">
           <div>
             <span className="eyebrow">private voice control</span>
-            <span className="hero-agent-kicker">{agentName}</span>
           </div>
           <div
             className={`agent-connection state-${agentConnection.state}`}
@@ -3099,6 +3172,7 @@ export default function App() {
           nudgeKey={finalizingNudgeKey}
           agentName={agentName}
           audioLevelRef={orbLevelRef}
+          notice={orbNotice}
         />
         <div className="control-row">
           {voiceMode === "live" ? (

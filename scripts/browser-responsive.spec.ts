@@ -185,9 +185,14 @@ async function applyVisualState(
       const small = chip.querySelector("small");
       if (nextState.callState === "error") {
         chip.classList.add("state-unavailable");
-        chip.setAttribute("aria-label", "Agent connection: Backend unreachable");
-        if (strong) strong.textContent = "Backend unreachable";
-        if (small) small.textContent = "Check the private connection";
+        chip.setAttribute("aria-label", "Agent connection: Voice offline");
+        if (strong) strong.textContent = "Voice offline";
+        if (small) small.textContent = "Retry when ready";
+      } else if (nextState.callState === "reconnecting") {
+        chip.classList.add("state-checking");
+        chip.setAttribute("aria-label", "Agent connection: Reconnecting...");
+        if (strong) strong.textContent = "Reconnecting...";
+        if (small) small.textContent = "Checking";
       } else {
         chip.classList.add("state-connected");
         chip.setAttribute("aria-label", "Agent connection: Ready");
@@ -199,8 +204,8 @@ async function applyVisualState(
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "retry-pill";
-      retry.textContent = "Tap to retry";
-      copy.append(retry);
+      retry.textContent = "Retry voice";
+      copy.after(retry);
     }
   }, state);
 }
@@ -386,7 +391,7 @@ test("prevents mobile long-press text and image selection on the voice surface",
   const selectionStyles = await page.evaluate(() => {
     const selectors = [
       ".hero-panel",
-      ".hero-agent-kicker",
+      ".orb-agent-title",
       ".orb-stage",
       ".voice-orb",
     ];
@@ -414,7 +419,7 @@ test("prevents mobile long-press text and image selection on the voice surface",
         webkitUserSelect: "none",
       }),
       expect.objectContaining({
-        selector: ".hero-agent-kicker",
+        selector: ".orb-agent-title",
         userSelect: "none",
         webkitUserSelect: "none",
       }),
@@ -448,14 +453,41 @@ test("honors reduced motion preference", async ({ page }) => {
 });
 
 test("shows and clears the private PIN gate", async ({ page }) => {
+  let authenticated = false;
+  await page.route("**/readyz", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+  await page.route("**/readyz/details", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        checks: {
+          hermes_adapter: "api",
+          hermes: { kind: "api", available: true },
+          stt_provider: "gemini",
+        },
+      }),
+    });
+  });
   await page.route("**/auth/session", async (route) => {
     await route.fulfill({
-      status: 401,
+      status: authenticated ? 200 : 401,
       contentType: "application/json",
-      body: JSON.stringify({ detail: "Authentication required" }),
+      body: JSON.stringify(
+        authenticated
+          ? { authenticated: true, expires_at: "2026-01-01T00:00:00Z" }
+          : { detail: "Authentication required" },
+      ),
     });
   });
   await page.route("**/auth/pin", async (route) => {
+    authenticated = true;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -660,7 +692,7 @@ test.describe("real backend token flow", () => {
     await expect(
       page.getByText(
         new RegExp(
-          `Connecting voice|Listening|${AGENT_NAME_PATTERN} is speaking|Hold-to-talk`,
+          `Connecting voice|Listening|Speaking|Hold-to-talk`,
           "i",
         ),
       ),

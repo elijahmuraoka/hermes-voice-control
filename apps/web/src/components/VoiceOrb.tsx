@@ -13,6 +13,7 @@ interface Props {
   audioLevelRef?: RefObject<number>;
   nudging?: boolean;
   nudgeKey?: number;
+  notice?: { text: string; tone: "info" | "warning" } | null;
 }
 
 const LEVEL_ACTIVE_STATES = new Set<CallState>([
@@ -39,6 +40,7 @@ export function VoiceOrb({
   audioLevelRef,
   nudging = false,
   nudgeKey = 0,
+  notice,
 }: Props) {
   const orbRef = useRef<HTMLButtonElement | null>(null);
   const cls = `voice-orb state-${state.callState}${
@@ -149,12 +151,17 @@ export function VoiceOrb({
             Still finalizing.
           </span>
         ) : null}
-        {state.callState === "error" ? (
-          <button type="button" className="retry-pill" onClick={onRetry}>
-            Tap to retry
-          </button>
-        ) : null}
       </div>
+      {notice ? (
+        <div className={`orb-notice tone-${notice.tone}`} role="status">
+          {notice.text}
+        </div>
+      ) : null}
+      {state.callState === "error" ? (
+        <button type="button" className="retry-pill" onClick={onRetry}>
+          Retry voice
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -182,7 +189,7 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
       case "agent-thinking":
         return "Getting the reply.";
       case "error":
-        return "Retry voice.";
+        return "";
       default:
         return "";
     }
@@ -199,9 +206,9 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
     case "agent-thinking":
       return "Getting the reply.";
     case "reconnecting":
-      return "Keeping voice alive.";
+      return "Tap to stop reconnecting.";
     case "error":
-      return "Retry voice.";
+      return "";
     default:
       return "";
   }

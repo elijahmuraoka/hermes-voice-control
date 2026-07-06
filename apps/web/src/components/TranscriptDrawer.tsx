@@ -23,9 +23,8 @@ function elapsedSeconds(startedAt: number, now: number): number {
   return Math.max(0, Math.floor((now - startedAt) / 1000));
 }
 
-function statusLabel(entry: TranscriptEntry, now: number) {
-  if (entry.jobId && ACTIVE_JOB_STATUSES.has(entry.status))
-    return `working ${elapsedSeconds(entry.at, now)}s`;
+function statusLabel(entry: TranscriptEntry) {
+  if (entry.jobId && ACTIVE_JOB_STATUSES.has(entry.status)) return "working";
   if (entry.status === "streaming")
     return entry.role === "user" ? "hearing" : "streaming";
   if (entry.status === "working") return "working";
@@ -103,14 +102,18 @@ export function TranscriptDrawer({
         <span>Transcript</span>
         {drawer === "open" ? <X size={16} /> : null}
       </button>
-      <div className="transcript-body" ref={bodyRef} aria-live="polite">
+      <div className="transcript-body" ref={bodyRef}>
         {entries.length === 0 ? (
           <div className="empty-transcript">
             <p>Quiet for now.</p>
           </div>
         ) : (
           entries.map((e) => {
-            const label = statusLabel(e, now);
+            const label = statusLabel(e);
+            const elapsed =
+              e.jobId && ACTIVE_JOB_STATUSES.has(e.status)
+                ? elapsedSeconds(e.at, now)
+                : null;
             const isCancellableJob =
               e.jobId !== undefined && ACTIVE_JOB_STATUSES.has(e.status);
             const isCancelling =
@@ -133,10 +136,16 @@ export function TranscriptDrawer({
                   {label ? (
                     <span className={e.status === "streaming" ? "live-meta" : ""}>
                       {label}
+                      {elapsed !== null ? (
+                        <span className="elapsed-meta" aria-hidden="true">
+                          {" "}
+                          {elapsed}s
+                        </span>
+                      ) : null}
                     </span>
                   ) : null}
                 </div>
-                <p>{e.text}</p>
+                <p aria-live="polite">{e.text}</p>
                 {isCancellableJob ? (
                   <button
                     type="button"

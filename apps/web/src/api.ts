@@ -23,6 +23,7 @@ export class ApiRequestTimeoutError extends Error {
 }
 
 const TEXT_JOB_CREATE_TIMEOUT_MS = 15000;
+const TEXT_JOB_INTERACTIVE_BUDGET_MS = 750;
 export const SPEECH_TRANSCRIPTION_TIMEOUT_MS = 4000;
 const textRequestId = () =>
   `text-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -62,21 +63,29 @@ export async function login(pin: string) {
 export async function getReadyz(): Promise<ReadyzResponse> {
   // /readyz/details carries the checks the connection chip needs but sits
   // behind session auth; unauthenticated /readyz only reports the ok bit.
-  const fallback: ReadyzResponse = { ok: false };
-  const read = async (path: string): Promise<ReadyzResponse | null> => {
+  const fallback: ReadyzResponse = { ok: false, hasDetails: false };
+  const read = async (
+    path: string,
+    hasDetails: boolean,
+  ): Promise<ReadyzResponse | null> => {
     try {
       const res = await fetch(`${apiBase}${path}`, {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
       });
-      if (res.status === 401 || res.status === 404) return null;
+      if (res.status === 401)
+        return { ok: false, authExpired: true, hasDetails };
+      if (res.status === 404) return null;
       const body = (await res.json()) as ReadyzResponse;
-      return res.ok ? body : { ...body, ok: false };
+      return { ...body, ok: res.ok && body.ok !== false, hasDetails };
     } catch {
       return null;
     }
   };
-  return (await read("/readyz/details")) ?? (await read("/readyz")) ?? fallback;
+  const details = await read("/readyz/details", true);
+  if (details?.authExpired) return details;
+  if (details) return details;
+  return (await read("/readyz", false)) ?? fallback;
 }
 export async function getGeminiToken() {
   return jsonFetch<{
@@ -115,7 +124,7 @@ export async function sendText(
         mode: "quick",
         transcript_window: transcript.slice(-10),
         job: true,
-        interactive_budget_ms: 0,
+        interactive_budget_ms: TEXT_JOB_INTERACTIVE_BUDGET_MS,
       }),
     });
   } catch (error) {

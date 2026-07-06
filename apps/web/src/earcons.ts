@@ -85,6 +85,11 @@ export function createEarconController(
 
   function play(name: EarconName) {
     if (!context) return;
+    if (context.state === "suspended") {
+      pendingEarcon = { name, queuedAt: Date.now() };
+      void unlock();
+      return;
+    }
     if (!unlocked) {
       if (unlocking) pendingEarcon = { name, queuedAt: Date.now() };
       return;

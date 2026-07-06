@@ -55,6 +55,8 @@ let restoreNavigatorMediaDevices: (() => void) | null = null;
 let readyzOk = true;
 let readyzHermesAvailable = true;
 let readyzSttProvider = "gemini";
+let readyzDetailsAuthExpired = false;
+let readyzDetailsIncludeChecks = true;
 let readyzDeferred: { promise: Promise<void>; resolve: () => void } | null = null;
 
 interface MockSpeechUtterance {
@@ -526,6 +528,8 @@ describe("App", () => {
     readyzOk = true;
     readyzHermesAvailable = true;
     readyzSttProvider = "gemini";
+    readyzDetailsAuthExpired = false;
+    readyzDetailsIncludeChecks = true;
     readyzDeferred = null;
     earconMock.plays = [];
     earconMock.unlocks = 0;
@@ -546,22 +550,39 @@ describe("App", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         const requestUrl = String(url);
-        if (requestUrl.includes("/readyz")) {
+        if (requestUrl.includes("/readyz/details")) {
           if (readyzDeferred) await readyzDeferred.promise;
+          if (readyzDetailsAuthExpired) {
+            return new Response(JSON.stringify({ detail: "Session expired" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           return new Response(
             JSON.stringify({
               ok: readyzOk,
-              checks: {
-                hermes_adapter: "api",
-                hermes: { kind: "api", available: readyzHermesAvailable },
-                stt_provider: readyzSttProvider,
-              },
+              ...(readyzDetailsIncludeChecks
+                ? {
+                    checks: {
+                      hermes_adapter: "api",
+                      hermes: { kind: "api", available: readyzHermesAvailable },
+                      stt_provider: readyzSttProvider,
+                    },
+                  }
+                : {}),
             }),
             {
-              status: 200,
+              status: readyzOk ? 200 : 503,
               headers: { "Content-Type": "application/json" },
             },
           );
+        }
+        if (requestUrl.includes("/readyz")) {
+          if (readyzDeferred) await readyzDeferred.promise;
+          return new Response(JSON.stringify({ ok: readyzOk }), {
+            status: readyzOk ? 200 : 503,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         if (requestUrl.includes("/auth/session")) {
           return new Response(
@@ -855,7 +876,7 @@ describe("App", () => {
     expect(chatTextBodies[0]).toEqual(
       expect.objectContaining({
         job: true,
-        interactive_budget_ms: 0,
+        interactive_budget_ms: 750,
         message: "hello",
       }),
     );
@@ -891,7 +912,7 @@ describe("App", () => {
       expect(chatTextBodies[0]).toEqual(
         expect.objectContaining({
           job: true,
-          interactive_budget_ms: 0,
+          interactive_budget_ms: 750,
           message: "turn on the lights please",
         }),
       ),
@@ -921,8 +942,9 @@ describe("App", () => {
     expect(speech.instances[0].start).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Holding to talk")).toBeInTheDocument();
     expect(
-      screen.getByText(/Hold-to-talk sends held audio to Google Gemini/i),
-    ).toBeInTheDocument();
+      screen.getAllByText(/Hold-to-talk sends held audio to Google Gemini/i)
+        .length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("discloses Basic Hold transcription when switching back from Live", async () => {
@@ -933,8 +955,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Hold$/ }));
 
     expect(
-      screen.getByText(/Hold-to-talk sends held audio to Google Gemini/i),
-    ).toBeInTheDocument();
+      screen.getAllByText(/Hold-to-talk sends held audio to Google Gemini/i)
+        .length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("assembles one hold utterance across aggressive recognition restarts", async () => {
@@ -973,7 +996,7 @@ describe("App", () => {
       expect(chatTextBodies).toEqual([
         expect.objectContaining({
           job: true,
-          interactive_budget_ms: 0,
+          interactive_budget_ms: 750,
           message: "hello from iphone",
         }),
       ]),
@@ -1199,7 +1222,7 @@ describe("App", () => {
     readyzSttProvider = "gemini";
     await renderUnlockedApp();
     await waitFor(() =>
-      expect(screen.getByText("Backend unreachable")).toBeInTheDocument(),
+      expect(screen.getByText("Voice unavailable")).toBeInTheDocument(),
     );
     switchToBasicHoldMode();
     vi.useFakeTimers();
@@ -1220,6 +1243,66 @@ describe("App", () => {
     expect(audioMock.instances).toHaveLength(0);
     expect(sttRequests).toHaveLength(0);
     expect(chatTextBodies).toHaveLength(0);
+  });
+
+  it("keeps confirmed server STT when readiness omits detailed checks", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    sttTranscript = "preserved provider transcript";
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+
+    readyzDetailsIncludeChecks = false;
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Checking")).toBeInTheDocument();
+    expect(screen.getByText("Agent status unknown")).toBeInTheDocument();
+
+    switchToBasicHoldMode();
+    vi.useFakeTimers();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 1, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(230);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    audioMock.instances[0].emit("AAECAw==");
+    fireEvent.pointerUp(orb, { pointerId: 1 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(sttRequests).toHaveLength(1);
+    await waitFor(() =>
+      expect(chatTextBodies).toEqual([
+        expect.objectContaining({ message: "preserved provider transcript" }),
+      ]),
+    );
+  });
+
+  it("reopens unlock when readiness details report auth expiry", async () => {
+    await renderUnlockedApp();
+    await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+
+    readyzDetailsAuthExpired = true;
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByLabelText("Private PIN")).toBeInTheDocument();
+    expect(
+      screen.getByText("Session expired. Enter your private PIN again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Ready")).not.toBeInTheDocument();
   });
 
   it("does not keep PCM-only hold enabled after the browser goes offline", async () => {
@@ -1621,7 +1704,9 @@ describe("App", () => {
     vi.useRealTimers();
 
     expect(sttRequests).toHaveLength(0);
-    expect(screen.getByText(/Captured the first 60 seconds/i)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Captured the first 60 seconds/i).length,
+    ).toBeGreaterThanOrEqual(2);
     expect(chatTextBodies).toEqual([
       expect.objectContaining({
         message: "browser transcript with the full tail",
@@ -2278,7 +2363,14 @@ describe("App", () => {
     expect(
       screen.getByText("I am checking the latest Hermes context..."),
     ).toBeInTheDocument();
-    expect(screen.getByText(/working \d+s/i)).toBeInTheDocument();
+    expect(screen.getByText("working")).toBeInTheDocument();
+    expect(document.querySelector(".transcript-body")).not.toHaveAttribute(
+      "aria-live",
+    );
+    expect(document.querySelector(".elapsed-meta")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
     expect(
       screen.getByRole("button", { name: /Cancel background reply/i }),
     ).toBeInTheDocument();
@@ -3070,7 +3162,7 @@ describe("App", () => {
         act(() => {
           realtimeMock.instances[0].callbacks.onStatus("agent-speaking");
         });
-        expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+        expect(screen.getByText("Speaking")).toBeInTheDocument();
       },
     ],
     [
@@ -3079,7 +3171,7 @@ describe("App", () => {
         fireEvent.focus(
           screen.getByLabelText("Type a message to your Hermes agent"),
         );
-        expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+        expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
       },
     ],
   ])("uses transcript only when %s", async (_name, makeUnsafe) => {
@@ -3273,13 +3365,13 @@ describe("App", () => {
     const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
 
     fireEvent.blur(input);
 
     expect(session.resume).not.toHaveBeenCalled();
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
   });
 
   it("restores hands-free capture after a successful typed send from a live session", async () => {
@@ -3375,7 +3467,7 @@ describe("App", () => {
     fireEvent.focus(input);
 
     await waitFor(
-      () => expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument(),
+      () => expect(screen.getByText("Tap to talk.")).toBeInTheDocument(),
       { timeout: 1500 },
     );
     expect(session.resume).not.toHaveBeenCalled();
@@ -3467,7 +3559,7 @@ describe("App", () => {
     const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
     expect(session.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
 
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
     fireEvent.pointerUp(orb, { pointerId: 2 });
@@ -3484,7 +3576,7 @@ describe("App", () => {
 
     const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
     fireEvent.blur(input);
 
     vi.useFakeTimers();
@@ -3711,8 +3803,11 @@ describe("App", () => {
       ).toBeInTheDocument(),
     );
     expect(
-      screen.getByText("Unsupported realtime provider 'openai'."),
+      screen.getByText("Voice is not configured for this browser. Use Hold or type."),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Unsupported realtime provider 'openai'."),
+    ).not.toBeInTheDocument();
     expect(realtimeMock.instances).toHaveLength(0);
   });
 
@@ -3782,7 +3877,7 @@ describe("App", () => {
     expect(
       screen.queryByText("Thinking."),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("turn-complete"));
 
@@ -4063,9 +4158,9 @@ describe("App", () => {
     );
 
     expect(session.abandonPendingResponse).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Hermes Agent is speaking")).not.toBeInTheDocument();
+    expect(screen.queryByText("Speaking")).not.toBeInTheDocument();
     expect(screen.queryByText("old abandoned answer")).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
 
     act(() => session.callbacks.onStatus("turn-complete"));
     expect(screen.queryByText("I didn't catch that.")).not.toBeInTheDocument();
@@ -4118,7 +4213,7 @@ describe("App", () => {
 
     act(() => session.callbacks.onStatus("agent-speaking"));
 
-    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+    expect(screen.getByText("Speaking")).toBeInTheDocument();
     expect(screen.getAllByText("I didn't catch that.")).toHaveLength(1);
 
     act(() => session.callbacks.onStatus("turn-complete"));
@@ -4324,7 +4419,7 @@ describe("App", () => {
     expect(
       screen.queryByText(/did not return a response/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+    expect(screen.getByText("Speaking")).toBeInTheDocument();
   });
 
   it("keeps raw realtime tool activity out of the transcript", async () => {
@@ -4356,7 +4451,7 @@ describe("App", () => {
 
     act(() => realtimeMock.instances[0].callbacks.onStatus("agent-speaking"));
     await waitFor(() =>
-      expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument(),
+      expect(screen.getByText("Speaking")).toBeInTheDocument(),
     );
 
     vi.useFakeTimers();
@@ -4417,7 +4512,7 @@ describe("App", () => {
     });
 
     expect(realtimeMock.instances).toHaveLength(1);
-    expect(screen.getByText("Hermes Agent is speaking")).toBeInTheDocument();
+    expect(screen.getByText("Speaking")).toBeInTheDocument();
 
     realtimeMock.tokenExpiresAt = "2099-01-01T00:00:00Z";
     act(() => first.callbacks.onStatus?.("turn-complete"));
@@ -4452,7 +4547,7 @@ describe("App", () => {
     const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
     fireEvent.blur(input);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
@@ -4463,7 +4558,7 @@ describe("App", () => {
     expect(first.disconnect).toHaveBeenCalledTimes(1);
     expect(realtimeMock.instances).toHaveLength(1);
     expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
   });
 
   it("does not revive a delayed reconnect after the transcript is focused", async () => {
@@ -4493,7 +4588,7 @@ describe("App", () => {
 
     expect(screen.queryByText("Voice reconnected.")).not.toBeInTheDocument();
     expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
   });
 
   it("does not let stale reconnect cleanup clear a newer Live session", async () => {
@@ -4618,7 +4713,7 @@ describe("App", () => {
 
     expect(realtimeMock.instances).toHaveLength(1);
     expect(screen.queryByText("Listening hands-free")).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
   });
 
   it("does not let stale initial Live cleanup clear a newer Live session", async () => {
@@ -4737,10 +4832,8 @@ describe("App", () => {
     });
     vi.useRealTimers();
 
-    expect(
-      screen.getByText(/Voice could not reconnect/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Tap to retry")).toBeInTheDocument();
+    expect(screen.getAllByText("Voice disconnected.").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("button", { name: /Retry voice/i })).toBeInTheDocument();
     expect(screen.queryByText("Reconnecting...")).not.toBeInTheDocument();
   });
 
@@ -4770,7 +4863,7 @@ describe("App", () => {
     const input = screen.getByLabelText("Type a message to your Hermes agent");
     fireEvent.focus(input);
     fireEvent.blur(input);
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
     vi.useFakeTimers();
 
     Object.defineProperty(document, "visibilityState", {
@@ -4793,7 +4886,7 @@ describe("App", () => {
     expect(first.resume).not.toHaveBeenCalled();
     expect(realtimeMock.instances).toHaveLength(1);
     expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Tap to talk to Hermes Agent")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
   });
 
   it("resumes audio without reconnecting a healthy session after returning from the background", async () => {
@@ -4905,6 +4998,35 @@ describe("App", () => {
     });
   });
 
+  it("lets the orb stop an active Live reconnect", async () => {
+    await renderUnlockedApp();
+    const session = await startListeningVoice();
+    realtimeMock.connectGate = createConnectGate();
+    vi.useFakeTimers();
+
+    await act(async () => {
+      session.callbacks.onError?.(new Error("socket failed"));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Reconnecting...")).toBeInTheDocument();
+
+    const orb = screen.getByLabelText(/Voice orb/);
+    fireEvent.pointerDown(orb, { pointerId: 7, button: 0 });
+    fireEvent.pointerUp(orb, { pointerId: 7 });
+    expect(screen.getByText("Stopped reconnecting.")).toBeInTheDocument();
+    expect(screen.getByText("Tap to talk.")).toBeInTheDocument();
+
+    realtimeMock.connectGate.resolve();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(screen.queryByText("Voice reconnected.")).not.toBeInTheDocument();
+  });
+
   it("disconnects an errored Live session before reconnecting", async () => {
     await renderUnlockedApp();
     const first = await startListeningVoice();
@@ -4934,11 +5056,11 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: /^Live$/ }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Tap to retry/i })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /Retry voice/i })).toBeInTheDocument(),
     );
 
     realtimeMock.connectError = null;
-    await user.click(screen.getByRole("button", { name: /Tap to retry/i }));
+    await user.click(screen.getByRole("button", { name: /Retry voice/i }));
 
     await waitFor(() =>
       expect(screen.getByText("Listening hands-free")).toBeInTheDocument(),
@@ -4964,7 +5086,7 @@ describe("App", () => {
     vi.useRealTimers();
 
     expect(screen.getByText("Hold-to-talk is not available here.")).toBeInTheDocument();
-    await user.click(screen.getByText("Tap to retry"));
+    await user.click(screen.getByRole("button", { name: /Retry voice/i }));
 
     expect(realtimeMock.instances).toHaveLength(0);
     expect(screen.getByText("Hold to talk.")).toBeInTheDocument();

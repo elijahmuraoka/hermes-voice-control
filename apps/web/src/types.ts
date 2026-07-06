@@ -40,6 +40,8 @@ export interface HermesAdapterDiagnostics {
 }
 export interface ReadyzResponse {
   ok: boolean;
+  authExpired?: boolean;
+  hasDetails?: boolean;
   checks?: {
     hermes_adapter?: string;
     stt_provider?: string;

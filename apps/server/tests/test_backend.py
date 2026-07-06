@@ -149,12 +149,15 @@ def test_device_refresh_cookie_survives_jsonresponse_endpoints(tmp_path):
     job_id = res.headers["X-HVC-Chat-Job-Id"]
     client.cookies.delete("hvc_session")
     poll = client.get(f"/chat/jobs/{job_id}")
-    assert poll.status_code == 404  # job belongs to the refreshed session, not a re-refreshed one
+    # Jobs are owned by the device-stable principal, so they survive
+    # session rotation on the same device.
+    assert poll.status_code == 200
+    assert "hvc_session" in poll.headers.get("set-cookie", "")
     res2 = client.post("/chat/text", json={"message": "again", "job": True})
-    assert not res2.headers.get("set-cookie")  # refreshed session B persisted; no re-mint
+    assert not res2.headers.get("set-cookie")  # refreshed session persisted; no re-mint
     job2 = res2.headers["X-HVC-Chat-Job-Id"]
     poll2 = client.get(f"/chat/jobs/{job2}")
-    assert poll2.status_code == 200  # same session reused across submit+poll
+    assert poll2.status_code == 200  # same principal across submit+poll
 def test_logout_revokes_device_token(tmp_path):
     client = make_pin_client(tmp_path)
     login(client)
@@ -163,6 +166,83 @@ def test_logout_revokes_device_token(tmp_path):
     client.cookies.clear()
     client.cookies.set("hvc_device", device)
     assert client.get("/auth/session").status_code == 401
+class _WarmSpyAdapter(HermesAdapter):
+    def __init__(self):
+        self.calls: list = []
+        self.warmed = threading.Event()
+
+    def warm_session(self, session_hash=None):
+        self.calls.append(session_hash)
+        self.warmed.set()
+        return "resumed"
+def test_pin_unlock_warms_device_principal(tmp_path):
+    client = make_pin_client(tmp_path)
+    spy = _WarmSpyAdapter()
+    client.app.state.tools.adapter = spy
+    login(client)
+    assert spy.warmed.wait(2)
+    assert len(spy.calls) == 1
+    assert spy.calls[0].startswith("dev-") and len(spy.calls[0]) == 68
+def test_device_refresh_warms_same_principal(tmp_path):
+    client = make_pin_client(tmp_path)
+    spy = _WarmSpyAdapter()
+    client.app.state.tools.adapter = spy
+    login(client)
+    assert spy.warmed.wait(2)
+    first = spy.calls[0]
+    spy.warmed.clear()
+    client.cookies.delete("hvc_session")
+    assert client.get("/auth/session").status_code == 200
+    assert spy.warmed.wait(2)
+    # Session rotation must NOT rotate the agent identity: the remembered
+    # device keys the Hermes session, so memory survives re-mints.
+    assert all(call == first for call in spy.calls)
+def test_auth_session_check_warms_with_valid_cookies(tmp_path):
+    client = make_pin_client(tmp_path)
+    spy = _WarmSpyAdapter()
+    client.app.state.tools.adapter = spy
+    login(client)
+    assert spy.warmed.wait(2)
+    spy.warmed.clear()
+    assert client.get("/auth/session").status_code == 200
+    assert spy.warmed.wait(2)
+    assert len(spy.calls) == 2
+def test_agent_principal_stable_across_session_rotation(tmp_path):
+    seen: list = []
+
+    class RecordingAdapter(HermesAdapter):
+        def ask_agent(self, message, mode="quick", transcript_window=None, should_cancel=None, session_hash=None, on_partial=None):
+            seen.append(session_hash)
+            return AdapterResult(ok=True, data={"speakable": "ok", "display": "ok", "mode": mode})
+
+    client = make_pin_client(tmp_path)
+    client.app.state.tools.adapter = RecordingAdapter()
+    login(client)
+    assert client.post("/chat/text", json={"message": "one"}).status_code == 200
+    client.cookies.delete("hvc_session")
+    assert client.post("/chat/text", json={"message": "two"}).status_code == 200
+    assert len(seen) == 2
+    assert seen[0] == seen[1]
+    assert seen[0].startswith("dev-")
+def test_pin_reentry_keeps_existing_device(tmp_path):
+    client = make_pin_client(tmp_path)
+    spy = _WarmSpyAdapter()
+    client.app.state.tools.adapter = spy
+    login(client)
+    assert spy.warmed.wait(2)
+    device = client.cookies.get("hvc_device")
+    first_principal = spy.calls[0]
+    spy.warmed.clear()
+    # Re-entering the PIN must not rotate the device (agent memory + job
+    # ownership are keyed to it).
+    res = client.post("/auth/pin", json={"pin": TEST_PIN})
+    assert res.status_code == 200
+    assert "hvc_device" not in res.headers.get("set-cookie", "")
+    assert client.cookies.get("hvc_device") == device
+    assert spy.warmed.wait(2)
+    assert spy.calls[-1] == first_principal
+def test_base_adapter_warm_session_is_noop():
+    assert HermesAdapter().warm_session("abc") == "skipped"
 def test_readyz_unauthenticated_is_minimal(tmp_path):
     res = make_client(tmp_path).get("/readyz")
     assert res.status_code == 200
@@ -654,6 +734,11 @@ def test_chat_text_job_slow_response_survives_refresh_with_same_session_cookie(t
 
     refreshed = TestClient(client.app)
     refreshed.cookies.set("hvc_session", token)
+    # Real clients send the device cookie alongside the session cookie; the
+    # device pins the agent principal that owns the job.
+    device = client.cookies.get("hvc_device")
+    if device:
+        refreshed.cookies.set("hvc_device", device)
     completed = wait_for_job_state(refreshed, job_id, "complete")
     assert completed["result"]["result"]["speakable"] == "slow answer"
     assert completed["result"]["diagnostics"] == {"adapter": "mock", "duration_ms": 100}

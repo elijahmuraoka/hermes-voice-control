@@ -113,9 +113,10 @@ curl -i -X POST http://127.0.0.1:8765/auth/pin \
 Expected results:
 
 - `/healthz` returns `{"ok":true}`.
-- `/readyz` returns HTTP 200 with `ok: true`, `database: "ok"`,
-  `gemini_mode: "mock"`, `gemini_client_available: true`,
-  `pin_required: true`, and `logs_endpoint_enabled: false`.
+- `/readyz` returns HTTP 200 with `{"ok": true}`. Detailed posture fields
+  (`database`, `gemini_mode`, `gemini_client_available`, `pin_required`,
+  `logs_endpoint_enabled`) have moved to `/readyz/details`, which requires a
+  valid session (returns HTTP 401 when unauthenticated).
 - `/auth/session` returns HTTP 401 until a valid PIN session is established.
 - The PIN value, `Set-Cookie` header, session ids, hostnames, and tailnet names
   are not copied into committed evidence.
@@ -224,7 +225,8 @@ curl -i 'https://DEVICE.TAILNET.ts.net/auth/session'
 Expected results:
 
 - Tailscale Serve reports an HTTPS reverse proxy to `127.0.0.1:8787`.
-- `/readyz` returns HTTP 200 with the same safe posture as the local rehearsal.
+- `/readyz` returns HTTP 200 with `{"ok": true}` (same as the local rehearsal).
+  Use `/readyz/details` with a valid session to inspect per-field posture.
 - `/auth/session` returns HTTP 401 before PIN login.
 - `tailscale funnel status` shows tailnet-only Serve state and no public Funnel
   exposure; the runner fails closed if Funnel status cannot be verified.
@@ -322,8 +324,9 @@ tailscale serve status --json
 
 Expected results:
 
-- `/readyz` is HTTP 200 with `pin_required: true`, real Gemini mode when
-  configured, and `logs_endpoint_enabled: false`.
+- `/readyz` is HTTP 200 with `{"ok": true}`. Per-field posture (`pin_required`,
+  Gemini mode, `logs_endpoint_enabled`) is available at `/readyz/details` with a
+  valid session.
 - Unauthenticated `/auth/session` is HTTP 401.
 - `tailscale funnel status` still reports the endpoint as tailnet-only.
 - Logs are under `.private/deployment/logs/`, which is ignored by git.
@@ -376,8 +379,10 @@ Record evidence in the active spec using summaries, not raw secrets.
 Allowed:
 
 - Command names and pass/fail status.
-- Redacted `/readyz` keys such as `ok`, `database`, `gemini_mode`,
-  `gemini_client_available`, `pin_required`, and `logs_endpoint_enabled`.
+- The `/readyz` response shape: `{"ok": true}` (unauthenticated). Detailed
+  posture fields (`database`, `gemini_mode`, `gemini_client_available`,
+  `pin_required`, `logs_endpoint_enabled`) are from `/readyz/details` and
+  require a valid session.
 - Whether Tailscale Serve and rollback were executed or intentionally skipped.
 
 Do not commit:
@@ -401,8 +406,9 @@ Do not commit:
   private HTTPS origins.
 - `HVC_GEMINI_MODE=real requires GEMINI_API_KEY or GOOGLE_API_KEY`: configure
   credentials on the backend only.
-- `gemini_client_available=false` in `/readyz`: install the real Gemini extra
-  with `cd apps/server && uv pip install -e '.[dev,real-gemini]'`.
+- `gemini_client_available=false` in `/readyz/details` (requires a valid
+  session): install the real Gemini extra with
+  `cd apps/server && uv pip install -e '.[dev,real-gemini]'`.
 - `HVC_HERMES_ADAPTER=local requires HVC_HERMES_BIN`: install Hermes or point
   `HVC_HERMES_BIN` at the executable.
 - `tailscale serve status` fails locally: do not mutate Serve state until the

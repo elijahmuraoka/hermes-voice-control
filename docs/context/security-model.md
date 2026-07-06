@@ -32,6 +32,9 @@ Defaults:
 - Keep optional PIN/session auth available behind `HVC_REQUIRE_PIN=true`.
 - Reject weak configured PINs such as empty values, `000000`, `123456`, or
   values shorter than 8 characters when PIN auth is required.
+- Issue a long-lived `hvc_device` httpOnly cookie (default 90-day TTL,
+  `HVC_DEVICE_TTL_SECONDS`) after first successful PIN entry so the device can
+  skip PIN re-entry on subsequent visits. Disable with `HVC_REMEMBER_DEVICE=false`.
 - Reject wildcard CORS origins because credentials are enabled.
 - Keep `/logs` disabled unless `HVC_ALLOW_LOGS_ENDPOINT=true` is set for a
   trusted debugging session.
@@ -71,10 +74,35 @@ compromised browser can use that token until it expires. That is the accepted
 residual risk for direct Gemini Live browser streaming; long-lived Gemini API
 keys never leave the backend.
 
-`/readyz` reports safe runtime posture, including database writeability, Gemini
-mode/model, adapter mode, PIN requirement, log-retention controls, and whether
-the logs endpoint is enabled. It returns `503` when real Gemini mode is selected
+`/readyz` (unauthenticated) returns only `{"ok": true}` or `{"ok": false}`.
+Detailed posture fields (database writeability, Gemini mode/model, adapter mode,
+PIN requirement, log-retention controls, logs endpoint state) are available at
+`/readyz/details`, which requires a valid session and returns HTTP 401 when
+unauthenticated. `/readyz` returns `503` when real Gemini mode is selected
 without a configured API key or without the `google-genai` client installed.
+
+## Hold-to-talk STT and privacy
+
+Hold-to-talk records PCM audio only while the operator holds the orb and sends
+it to the backend `POST /stt/transcribe`. The audio is not persisted to disk by
+the HVC backend.
+
+When `HVC_GEMINI_MODE=real` is active and a `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+is present, `HVC_STT_PROVIDER` automatically resolves to `gemini`. In that
+configuration the backend forwards the audio bytes inline to Google's Gemini API
+for transcription. Google's Files API is not used; the audio is sent as inline
+bytes in the request and is not persisted by Google beyond the request lifetime,
+consistent with Google's standard API data handling. Long-lived API keys never
+leave the backend.
+
+When Gemini STT is not active or the backend STT endpoint is unreachable, the
+browser falls back to `webkitSpeechRecognition` for interim and final transcript
+text. This fallback runs in the browser and sends audio to the browser vendor's
+speech service, not to the HVC backend or Google's Gemini API.
+
+Operators deploying HVC in real Gemini mode should be aware that hold-to-talk
+audio reaches Google's API infrastructure for the duration of each transcription
+request.
 
 ## Hermes agent bridge
 
@@ -91,6 +119,18 @@ not persist raw free-text prompts, transcript windows, agent answers, or
 confirmation summaries. Confirmation records can still hold the visible summary
 and payload needed for review, but approval remains non-executing in v1.
 
+## Remembered-device unlock
+
+After the first successful PIN entry the backend issues an httpOnly `hvc_device`
+cookie with a long-lived TTL (default 90 days, configurable via
+`HVC_DEVICE_TTL_SECONDS`). On subsequent visits the device cookie allows the
+browser to skip PIN re-entry. The device cookie, not the short-lived session
+cookie, is the stable key for agent memory and job ownership across sessions.
+
+The remembered-device bypass is a deliberate convenience for a single-operator
+deployment. Set `HVC_REMEMBER_DEVICE=false` to disable device-cookie issuance
+and require the PIN on every visit.
+
 ## Cancellation
 
 Tool calls carry request ids. When the user barges in, ends the session, or the
@@ -104,7 +144,7 @@ frontend ignores late responses for cancelled calls.
 |---|---|---|---|
 | Browser compromise | High | Browser is treated as untrusted. It receives only Gemini ephemeral tokens and, when PIN auth is enabled, an HttpOnly `hvc_session` cookie. Long-lived Gemini keys stay backend-only. PIN login no longer returns the raw session token in JSON. CORS is allowlisted, wildcard origins fail closed, `/logs` is disabled by default, and audit payloads avoid raw free text. | Accepted for v1: a compromised browser can act as the user until the session cookie or Gemini token expires. Keep TTLs short for exposed deployments and revoke with logout or DB cleanup if compromise is suspected. |
 | Gemini token theft | High | Tokens are minted only after backend auth. Real tokens are constrained to one use, short expiry, short new-session window, configured Live model, and audio-only response modalities. Token values are not logged. | Accepted for v1 because direct browser-to-Gemini Live streaming requires an ephemeral browser token. The non-goal is hiding the active ephemeral token from the active browser session. |
-| PIN and session abuse | High | PIN auth is required for Tailscale Serve. Weak/default PINs fail closed when `HVC_REQUIRE_PIN=true`. PIN attempts are rate-limited per client. Sessions are random, stored hashed server-side, expire by TTL, and can be revoked. Cookies are HttpOnly, SameSite=Lax, and can be Secure. | No multi-user RBAC or IdP in v1. Add a follow-up before shared-team use or before enabling external action execution. |
+| PIN and session abuse | High | PIN auth is required for Tailscale Serve. Weak/default PINs fail closed when `HVC_REQUIRE_PIN=true`. PIN attempts are rate-limited per client. Sessions are random, stored hashed server-side, expire by TTL, and can be revoked. Cookies are HttpOnly, SameSite=Lax, and can be Secure. A long-lived `hvc_device` cookie (default 90-day TTL, `HVC_DEVICE_TTL_SECONDS`) allows a remembered device to bypass PIN re-entry; treat it as equivalent to a valid PIN session for its full TTL. Disable device cookies with `HVC_REMEMBER_DEVICE=false`. | No multi-user RBAC or IdP in v1. The device cookie is a PIN-bypass per device; review TTL and disable if the device is shared or untrusted. Add a follow-up before shared-team use or before enabling external action execution. |
 | CSRF and origin abuse | Medium | Credentialed CORS allows only configured origins and rejects `*`. Browser fetch calls use credentials against configured origins, PIN sessions use SameSite=Lax cookies, and v1 confirmation approval does not execute external actions. | No separate CSRF token or strict Origin/Referer gate in v1. Add one before any approval can perform a real external action. |
 | Reverse-proxy header spoofing | High | Default bind is localhost. Non-local binds require `HVC_ALLOW_REMOTE_BIND=true`. No-PIN mode rejects non-local clients, forwarded/proxy identity headers, and non-local Host headers unless `HVC_ALLOW_NO_PIN_REMOTE=true` is set intentionally. `pnpm env:check` fails unsafe private-network posture. | Explicit override is treated as an operator-accepted exception for debugging only. Normal Tailscale Serve uses PIN/session auth. |
 | Tool prompt injection | High | Gemini/browser tool calls hit a backend allowlist. Unknown tools are denied. `ask_agent` accepts only `quick` and `deep` modes. Local Hermes is launched with the safe toolset and a read-only prompt. Risky requests can only create `propose_action` confirmations, and approval records intent without executing. | Agent text can still contain bad advice. V1 non-goal: autonomous file, message, shell, or network actions from voice. |

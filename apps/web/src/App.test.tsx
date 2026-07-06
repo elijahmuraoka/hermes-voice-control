@@ -29,6 +29,7 @@ const audioMock = vi.hoisted(() => ({
     close: ReturnType<typeof vi.fn>;
     emit: (data?: string) => void;
   }>,
+<<<<<<< HEAD
   createError: null as Error | null,
   startError: null as Error | null,
   startGate: null as { promise: Promise<void>; resolve: () => void } | null,
@@ -37,6 +38,23 @@ const earconMock = vi.hoisted(() => ({
   plays: [] as string[],
   unlocks: 0,
   closes: 0,
+=======
+  startError: null as Error | null,
+  startGate: null as { promise: Promise<void>; resolve: () => void } | null,
+}));
+const audioMock = vi.hoisted(() => ({
+  instances: [] as Array<{
+    startCapture: ReturnType<typeof vi.fn>;
+    stopCapture: ReturnType<typeof vi.fn>;
+    setCaptureEnabled: ReturnType<typeof vi.fn>;
+    playPcm16Base64: ReturnType<typeof vi.fn>;
+    interrupt: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+    emit: (data?: string) => void;
+  }>,
+  startError: null as Error | null,
+  startGate: null as { promise: Promise<void>; resolve: () => void } | null,
+>>>>>>> origin/main
 }));
 
 let sessionAuthenticated = true;
@@ -54,7 +72,10 @@ let chatTextBodies: unknown[] = [];
 let restoreNavigatorMediaDevices: (() => void) | null = null;
 let readyzOk = true;
 let readyzHermesAvailable = true;
+<<<<<<< HEAD
 let readyzSttProvider = "gemini";
+=======
+>>>>>>> origin/main
 let readyzDeferred: { promise: Promise<void>; resolve: () => void } | null = null;
 
 interface MockSpeechUtterance {
@@ -460,16 +481,23 @@ vi.mock("./audio", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./audio")>();
   class MockBrowserGeminiAudio {
     private onChunk: ((chunk: { data: string; mimeType: typeof actual.GEMINI_INPUT_MIME_TYPE }) => void) | null = null;
+<<<<<<< HEAD
     private closed = false;
     startCapture = vi.fn(async (onChunk: (chunk: { data: string; mimeType: typeof actual.GEMINI_INPUT_MIME_TYPE }) => void) => {
       if (audioMock.startError) throw audioMock.startError;
       if (audioMock.startGate) await audioMock.startGate.promise;
       if (this.closed) return;
+=======
+    startCapture = vi.fn(async (onChunk: (chunk: { data: string; mimeType: typeof actual.GEMINI_INPUT_MIME_TYPE }) => void) => {
+      if (audioMock.startError) throw audioMock.startError;
+      if (audioMock.startGate) await audioMock.startGate.promise;
+>>>>>>> origin/main
       this.onChunk = onChunk;
     });
     stopCapture = vi.fn();
     setCaptureEnabled = vi.fn();
     playPcm16Base64 = vi.fn(async () => undefined);
+<<<<<<< HEAD
     resume = vi.fn(async () => undefined);
     interrupt = vi.fn();
     close = vi.fn(() => {
@@ -482,12 +510,25 @@ vi.mock("./audio", async (importOriginal) => {
     }
     constructor() {
       if (audioMock.createError) throw audioMock.createError;
+=======
+<<<<<<< HEAD
+    resume = vi.fn(async () => undefined);
+=======
+>>>>>>> origin/main
+    interrupt = vi.fn();
+    close = vi.fn(() => this.stopCapture());
+    emit(data = "AAECAw==") {
+      this.onChunk?.({ data, mimeType: actual.GEMINI_INPUT_MIME_TYPE });
+    }
+    constructor() {
+>>>>>>> origin/main
       audioMock.instances.push(this);
     }
   }
   return { ...actual, BrowserGeminiAudio: MockBrowserGeminiAudio };
 });
 
+<<<<<<< HEAD
 vi.mock("./earcons", () => ({
   createEarconController: () => ({
     unlock: vi.fn(async () => {
@@ -502,6 +543,8 @@ vi.mock("./earcons", () => ({
   }),
 }));
 
+=======
+>>>>>>> origin/main
 describe("App", () => {
   beforeEach(() => {
     realtimeMock.instances.length = 0;
@@ -525,6 +568,7 @@ describe("App", () => {
     chatTextBodies = [];
     readyzOk = true;
     readyzHermesAvailable = true;
+<<<<<<< HEAD
     readyzSttProvider = "gemini";
     readyzDeferred = null;
     earconMock.plays = [];
@@ -534,6 +578,12 @@ describe("App", () => {
     chatCancelStatuses.clear();
     audioMock.instances = [];
     audioMock.createError = null;
+=======
+    readyzDeferred = null;
+    chatJobStatuses.clear();
+    chatCancelStatuses.clear();
+    audioMock.instances = [];
+>>>>>>> origin/main
     audioMock.startError = null;
     audioMock.startGate = null;
     Object.defineProperty(window, "localStorage", {
@@ -553,8 +603,17 @@ describe("App", () => {
               ok: readyzOk,
               checks: {
                 hermes_adapter: "api",
+<<<<<<< HEAD
                 hermes: { kind: "api", available: readyzHermesAvailable },
                 stt_provider: readyzSttProvider,
+=======
+<<<<<<< HEAD
+                hermes: { kind: "api", available: readyzHermesAvailable },
+=======
+                hermes: { kind: "api", available: true },
+>>>>>>> origin/main
+                stt_provider: "gemini",
+>>>>>>> origin/main
               },
             }),
             {
@@ -1011,7 +1070,15 @@ describe("App", () => {
       }),
     ]);
     expect(screen.getByText("browser guess")).toBeInTheDocument();
+<<<<<<< HEAD
     expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+=======
+<<<<<<< HEAD
+    expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+=======
+    expect(screen.getByText("Sending...")).toBeInTheDocument();
+>>>>>>> origin/main
+>>>>>>> origin/main
     expect(chatTextBodies).toHaveLength(0);
 
     fireEvent.pointerDown(orb, { pointerId: 2, button: 0 });
@@ -1037,6 +1104,7 @@ describe("App", () => {
     expect(screen.getByText("gemini corrected phrase")).toBeInTheDocument();
   });
 
+<<<<<<< HEAD
   it("keeps hold-to-talk alive when recognition service is unavailable and Gemini STT can transcribe", async () => {
     const speech = installSpeechRecognitionMock({ stopEnds: false });
     sttTranscript = "gemini transcript from standalone pwa";
@@ -1524,6 +1592,8 @@ describe("App", () => {
     expect(sttRequests).toHaveLength(0);
   });
 
+=======
+>>>>>>> origin/main
   it("stops buffering STT audio immediately on basic hold release", async () => {
     const speech = installSpeechRecognitionMock({ stopEnds: false });
     sttTranscript = "gemini released transcript";
@@ -1716,7 +1786,15 @@ describe("App", () => {
       await Promise.resolve();
     });
     expect(chatTextBodies).toHaveLength(0);
+<<<<<<< HEAD
     expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+=======
+<<<<<<< HEAD
+    expect(screen.getByText("Finalizing...")).toBeInTheDocument();
+=======
+    expect(screen.getByText("Sending...")).toBeInTheDocument();
+>>>>>>> origin/main
+>>>>>>> origin/main
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4200);
@@ -2167,7 +2245,11 @@ describe("App", () => {
     expect(screen.getByText("Listening hands-free")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Hold$/ })).toBeInTheDocument();
     expect(
+<<<<<<< HEAD
       screen.getByText(/Hold-to-talk needs browser speech recognition here/i),
+=======
+      screen.getByText(/Hold mode needs browser speech recognition/i),
+>>>>>>> origin/main
     ).toBeInTheDocument();
   });
 
@@ -4562,7 +4644,11 @@ describe("App", () => {
     vi.useRealTimers();
 
     expect(screen.queryByText("Voice reconnected.")).not.toBeInTheDocument();
+<<<<<<< HEAD
     expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
+=======
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+>>>>>>> origin/main
   });
 
   it("does not schedule reconnect while the initial Live connection is pending", async () => {
@@ -4761,7 +4847,11 @@ describe("App", () => {
 
     expect(realtimeMock.instances).toHaveLength(1);
     expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+<<<<<<< HEAD
     expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
+=======
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+>>>>>>> origin/main
   });
 
   it("does not reconnect or resume a parked idle Live session on visibility return", async () => {
@@ -4947,12 +5037,17 @@ describe("App", () => {
   });
 
   it("keeps the retry pill in hold mode instead of starting Live", async () => {
+<<<<<<< HEAD
     readyzSttProvider = "browser";
     vi.stubGlobal("SpeechRecognition", undefined);
     vi.stubGlobal("webkitSpeechRecognition", undefined);
     const user = userEvent.setup();
     await renderUnlockedApp();
     await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument());
+=======
+    const user = userEvent.setup();
+    await renderUnlockedApp();
+>>>>>>> origin/main
     const orb = screen.getByLabelText(/Voice orb/);
     vi.useFakeTimers();
 
@@ -4967,7 +5062,11 @@ describe("App", () => {
     await user.click(screen.getByText("Tap to retry"));
 
     expect(realtimeMock.instances).toHaveLength(0);
+<<<<<<< HEAD
     expect(screen.getByText("Hold to talk.")).toBeInTheDocument();
+=======
+    expect(screen.getByText("Hold to talk to Hermes Agent")).toBeInTheDocument();
+>>>>>>> origin/main
   });
 
   it("shows finalizing feedback and nudges blocked hold attempts", async () => {
@@ -4996,6 +5095,7 @@ describe("App", () => {
       vi.advanceTimersByTime(230);
       await Promise.resolve();
     });
+<<<<<<< HEAD
     const firstNudgedOrb = screen.getByLabelText(/Voice orb/);
     expect(firstNudgedOrb.className).toContain("is-nudging");
     const firstNudgeKey = firstNudgedOrb.getAttribute("data-nudge-key");
@@ -5012,6 +5112,9 @@ describe("App", () => {
     expect(secondNudgedOrb.getAttribute("data-nudge-key")).not.toBe(
       firstNudgeKey,
     );
+=======
+    expect(orb.className).toContain("is-nudging");
+>>>>>>> origin/main
 
     sttDeferred.resolve();
     await act(async () => {

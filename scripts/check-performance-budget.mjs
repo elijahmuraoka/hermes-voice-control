@@ -5,7 +5,7 @@ import { join } from "node:path";
 const root = new URL("..", import.meta.url).pathname;
 const assetsDir = join(root, "apps/web/dist/assets");
 const bundleBudgets = {
-  // Reliability + standalone PWA hold-to-talk fallback.
+  // Reliability + standalone PWA hold-to-talk fallback (raised from 272000).
   jsBytes: 280000,
   cssBytes: 20 * 1024,
 };

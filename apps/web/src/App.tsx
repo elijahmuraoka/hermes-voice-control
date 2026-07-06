@@ -92,6 +92,10 @@ const BASIC_HOLD_STT_SAMPLE_BYTES_PER_SECOND = 16_000 * 2;
 const BASIC_HOLD_STT_TIMEOUT_PER_SECOND_MS = 150;
 const BASIC_HOLD_STT_TIMEOUT_MAX_MS = 12_000;
 const SESSION_EXPIRED_MESSAGE = "Session expired. Enter your private PIN again.";
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
 const READYZ_REFRESH_MS = 45_000;
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000] as const;
 const RECONNECT_GIVE_UP_MS = 45_000;
@@ -99,6 +103,11 @@ const TOKEN_RECONNECT_LEEWAY_MS = 5_000;
 const TOKEN_RECONNECT_DEFER_MS = 1_000;
 const FINALIZING_NUDGE_MS = 620;
 const MAX_BROWSER_TIMER_MS = 2_147_483_647;
+<<<<<<< HEAD
+=======
+=======
+>>>>>>> origin/main
+>>>>>>> origin/main
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
   return [
@@ -158,10 +167,15 @@ type TextJobEntryMeta = {
 };
 
 type SpeechCaptureState = {
+<<<<<<< HEAD
   recognition: BrowserSpeechRecognition | null;
   audio: BrowserGeminiAudio | null;
   audioStartSettled: boolean;
   audioStartFailed: boolean;
+=======
+  recognition: BrowserSpeechRecognition;
+  audio: BrowserGeminiAudio | null;
+>>>>>>> origin/main
   audioChunksBase64: string[];
   audioBytes: number;
   audioCapped: boolean;
@@ -319,9 +333,12 @@ export default function App() {
   const sessionRef = useRef<RealtimeVoiceSession | null>(null);
   const speechCaptureRef = useRef<SpeechCaptureState | null>(null);
   const speechFinalizingRef = useRef(false);
+<<<<<<< HEAD
   const orbLevelRef = useRef(0);
   const earconsRef = useRef<EarconController | null>(null);
   const sttProviderConfirmedRef = useRef(false);
+=======
+>>>>>>> origin/main
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
   const speechRecognitionDisclosureShownRef = useRef(false);
@@ -343,7 +360,10 @@ export default function App() {
   const wakeLockReleaseHandlerRef = useRef<(() => void) | null>(null);
   const wakeLockRequestingRef = useRef(false);
   const finalizingNudgeTimerRef = useRef<number | null>(null);
+<<<<<<< HEAD
   const finalizingNudgeSequenceRef = useRef(0);
+=======
+>>>>>>> origin/main
   const transcriptDraftsRef = useRef<
     Partial<Record<RealtimeTranscriptEvent["role"], string>>
   >({});
@@ -429,7 +449,10 @@ export default function App() {
       clearReadyzRefreshInterval();
       clearFinalizingNudgeTimer();
       void releaseWakeLock();
+<<<<<<< HEAD
       earconsRef.current?.close();
+=======
+>>>>>>> origin/main
       const activeSpeechCapture = speechCaptureRef.current;
       if (activeSpeechCapture) {
         activeSpeechCapture.finished = true;
@@ -480,15 +503,44 @@ export default function App() {
       setAgentConnection(checkingAgentConnection);
       return;
     }
+<<<<<<< HEAD
     const online = () => void refreshAgentConnection();
     const offline = () => {
       sttProviderConfirmedRef.current = false;
+=======
+<<<<<<< HEAD
+    const online = () => void refreshAgentConnection();
+    const offline = () =>
+>>>>>>> origin/main
       setAgentConnection({
         state: "unavailable",
         label: "Offline",
         detail: "Browser network is offline",
+<<<<<<< HEAD
       });
     };
+=======
+=======
+    let cancelled = false;
+    setAgentConnection(checkingAgentConnection);
+    getReadyz()
+      .then((readyz) => {
+        if (!cancelled) {
+          const provider = readyz.checks?.stt_provider?.trim();
+          if (provider) sttProviderRef.current = provider;
+          setAgentConnection(agentConnectionFromReadyz(readyz));
+        }
+      })
+      .catch(() => {
+        if (!cancelled)
+          setAgentConnection({
+            state: "unavailable",
+            label: "Agent status unavailable",
+            detail: "Open transcript if a request stalls",
+          });
+>>>>>>> origin/main
+      });
+>>>>>>> origin/main
     void refreshAgentConnection({ checking: true });
     readyzRefreshIntervalRef.current = window.setInterval(
       () => void refreshAgentConnection(),
@@ -533,6 +585,7 @@ export default function App() {
     setFinalizingNudgeKey(0);
   }
 
+<<<<<<< HEAD
   function updateOrbLevel(level: number) {
     orbLevelRef.current = Math.max(orbLevelRef.current, level);
   }
@@ -550,6 +603,8 @@ export default function App() {
     if (voiceModeRef.current === "push-to-talk") playEarcon("reply");
   }
 
+=======
+>>>>>>> origin/main
   async function refreshAgentConnection({
     checking = false,
   }: { checking?: boolean } = {}) {
@@ -565,6 +620,7 @@ export default function App() {
     )
       return;
     if (reconnectingRef.current) return;
+<<<<<<< HEAD
     const provider = readyz.ok ? readyz.checks?.stt_provider?.trim() : "";
     if (provider) {
       sttProviderRef.current = provider;
@@ -572,6 +628,10 @@ export default function App() {
     } else {
       sttProviderConfirmedRef.current = false;
     }
+=======
+    const provider = readyz.checks?.stt_provider?.trim();
+    if (provider) sttProviderRef.current = provider;
+>>>>>>> origin/main
     setAgentConnection(agentConnectionFromReadyz(readyz));
   }
 
@@ -1302,13 +1362,18 @@ export default function App() {
   }
 
   function speechRecognitionUnavailableMessage() {
+<<<<<<< HEAD
     return "Hold-to-talk needs browser speech recognition here. Use Live or type.";
+=======
+    return "Hold mode needs browser speech recognition. Switch to Live or type.";
+>>>>>>> origin/main
   }
 
   function speechRecognitionPermissionMessage() {
     return "Microphone blocked. Allow mic access, then hold again.";
   }
 
+<<<<<<< HEAD
   function speechTranscriptionFailureMessage() {
     return "Hold-to-talk could not transcribe that. Try again, use Live, or type.";
   }
@@ -1319,6 +1384,8 @@ export default function App() {
     return "Hold-to-talk could not start microphone audio. Use Live or type.";
   }
 
+=======
+>>>>>>> origin/main
   function basicHoldDisclosureMessage() {
     const provider = sttProviderRef.current;
     if (provider === "browser")
@@ -1332,6 +1399,7 @@ export default function App() {
     if (speechRecognitionDisclosureShownRef.current) return;
     speechRecognitionDisclosureShownRef.current = true;
     appendSystem(basicHoldDisclosureMessage());
+<<<<<<< HEAD
   }
 
   function serverSttCanTranscribeHold() {
@@ -1339,6 +1407,8 @@ export default function App() {
       sttProviderConfirmedRef.current &&
       ["gemini", "mock"].includes(sttProviderRef.current)
     );
+=======
+>>>>>>> origin/main
   }
 
   async function primeBasicHoldMicrophonePermission({
@@ -1397,6 +1467,7 @@ export default function App() {
     );
   }
 
+<<<<<<< HEAD
   function startSpeechCaptureAudio(capture: SpeechCaptureState): boolean {
     let audio: BrowserGeminiAudio;
     try {
@@ -1404,6 +1475,14 @@ export default function App() {
     } catch {
       capture.audioStartFailed = true;
       return false;
+=======
+  function startSpeechCaptureAudio(capture: SpeechCaptureState) {
+    let audio: BrowserGeminiAudio;
+    try {
+      audio = new BrowserGeminiAudio();
+    } catch {
+      return;
+>>>>>>> origin/main
     }
     capture.audio = audio;
     void audio
@@ -1411,7 +1490,11 @@ export default function App() {
         if (
           speechCaptureRef.current !== capture ||
           capture.finished ||
+<<<<<<< HEAD
           (capture.releaseRequested && capture.recognition)
+=======
+          capture.releaseRequested
+>>>>>>> origin/main
         )
           return;
         const bytes =
@@ -1424,6 +1507,7 @@ export default function App() {
         }
         capture.audioBytes += bytes;
         capture.audioChunksBase64.push(chunk.data);
+<<<<<<< HEAD
         if (capture.releaseRequested && !capture.recognition)
           finishSpeechCapture(capture);
       })
@@ -1453,6 +1537,22 @@ export default function App() {
           failSpeechCapture(capture, speechAudioCaptureMessage(error));
       });
     return true;
+=======
+      })
+      .then(() => {
+        if (
+          speechCaptureRef.current !== capture ||
+          capture.finished ||
+          capture.releaseRequested ||
+          capture.audio !== audio
+        )
+          audio.close();
+      })
+      .catch(() => {
+        if (capture.audio === audio) capture.audio = null;
+        audio.close();
+      });
+>>>>>>> origin/main
   }
 
   function updateSpeechCaptureEntry(
@@ -1503,8 +1603,11 @@ export default function App() {
       return speechRecognitionPermissionMessage();
     if (error === "audio-capture")
       return "I could not reach the microphone. Check the input, then try again or type.";
+<<<<<<< HEAD
     if (error === "service-not-allowed")
       return speechRecognitionUnavailableMessage();
+=======
+>>>>>>> origin/main
     if (error === "language-not-supported")
       return "This browser cannot recognize that language. Switch to Live or type.";
     return "Browser speech recognition stopped early. Try again, switch to Live, or type.";
@@ -1670,6 +1773,7 @@ export default function App() {
     );
   }
 
+<<<<<<< HEAD
   function nudgeFinalizingHold() {
     if (finalizingNudgeTimerRef.current !== null) {
       window.clearTimeout(finalizingNudgeTimerRef.current);
@@ -1677,6 +1781,12 @@ export default function App() {
     }
     finalizingNudgeSequenceRef.current += 1;
     setFinalizingNudgeKey(finalizingNudgeSequenceRef.current);
+=======
+<<<<<<< HEAD
+  function nudgeFinalizingHold() {
+    clearFinalizingNudgeTimer();
+    setFinalizingNudgeKey((key) => key + 1);
+>>>>>>> origin/main
     finalizingNudgeTimerRef.current = window.setTimeout(() => {
       finalizingNudgeTimerRef.current = null;
       setFinalizingNudgeKey(0);
@@ -1693,6 +1803,20 @@ export default function App() {
       return;
     }
     dispatch({ type: "THINK" });
+<<<<<<< HEAD
+=======
+=======
+  function submitFinishedSpeechCapture(capture: SpeechCaptureState, text: string) {
+    if (!text) {
+      cancelEmptySpeechCapture(capture);
+      return;
+    }
+    if (!canUsePrivateSession()) {
+      failFinishedSpeechCapture(capture, SESSION_EXPIRED_MESSAGE);
+      return;
+    }
+>>>>>>> origin/main
+>>>>>>> origin/main
     if (capture.entryId) {
       setEntries((items) =>
         items.map((entry) =>
@@ -1755,12 +1879,19 @@ export default function App() {
             dispatch({ type: "RECOVER" });
             return;
           }
+<<<<<<< HEAD
           void refreshAgentConnection();
           if (!browserText) {
             failFinishedSpeechCapture(capture, speechTranscriptionFailureMessage());
             dispatch({ type: "RECOVER" });
             return;
           }
+=======
+<<<<<<< HEAD
+          void refreshAgentConnection();
+=======
+>>>>>>> origin/main
+>>>>>>> origin/main
           // Browser recognition remains the fallback if Gemini STT is slow or unavailable.
         }
       }
@@ -1784,7 +1915,15 @@ export default function App() {
       return;
     }
     speechFinalizingRef.current = true;
+<<<<<<< HEAD
     dispatch({ type: "FINALIZE" });
+=======
+<<<<<<< HEAD
+    dispatch({ type: "FINALIZE" });
+=======
+    dispatch({ type: "POINTER_UP" });
+>>>>>>> origin/main
+>>>>>>> origin/main
     void finalizeSpeechCaptureTranscript(
       capture,
       text,
@@ -1796,10 +1935,20 @@ export default function App() {
 
   function startBasicHoldRecognition(press: PressState): boolean {
     if (!canUsePrivateSession()) return false;
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
     if (speechFinalizingRef.current) {
       nudgeFinalizingHold();
       return false;
     }
+<<<<<<< HEAD
+=======
+=======
+    if (speechFinalizingRef.current) return false;
+>>>>>>> origin/main
+>>>>>>> origin/main
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
@@ -1817,8 +1966,11 @@ export default function App() {
     const capture: SpeechCaptureState = {
       recognition,
       audio: null,
+<<<<<<< HEAD
       audioStartSettled: false,
       audioStartFailed: false,
+=======
+>>>>>>> origin/main
       audioChunksBase64: [],
       audioBytes: 0,
       audioCapped: false,
@@ -1840,6 +1992,7 @@ export default function App() {
       failSpeechCapture(capture, speechAudioCaptureMessage());
       return false;
     }
+    startSpeechCaptureAudio(capture);
 
     if (recognition) {
       recognition.continuous = true;
@@ -1913,10 +2066,20 @@ export default function App() {
 
   function beginBasicHold(): boolean {
     if (!canUsePrivateSession()) return false;
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
     if (speechFinalizingRef.current) {
       nudgeFinalizingHold();
       return false;
     }
+<<<<<<< HEAD
+=======
+=======
+    if (speechFinalizingRef.current) return false;
+>>>>>>> origin/main
+>>>>>>> origin/main
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     const press = pressRef.current;
@@ -1981,11 +2144,14 @@ export default function App() {
       return;
     }
     capture.releaseRequested = true;
+<<<<<<< HEAD
     if (!capture.recognition) {
       stopSpeechCaptureAudio(capture);
       finishSpeechCapture(capture);
       return;
     }
+=======
+>>>>>>> origin/main
     stopSpeechCaptureAudio(capture);
     if (capture.ended) {
       finishSpeechCapture(capture);
@@ -2297,20 +2463,28 @@ export default function App() {
   function createLiveSession(sessionGeneration: number): RealtimeVoiceSession {
     return createDefaultRealtimeVoiceSession({
       callbacks: buildSessionCallbacks(sessionGeneration),
+<<<<<<< HEAD
       audio: {
         startMuted: stateRef.current.isMuted,
         onInputLevel: updateOrbLevel,
         onOutputLevel: updateOrbLevel,
       },
+=======
+      audio: { startMuted: stateRef.current.isMuted },
+>>>>>>> origin/main
       systemInstruction: buildLiveHermesSystemInstruction(agentName),
       requireToolResponseForModelOutput: true,
     });
   }
 
+<<<<<<< HEAD
   async function connectLiveSession(
     sessionGeneration: number,
     { playStartEarcon = false }: { playStartEarcon?: boolean } = {},
   ) {
+=======
+  async function connectLiveSession(sessionGeneration: number) {
+>>>>>>> origin/main
     const session = createLiveSession(sessionGeneration);
     sessionRef.current = session;
     try {
@@ -2328,7 +2502,10 @@ export default function App() {
       disconnectLiveSession(session);
       throw new Error("voice connection cancelled");
     }
+<<<<<<< HEAD
     if (playStartEarcon) playEarcon("session-start");
+=======
+>>>>>>> origin/main
   }
 
   function nextSessionGeneration(): number {
@@ -2494,6 +2671,7 @@ export default function App() {
     return "Restoring voice connection...";
   }
 
+<<<<<<< HEAD
   function liveVoiceFailureCopy(reason: string) {
     if (/unsupported realtime provider/i.test(reason)) return reason;
     if (/permission|notallowed|microphone/i.test(reason))
@@ -2509,6 +2687,8 @@ export default function App() {
     return "Voice connection had trouble. Retry.";
   }
 
+=======
+>>>>>>> origin/main
   function handleLiveSessionLoss(sessionGeneration: number, reason: string) {
     if (!isCurrentSessionGeneration(sessionGeneration)) return;
     if (sessionLossHandledGenerationRef.current === sessionGeneration) return;
@@ -2538,7 +2718,11 @@ export default function App() {
     const previousSession = sessionRef.current;
     sessionRef.current = null;
     if (previousSession) disconnectLiveSession(previousSession);
+<<<<<<< HEAD
     appendSystem(liveVoiceFailureCopy(reason), "failed");
+=======
+    appendSystem(reason, "failed");
+>>>>>>> origin/main
     dispatch({ type: "ERROR", error: "Voice session disconnected." });
   }
 
@@ -2650,7 +2834,11 @@ export default function App() {
     dispatch({ type: "CONNECT" });
 
     try {
+<<<<<<< HEAD
       await connectLiveSession(sessionGeneration, { playStartEarcon: true });
+=======
+      await connectLiveSession(sessionGeneration);
+>>>>>>> origin/main
       if (
         !isCurrentSessionGeneration(sessionGeneration) ||
         !liveSessionDesired()
@@ -2677,7 +2865,11 @@ export default function App() {
         return;
       }
       liveDesiredRef.current = false;
+<<<<<<< HEAD
       appendSystem(liveVoiceFailureCopy(errorMessage), "failed");
+=======
+      appendSystem(errorMessage, "failed");
+>>>>>>> origin/main
       dispatch({
         type: "ERROR",
         error:
@@ -2737,7 +2929,10 @@ export default function App() {
     sessionRef.current = null;
     transcriptDraftsRef.current = {};
     void releaseWakeLock();
+<<<<<<< HEAD
     if (session) playEarcon("session-end");
+=======
+>>>>>>> origin/main
     dispatch({ type: "RECOVER" });
   }
 

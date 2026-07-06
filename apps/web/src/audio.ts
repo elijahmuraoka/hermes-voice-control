@@ -132,6 +132,7 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
   private mediaStream?: MediaStream;
   private captureEnabled = true;
   private closed = false;
+<<<<<<< HEAD
   private readonly visibilityHandler = () => {
     if (document.visibilityState === "hidden") {
       this.stopInputLevelMeter();
@@ -140,6 +141,8 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     }
     this.startInputLevelMeter();
   };
+=======
+>>>>>>> origin/main
 
   constructor(options: BrowserGeminiAudioOptions = {}) {
     const AudioContextCtor =
@@ -196,6 +199,7 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     this.mediaStream = mediaStream;
     this.captureContext = captureContext;
 
+<<<<<<< HEAD
     const source = this.captureContext.createMediaStreamSource(
       this.mediaStream,
     );
@@ -208,6 +212,9 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
         document.addEventListener("visibilitychange", this.visibilityHandler);
       }
     }
+=======
+    const source = this.captureContext.createMediaStreamSource(this.mediaStream);
+>>>>>>> origin/main
     this.captureNode = new AudioWorkletNode(
       this.captureContext,
       "audio-capture-processor",
@@ -407,6 +414,12 @@ export class BrowserGeminiAudio implements GeminiLiveAudio {
     this.outputLevelTailMs = 0;
     this.onOutputLevel?.(0);
   }
+}
+
+async function resumeAudioContext(context?: AudioContext): Promise<void> {
+  const state = context?.state as AudioContextState | "interrupted" | undefined;
+  if (!context || (state !== "suspended" && state !== "interrupted")) return;
+  await context.resume();
 }
 
 async function resumeAudioContext(context?: AudioContext): Promise<void> {

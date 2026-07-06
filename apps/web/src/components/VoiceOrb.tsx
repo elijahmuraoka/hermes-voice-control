@@ -10,7 +10,10 @@ interface Props {
   onPointerUp: React.PointerEventHandler<HTMLButtonElement>;
   onPointerCancel: React.PointerEventHandler<HTMLButtonElement>;
   onRetry: () => void;
+<<<<<<< HEAD
   audioLevelRef?: RefObject<number>;
+=======
+>>>>>>> origin/main
   nudging?: boolean;
   nudgeKey?: number;
 }
@@ -36,6 +39,7 @@ export function VoiceOrb({
   onPointerUp,
   onPointerCancel,
   onRetry,
+<<<<<<< HEAD
   audioLevelRef,
   nudging = false,
   nudgeKey = 0,
@@ -43,6 +47,13 @@ export function VoiceOrb({
   const orbRef = useRef<HTMLButtonElement | null>(null);
   const cls = `voice-orb state-${state.callState}${
     nudging ? " is-nudging" : ""
+=======
+  nudging = false,
+  nudgeKey = 0,
+}: Props) {
+  const cls = `voice-orb state-${state.callState}${
+    nudging ? ` is-nudging nudge-${nudgeKey % 2}` : ""
+>>>>>>> origin/main
   }`;
   const label = voiceStateLabel(state, mode, agentName);
   const helperText = subcopy(state.callState, mode, agentName);
@@ -144,11 +155,15 @@ export function VoiceOrb({
       <div className="state-copy" aria-live="polite" aria-atomic="true">
         <p>{label}</p>
         {helperText ? <span>{helperText}</span> : null}
+<<<<<<< HEAD
         {nudging ? (
           <span key={`nudge-copy-${nudgeKey}`} className="sr-only">
             Still finalizing.
           </span>
         ) : null}
+=======
+        {nudging ? <span className="sr-only">Still finalizing.</span> : null}
+>>>>>>> origin/main
         {state.callState === "error" ? (
           <button type="button" className="retry-pill" onClick={onRetry}>
             Tap to retry
@@ -166,7 +181,12 @@ function voiceStateLabel(
 ): string {
   if (state.callState === "agent-thinking") return "Thinking.";
   if (mode === "live") return stateLabel(state, agentName);
+<<<<<<< HEAD
   if (state.callState === "idle") return "Hold to talk.";
+=======
+  if (state.callState === "idle") return `Hold to talk to ${agentName}`;
+  if (state.callState === "agent-thinking") return "Sending...";
+>>>>>>> origin/main
   return stateLabel(state, agentName);
 }
 
@@ -178,9 +198,15 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
       case "hold-to-talk":
         return "Release to send.";
       case "finalizing":
+<<<<<<< HEAD
         return "Polishing your words.";
       case "agent-thinking":
         return "Getting the reply.";
+=======
+        return "Finalizing";
+      case "agent-thinking":
+        return `${agentName} is working.`;
+>>>>>>> origin/main
       case "error":
         return "Retry voice.";
       default:
@@ -197,7 +223,11 @@ function subcopy(callState: CallState, mode: VoiceMode, agentName: string) {
     case "agent-speaking":
       return "Hold to interrupt.";
     case "agent-thinking":
+<<<<<<< HEAD
       return "Getting the reply.";
+=======
+      return "One moment.";
+>>>>>>> origin/main
     case "reconnecting":
       return "Keeping voice alive.";
     case "error":

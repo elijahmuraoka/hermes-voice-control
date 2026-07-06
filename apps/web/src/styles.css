@@ -470,6 +470,7 @@ input {
   filter: saturate(0.78);
 }
 
+<<<<<<< HEAD
 .state-finalizing .orb-shimmer {
   opacity: 1;
 }
@@ -478,6 +479,8 @@ input {
   animation: shimmerSweep 1.4s ease-in-out infinite;
 }
 
+=======
+>>>>>>> origin/main
 .state-reconnecting .orb-aura {
   animation: breathe 1.7s ease-in-out infinite;
 }
@@ -486,6 +489,13 @@ input {
   animation: nudge 0.42s ease-out;
 }
 
+<<<<<<< HEAD
+=======
+.voice-orb.is-nudging.nudge-1 {
+  animation-name: nudgeAlt;
+}
+
+>>>>>>> origin/main
 .state-error .orb-core {
   background: radial-gradient(circle, #ffe0d7, #ff8f70 45%, #31110b);
   box-shadow:
@@ -531,7 +541,10 @@ input {
 }
 
 .retry-pill {
+<<<<<<< HEAD
   min-height: 42px;
+=======
+>>>>>>> origin/main
   margin-top: 14px;
   border: 1px solid rgba(255, 143, 112, 0.34);
   border-radius: 999px;
@@ -539,6 +552,7 @@ input {
   color: #ffd7cc;
   padding: 8px 13px;
   cursor: pointer;
+<<<<<<< HEAD
   transition:
     transform 0.16s cubic-bezier(0.2, 0, 0, 1),
     border-color 0.16s,
@@ -552,6 +566,8 @@ input {
 .retry-pill:focus-visible {
   outline: 2px solid rgba(255, 143, 112, 0.72);
   outline-offset: 3px;
+=======
+>>>>>>> origin/main
 }
 
 .control-row {
@@ -617,6 +633,8 @@ input {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 18px;
   scroll-behavior: smooth;
 }
@@ -736,7 +754,7 @@ input {
 }
 
 .message-action {
-  min-height: 34px;
+  min-height: 44px;
   margin-top: 12px;
   display: inline-flex;
   align-items: center;
@@ -896,6 +914,7 @@ input {
   }
 }
 
+<<<<<<< HEAD
 @keyframes coreSwirl {
   50% {
     filter: hue-rotate(8deg) saturate(1.08);
@@ -911,6 +930,8 @@ input {
   }
 }
 
+=======
+>>>>>>> origin/main
 @keyframes nudge {
   35% {
     transform: scale(1.04);
@@ -920,6 +941,18 @@ input {
   }
 }
 
+<<<<<<< HEAD
+=======
+@keyframes nudgeAlt {
+  35% {
+    transform: scale(1.04);
+  }
+  70% {
+    transform: scale(0.98);
+  }
+}
+
+>>>>>>> origin/main
 @keyframes livePulse {
   50% {
     transform: scale(1.45);
@@ -930,10 +963,11 @@ input {
 @media (max-width: 900px) {
   body {
     overflow: auto;
+    overscroll-behavior-y: none;
   }
   .app-shell {
     display: block;
-    padding: 12px;
+    padding: calc(env(safe-area-inset-top) + 12px) 12px 12px;
   }
   .hero-panel {
     min-height: 100dvh;

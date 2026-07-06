@@ -24,18 +24,33 @@ class AuthManager:
         self._store = store
         self._failures: dict[str, list[float]] = {}
 
+    # Per-peer bucket keeps one device from locking out others; the global
+    # bucket bounds total brute-force attempts regardless of the per-peer key,
+    # so a forgeable/rotating identity header cannot mint unlimited guesses.
+    _WINDOW_SECONDS = 300
+    _PER_KEY_LIMIT = 5
+    _GLOBAL_LIMIT = 20
+    _GLOBAL_KEY = "\x00global"
+
+    def _window_len(self, key: str, now: float) -> int:
+        window = [t for t in self._failures.get(key, []) if now - t < self._WINDOW_SECONDS]
+        self._failures[key] = window
+        return len(window)
+
     def _rate_limited(self, key: str) -> bool:
         now = time.time()
-        window = [t for t in self._failures.get(key, []) if now - t < 300]
-        self._failures[key] = window
-        return len(window) >= 5
+        per_key = self._window_len(key, now)
+        total = self._window_len(self._GLOBAL_KEY, now)
+        return per_key >= self._PER_KEY_LIMIT or total >= self._GLOBAL_LIMIT
 
     def verify_pin(self, pin: str, client_key: str = "local") -> bool:
         if self._rate_limited(client_key):
             raise HTTPException(status_code=429, detail="Too many attempts")
         ok = hmac.compare_digest(hash_secret(pin), self._pin_hash)
         if not ok:
-            self._failures.setdefault(client_key, []).append(time.time())
+            ts = time.time()
+            self._failures.setdefault(client_key, []).append(ts)
+            self._failures.setdefault(self._GLOBAL_KEY, []).append(ts)
         return ok
 
     def create_session(self) -> SessionRecord:

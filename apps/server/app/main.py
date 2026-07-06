@@ -345,8 +345,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Revoke the re-mint and cancel the pending cookie so logout is final.
         pending = getattr(request.state, "pending_session_cookie", None)
         if pending is not None:
-            auth.revoke(pending.token)
+            # Cancel the pending cookie before revoking so that even if revoke
+            # raises, the refresh middleware never re-sets a live session on the
+            # (error) response.
             request.state.pending_session_cookie = None
+            auth.revoke(pending.token)
         device_token = request.cookies.get("hvc_device")
         if device_token:
             auth.revoke_device(device_token)

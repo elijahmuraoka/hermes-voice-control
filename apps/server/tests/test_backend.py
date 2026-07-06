@@ -15,6 +15,7 @@ from app.adapters import AdapterResult, HermesAdapter, LocalHermesAdapter
 from app.config import Settings
 from app.main import create_app
 from app.redaction import redact
+from app.security import AuthManager
 from app.store import Store
 
 
@@ -198,6 +199,18 @@ def test_pin_rate_limit_is_keyed_per_peer_behind_proxy(tmp_path):
     assert client.post("/auth/pin", json={"pin": "0000-0000"}, headers=peer_a).status_code == 429
     # Peer B is unaffected and can still authenticate.
     assert client.post("/auth/pin", json={"pin": TEST_PIN}, headers=peer_b).status_code == 200
+def test_pin_rate_limit_global_cap_bounds_header_rotation(tmp_path):
+    # A caller rotating the per-peer identity header must not mint unlimited
+    # guesses: the global bucket bounds total brute-force attempts.
+    client = make_pin_client(tmp_path)
+    statuses = [
+        client.post("/auth/pin", json={"pin": "0000-0000"}, headers={"x-forwarded-for": f"100.64.0.{i}"}).status_code
+        for i in range(30)
+    ]
+    # Each request uses a fresh peer bucket, so throttling can only come from
+    # the global cap — which must trip well before 30 unique-peer attempts.
+    assert 429 in statuses
+    assert statuses.count(401) <= AuthManager._GLOBAL_LIMIT
 def test_logout_is_final_on_idle_remembered_device(tmp_path):
     # Idle remembered device: the short-lived session cookie has expired but
     # the long-lived device cookie is still valid. session_dep re-mints a

@@ -221,14 +221,24 @@ class ApiHermesAdapter(HermesAdapter):
             "timeout_seconds": self.timeout_seconds,
         }
 
-    def warm_session(self, session_hash: str | None = None) -> bool:
+    def warm_session(self, session_hash: str | None = None) -> str:
+        # Resume-only by design: creating here would race the first real
+        # ask_agent (double session.create, last-upsert-wins) and would build
+        # a session without the client's transcript seed. A missing row means
+        # the first chat pays the one-time create; every later unlock resumes
+        # warm with eager_build.
         if not self.token or not session_hash:
-            return False
+            return "skipped"
+        if self.store is None:
+            return "skipped"
+        row = self.store.get_hermes_api_session(session_hash)
+        if not row or not row["stored_session_id"]:
+            return "skipped"
         now = time.monotonic()
         with self._warm_lock:
             last = self._warm_seen.get(session_hash)
             if last is not None and now - last < WARM_DEDUPE_SECONDS:
-                return False
+                return "skipped"
             self._warm_seen[session_hash] = now
             if len(self._warm_seen) > 256:
                 cutoff = now - WARM_DEDUPE_SECONDS
@@ -245,9 +255,9 @@ class ApiHermesAdapter(HermesAdapter):
                 rpc = _HermesRpc(ws, self.timeout_seconds)
                 rpc.expect_ready()
                 self._open_session(rpc, session_hash, None, trace, started)
-                return True
+                return "resumed"
         except Exception:
-            return False
+            return "failed"
 
     def ask_agent(
         self,
@@ -324,6 +334,7 @@ class ApiHermesAdapter(HermesAdapter):
             "title": f"{self.agent_name} voice",
             "messages": _seed_messages(transcript_window),
             "close_on_disconnect": False,
+            "eager_build": True,
             "source": "hvc",
         }
         if self.cwd:

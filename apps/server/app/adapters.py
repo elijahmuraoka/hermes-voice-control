@@ -66,10 +66,11 @@ class HermesAdapter:
     def diagnostics(self) -> dict:
         return {"kind": "unknown", "available": False}
 
-    def warm_session(self, session_hash: str | None = None) -> bool:
-        # Best-effort: adapters with persistent sessions eagerly build/resume
-        # one at unlock so the first answer skips the cold-session cost.
-        return False
+    def warm_session(self, session_hash: str | None = None) -> str:
+        # Best-effort: adapters with persistent sessions eagerly resume one
+        # at unlock so the first answer skips the cold-session cost.
+        # Returns "resumed", "skipped", or "failed".
+        return "skipped"
 
 class MockHermesAdapter(HermesAdapter):
     def __init__(self, agent_name: str = DEFAULT_AGENT_NAME):

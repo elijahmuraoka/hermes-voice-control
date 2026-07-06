@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BrowserGeminiAudio,
-<<<<<<< HEAD
   computeAudioLevel,
-=======
->>>>>>> origin/main
   decodeGeminiOutputForPlayback,
   decodePcm16Base64,
   encodePcm16Base64,
@@ -23,10 +20,7 @@ class FakeAudioContext {
 
 describe("audio helpers", () => {
   afterEach(() => {
-<<<<<<< HEAD
     vi.useRealTimers();
-=======
->>>>>>> origin/main
     vi.unstubAllGlobals();
   });
 
@@ -123,7 +117,6 @@ describe("audio helpers", () => {
 
     expect(stop).toHaveBeenCalledTimes(1);
   });
-<<<<<<< HEAD
 
   it("reports output levels across the buffered playback duration", async () => {
     vi.useFakeTimers();
@@ -198,6 +191,4 @@ describe("audio helpers", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(onOutputLevel).toHaveBeenCalledTimes(callCountAfterInterrupt);
   });
-=======
->>>>>>> origin/main
 });

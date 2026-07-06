@@ -3,14 +3,8 @@ from __future__ import annotations
 import base64
 import binascii
 import struct
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
 import threading
 
->>>>>>> origin/main
->>>>>>> origin/main
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -19,14 +13,7 @@ from .adapters import build_adapter
 from .chat_jobs import ChatJobService
 from .config import CHAT_JOB_INTERACTIVE_BUDGET_MS_MAX, CHAT_JOB_INTERACTIVE_BUDGET_MS_MIN, LOCAL_CLIENT_HOSTS, Settings
 from .gemini import build_broker, build_transcriber
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> origin/main
-from .security import AuthManager
-=======
 from .security import AuthManager, hash_secret
->>>>>>> origin/main
 from .store import Store
 from .tools import ADAPTER_DIAGNOSTICS_HEADER, ADAPTER_DIAGNOSTICS_RESPONSE_KEY, ToolCallRequest, ToolCancelRequest, ToolService, adapter_diagnostics_headers
 

@@ -24,6 +24,7 @@ const apiPrefixes = [
   "/healthz",
   "/readyz",
   "/stt",
+  "/tts",
 ];
 
 const hopByHopHeaders = new Set([

@@ -122,6 +122,7 @@ async function stubUnlockedSession(page: Page) {
           hermes_adapter: "api",
           hermes: { kind: "api", available: true },
           stt_provider: "gemini",
+          tts_available: true,
         },
       }),
     });
@@ -142,6 +143,18 @@ async function stubUnlockedSession(page: Page) {
         provider: "gemini",
         model: "gemini-smoke",
         fallback: false,
+      }),
+    });
+  });
+  await page.route("**/tts", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        audio_data_url:
+          "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=",
+        mime_type: "audio/wav",
+        provider: "mock",
       }),
     });
   });
@@ -471,6 +484,7 @@ test("shows and clears the private PIN gate", async ({ page }) => {
           hermes_adapter: "api",
           hermes: { kind: "api", available: true },
           stt_provider: "gemini",
+          tts_available: true,
         },
       }),
     });

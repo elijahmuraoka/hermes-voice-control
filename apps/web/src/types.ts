@@ -45,6 +45,7 @@ export interface ReadyzResponse {
   checks?: {
     hermes_adapter?: string;
     stt_provider?: string;
+    tts_available?: boolean;
     hermes?: HermesAdapterDiagnostics;
   };
 }
@@ -90,6 +91,11 @@ export interface SpeechTranscriptionResponse {
   provider: "gemini" | "browser" | "mock" | string;
   model?: string | null;
   fallback?: boolean;
+}
+export interface TtsResponse {
+  audio_data_url: string;
+  mime_type: string;
+  provider: "hermes" | "mock" | string;
 }
 export interface VoiceState {
   callState: CallState;

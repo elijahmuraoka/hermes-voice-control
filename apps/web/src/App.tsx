@@ -27,6 +27,7 @@ import {
   getTextJob,
   login,
   sendText,
+  synthesizeSpeech,
   transcribeSpeechAudio,
 } from "./api";
 import { BrowserGeminiAudio } from "./audio";
@@ -63,6 +64,10 @@ import {
   type EarconName,
 } from "./earcons";
 import {
+  createReplyAudioController,
+  type ReplyAudioController,
+} from "./replyAudio";
+import {
   createHvcDiagnosticsRecorder,
   exposeHvcDiagnostics,
   type HvcDiagnosticsRecorder,
@@ -87,6 +92,7 @@ const SPOKEN_COMPLETION_NOTICE_TEXT = "Done. Background reply is ready.";
 const SPOKEN_COMPLETION_RESTORE_DELAY_MS = 2500;
 const SPOKEN_COMPLETION_RESTORE_CHECK_MS = 250;
 const SPOKEN_COMPLETION_MAX_DURATION_MS = 10000;
+const HOLD_REPLY_FALLBACK_MAX_DURATION_MS = 30000;
 const BASIC_HOLD_STT_AUDIO_BYTE_LIMIT = 1_920_000;
 const BASIC_HOLD_STT_SAMPLE_BYTES_PER_SECOND = 16_000 * 2;
 const BASIC_HOLD_STT_TIMEOUT_PER_SECOND_MS = 150;
@@ -101,6 +107,11 @@ const FINALIZING_NUDGE_MS = 620;
 const ORB_NOTICE_MS = 7000;
 const ORB_CAP_NOTICE_MS = 12000;
 const MAX_BROWSER_TIMER_MS = 2_147_483_647;
+const HOLD_REPLY_COMPLETION_STATES = new Set([
+  "idle",
+  "agent-thinking",
+  "finalizing",
+]);
 
 function buildLiveHermesSystemInstruction(currentAgentName: string): string {
   return [
@@ -162,7 +173,12 @@ type TextFocusReturnMode = "none" | "restore-capture" | "paused" | "muted";
 type TextJobEntryMeta = {
   entryId: string;
   restored: boolean;
+  source: TextSubmitSource;
+  submitFocusEpoch: number;
+  holdInteractionEpoch?: number;
 };
+
+type TextSubmitSource = "typed" | "hold";
 
 type SpeechCaptureState = {
   recognition: BrowserSpeechRecognition | null;
@@ -343,6 +359,10 @@ export default function App() {
   const speechFinalizingRef = useRef(false);
   const orbLevelRef = useRef(0);
   const earconsRef = useRef<EarconController | null>(null);
+  const replyAudioRef = useRef<ReplyAudioController | null>(null);
+  const replyPlaybackGenerationRef = useRef(0);
+  const holdReplyBrowserSpeechActiveRef = useRef(false);
+  const holdInteractionEpochRef = useRef(0);
   const sttProviderConfirmedRef = useRef(false);
   const basicHoldMicPermissionPrimedRef = useRef(false);
   const basicHoldMicPermissionPendingRef = useRef<Promise<boolean> | null>(null);
@@ -454,6 +474,7 @@ export default function App() {
       clearOrbNoticeTimer();
       void releaseWakeLock();
       earconsRef.current?.close();
+      replyAudioRef.current?.close();
       const activeSpeechCapture = speechCaptureRef.current;
       if (activeSpeechCapture) {
         activeSpeechCapture.finished = true;
@@ -587,6 +608,24 @@ export default function App() {
     void earconsRef.current.unlock();
   }
 
+  function unlockReplyAudio() {
+    replyAudioRef.current ??= createReplyAudioController();
+    void replyAudioRef.current.unlock();
+  }
+
+  function stopReplyAudio() {
+    replyPlaybackGenerationRef.current += 1;
+    replyAudioRef.current?.stop();
+    if (holdReplyBrowserSpeechActiveRef.current) {
+      holdReplyBrowserSpeechActiveRef.current = false;
+      try {
+        window.speechSynthesis?.cancel?.();
+      } catch {
+        // Optional browser fallback can throw during teardown.
+      }
+    }
+  }
+
   function resumeEarcons() {
     void earconsRef.current?.unlock();
   }
@@ -631,6 +670,7 @@ export default function App() {
 
   function handleVisibleReturn() {
     resumeEarcons();
+    void replyAudioRef.current?.unlock();
     void refreshAgentConnection();
     void updateWakeLock();
     const session = sessionRef.current;
@@ -1003,6 +1043,85 @@ export default function App() {
     }
   }
 
+  function speakHoldReplyWithBrowserVoice(
+    text: string,
+    onFinished: () => void,
+  ): boolean {
+    if (
+      typeof window === "undefined" ||
+      !("speechSynthesis" in window) ||
+      typeof window.speechSynthesis?.speak !== "function" ||
+      typeof window.SpeechSynthesisUtterance !== "function"
+    )
+      return false;
+    let finished = false;
+    let timeout: number | null = null;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      holdReplyBrowserSpeechActiveRef.current = false;
+      if (timeout !== null) window.clearTimeout(timeout);
+      onFinished();
+    };
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new window.SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.volume = 0.88;
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      timeout = window.setTimeout(() => {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {
+          // The fallback may already be torn down.
+        }
+        finish();
+      }, HOLD_REPLY_FALLBACK_MAX_DURATION_MS);
+      holdReplyBrowserSpeechActiveRef.current = true;
+      window.speechSynthesis.speak(utterance);
+      return true;
+    } catch {
+      holdReplyBrowserSpeechActiveRef.current = false;
+      if (timeout !== null) window.clearTimeout(timeout);
+      return false;
+    }
+  }
+
+  async function speakHoldReply(text: string, submitFocusEpoch: number) {
+    const playbackGeneration = replyPlaybackGenerationRef.current + 1;
+    replyPlaybackGenerationRef.current = playbackGeneration;
+    const finish = () => {
+      if (replyPlaybackGenerationRef.current !== playbackGeneration) return;
+      dispatch({ type: "DONE" });
+      completeTextTurn(submitFocusEpoch);
+    };
+    try {
+      const response = await synthesizeSpeech(text);
+      if (replyPlaybackGenerationRef.current !== playbackGeneration) return;
+      dispatch({ type: "SPEAK" });
+      const played = await (replyAudioRef.current ??= createReplyAudioController()).playDataUrl(
+        response.audio_data_url,
+        finish,
+        () => replyPlaybackGenerationRef.current === playbackGeneration,
+      );
+      if (played) return;
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        requireAuth(SESSION_EXPIRED_MESSAGE);
+        dispatch({ type: "RECOVER" });
+        return;
+      }
+      void refreshAgentConnection();
+    }
+    if (replyPlaybackGenerationRef.current !== playbackGeneration) return;
+    dispatch({ type: "SPEAK" });
+    if (!speakHoldReplyWithBrowserVoice(text, finish)) {
+      window.setTimeout(finish, 900);
+    }
+  }
+
   function clearTextJobPollTimer(jobId: string) {
     const timer = textJobPollTimersRef.current.get(jobId);
     if (timer === undefined) return;
@@ -1038,6 +1157,12 @@ export default function App() {
     return `${agentName} finished that reply.`;
   }
 
+  function speakableTextFromChatResult(result?: TextChatResult): string {
+    const speakable = result?.result?.speakable?.trim();
+    if (speakable) return speakable;
+    return textFromChatResult(result);
+  }
+
   function runningTextJobCopy(restored: boolean): string {
     return restored
       ? "Checking on a background reply from before the refresh. Voice stays available while it finishes."
@@ -1048,6 +1173,52 @@ export default function App() {
     const detail = status.error?.detail?.trim();
     if (detail) return `${detail} You can try again or keep using voice.`;
     return `${agentName} could not finish that background reply. You can try again or keep using voice.`;
+  }
+
+  function canSpeakHoldReplyNow(
+    submitFocusEpoch: number,
+    allowedCallStates: Set<string>,
+    holdInteractionEpoch?: number,
+  ): boolean {
+    if (voiceModeRef.current !== "push-to-talk") return false;
+    if (textFocusEpochRef.current !== submitFocusEpoch) return false;
+    if (!isCurrentHoldInteraction(holdInteractionEpoch)) return false;
+    if (stateRef.current.inputMode === "text") return false;
+    return allowedCallStates.has(stateRef.current.callState);
+  }
+
+  function isCurrentHoldInteraction(holdInteractionEpoch?: number): boolean {
+    return (
+      holdInteractionEpoch === undefined ||
+      holdInteractionEpochRef.current === holdInteractionEpoch
+    );
+  }
+
+  function canSpeakDelayedHoldReply(meta: TextJobEntryMeta): boolean {
+    if (meta.restored || meta.source !== "hold") return false;
+    return canSpeakHoldReplyNow(
+      meta.submitFocusEpoch,
+      HOLD_REPLY_COMPLETION_STATES,
+      meta.holdInteractionEpoch,
+    );
+  }
+
+  function finishSkippedHoldReply(
+    submitFocusEpoch: number,
+    holdInteractionEpoch?: number,
+    { allowFinalizing = false }: { allowFinalizing?: boolean } = {},
+  ) {
+    if (!isCurrentHoldInteraction(holdInteractionEpoch)) return;
+    if (stateRef.current.callState === "hold-to-talk") return;
+    if (stateRef.current.callState === "finalizing" && !allowFinalizing) return;
+    completeTextTurn(submitFocusEpoch);
+  }
+
+  function finishHoldJobWithoutSpeech(meta: TextJobEntryMeta) {
+    if (meta.restored || meta.source !== "hold") return;
+    finishSkippedHoldReply(meta.submitFocusEpoch, meta.holdInteractionEpoch, {
+      allowFinalizing: true,
+    });
   }
 
   function updateTextJobEntry(
@@ -1087,14 +1258,22 @@ export default function App() {
     }
 
     if (status.state === "complete") {
+      const answerText = textFromChatResult(status.result);
+      const speakableText = speakableTextFromChatResult(status.result);
       updateTextJobEntry(status.job_id, {
         status: "complete",
-        text: textFromChatResult(status.result),
+        text: answerText,
         restored: false,
       });
       if (!meta.restored) {
         playTextReplyEarcon();
-        speakBackgroundCompletionNotice(SPOKEN_COMPLETION_NOTICE_TEXT);
+        if (meta.source === "hold") {
+          if (canSpeakDelayedHoldReply(meta)) {
+            void speakHoldReply(speakableText, meta.submitFocusEpoch);
+          }
+        } else {
+          speakBackgroundCompletionNotice(SPOKEN_COMPLETION_NOTICE_TEXT);
+        }
       }
       finishTextJob(status.job_id, { keepRecoveryId: true });
       return false;
@@ -1107,6 +1286,7 @@ export default function App() {
           "Hermes needs permission before it can continue. Approve the request from your Hermes session, then send a new message when you are ready.",
         restored: false,
       });
+      finishHoldJobWithoutSpeech(meta);
       finishTextJob(status.job_id);
       return false;
     }
@@ -1117,6 +1297,7 @@ export default function App() {
         text: "Cancelled.",
         restored: false,
       });
+      finishHoldJobWithoutSpeech(meta);
       finishTextJob(status.job_id);
       return false;
     }
@@ -1126,6 +1307,7 @@ export default function App() {
       text: failedTextJobCopy(status),
       restored: false,
     });
+    finishHoldJobWithoutSpeech(meta);
     finishTextJob(status.job_id);
     return false;
   }
@@ -1171,8 +1353,21 @@ export default function App() {
     }
   }
 
-  function trackTextJob(jobId: string, entryId: string, restored = false) {
-    textJobEntriesRef.current.set(jobId, { entryId, restored });
+  function trackTextJob(
+    jobId: string,
+    entryId: string,
+    restored = false,
+    source: TextSubmitSource = "typed",
+    submitFocusEpoch = textFocusEpochRef.current,
+    holdInteractionEpoch?: number,
+  ) {
+    textJobEntriesRef.current.set(jobId, {
+      entryId,
+      restored,
+      source,
+      submitFocusEpoch,
+      holdInteractionEpoch,
+    });
     savePendingTextJob(jobId);
     scheduleTextJobPoll(jobId);
   }
@@ -1185,7 +1380,12 @@ export default function App() {
         continue;
       }
       const entryId = uid();
-      textJobEntriesRef.current.set(jobId, { entryId, restored: true });
+      textJobEntriesRef.current.set(jobId, {
+        entryId,
+        restored: true,
+        source: "typed",
+        submitFocusEpoch: textFocusEpochRef.current,
+      });
       setEntries((items) => [
         ...items,
         {
@@ -1325,6 +1525,7 @@ export default function App() {
     liveDesiredRef.current = false;
     stopVoiceTurnWatch();
     abortActiveSpeechCapture();
+    stopReplyAudio();
     speechFinalizingRef.current = false;
     resetHoldSpeechState();
     clearHandsFreeTurnPending();
@@ -1760,7 +1961,11 @@ export default function App() {
         ),
       );
     }
-    void submitText(text, { existingUserEntryId: capture.entryId ?? undefined });
+    void submitText(text, {
+      existingUserEntryId: capture.entryId ?? undefined,
+      source: "hold",
+      holdInteractionEpoch: holdInteractionEpochRef.current,
+    });
   }
 
   async function finalizeSpeechCaptureTranscript(
@@ -1858,12 +2063,14 @@ export default function App() {
       nudgeFinalizingHold();
       return false;
     }
+    stopReplyAudio();
     if (speechCaptureRef.current && !speechCaptureRef.current.finished)
       return false;
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
       press.holding = false;
       return false;
     }
+    holdInteractionEpochRef.current += 1;
     const recognition = createSpeechRecognition();
     if (!recognition && !serverSttCanTranscribeHold()) {
       press.holding = false;
@@ -1979,6 +2186,7 @@ export default function App() {
       return false;
     const press = pressRef.current;
     press.holding = true;
+    stopReplyAudio();
     if (!canEnableMicrophoneCapture() || stateRef.current.inputMode === "text") {
       press.holding = false;
       return false;
@@ -2060,6 +2268,7 @@ export default function App() {
 
   function switchToLiveMode() {
     if (!canUsePrivateSession()) return;
+    stopReplyAudio();
     if (isSpokenCompletionNoticeBlockingCapture()) return;
     stopBasicHold({ cancel: true });
     setVoiceModeImmediate("live");
@@ -2080,6 +2289,7 @@ export default function App() {
 
   function toggleVoiceMode() {
     unlockEarcons();
+    unlockReplyAudio();
     if (voiceModeRef.current === "live") {
       switchToPushToTalkMode();
     } else {
@@ -2696,6 +2906,7 @@ export default function App() {
 
   async function startCall() {
     if (!canUsePrivateSession()) return;
+    stopReplyAudio();
     if (isSpokenCompletionNoticeBlockingCapture()) return;
     if (connectingRef.current || stateRef.current.callState === "connecting")
       return;
@@ -2788,6 +2999,7 @@ export default function App() {
 
   function endCall() {
     clearPressTimer();
+    stopReplyAudio();
     clearReconnectTimer();
     clearTokenReconnectTimer();
     finishLiveReconnect();
@@ -2909,6 +3121,7 @@ export default function App() {
 
   function handlePointerDown(e: PointerEvent<HTMLButtonElement>) {
     unlockEarcons();
+    unlockReplyAudio();
     exitTextModeForOrbPress();
     if (
       e.button !== 0 ||
@@ -2980,6 +3193,13 @@ export default function App() {
     textComposerFocusedRef.current = true;
     cancelLiveReconnectForUserIntent();
     const current = stateRef.current;
+    stopReplyAudio();
+    if (
+      voiceModeRef.current === "push-to-talk" &&
+      current.callState === "agent-speaking"
+    ) {
+      dispatch({ type: "DONE" });
+    }
     if (
       current.inputMode !== "text" &&
       textFocusReturnModeRef.current === "none"
@@ -3060,10 +3280,19 @@ export default function App() {
 
   async function submitText(
     text: string,
-    { existingUserEntryId }: { existingUserEntryId?: string } = {},
+    {
+      existingUserEntryId,
+      source = "typed",
+      holdInteractionEpoch,
+    }: {
+      existingUserEntryId?: string;
+      source?: TextSubmitSource;
+      holdInteractionEpoch?: number;
+    } = {},
   ) {
     if (!canUsePrivateSession()) return;
     unlockEarcons();
+    unlockReplyAudio();
     const submitFocusEpoch = textFocusEpochRef.current;
     abandonPendingVoiceTurn();
     resetHoldSpeechState();
@@ -3089,6 +3318,14 @@ export default function App() {
     try {
       const res = await sendText(text, entriesRef.current);
       if (isChatJobStatus(res)) {
+        const completedHoldJobWillSpeak =
+          source === "hold" &&
+          res.state === "complete" &&
+          canSpeakHoldReplyNow(
+            submitFocusEpoch,
+            HOLD_REPLY_COMPLETION_STATES,
+            holdInteractionEpoch,
+          );
         const entryId = uid();
         setEntries((items) => [
           ...items,
@@ -3101,26 +3338,53 @@ export default function App() {
             jobId: res.job_id,
           },
         ]);
-        trackTextJob(res.job_id, entryId);
+        trackTextJob(
+          res.job_id,
+          entryId,
+          false,
+          source,
+          submitFocusEpoch,
+          holdInteractionEpoch,
+        );
         applyTextJobStatus(res);
-        completeTextTurn(submitFocusEpoch);
+        if (!completedHoldJobWillSpeak) {
+          if (source === "hold")
+            finishSkippedHoldReply(submitFocusEpoch, holdInteractionEpoch);
+          else completeTextTurn(submitFocusEpoch);
+        }
         return;
       }
+      const answerText = textFromChatResult(res);
+      const speakableText = speakableTextFromChatResult(res);
       setEntries((items) => [
         ...items,
         {
           id: uid(),
           role: "agent",
-          text: textFromChatResult(res),
+          text: answerText,
           status: "complete",
           at: Date.now(),
         },
       ]);
       playTextReplyEarcon();
-      dispatch({ type: "SPEAK" });
-      window.setTimeout(() => {
-        completeTextTurn(submitFocusEpoch);
-      }, 900);
+      if (source === "hold") {
+        if (
+          canSpeakHoldReplyNow(
+            submitFocusEpoch,
+            HOLD_REPLY_COMPLETION_STATES,
+            holdInteractionEpoch,
+          )
+        ) {
+          void speakHoldReply(speakableText, submitFocusEpoch);
+        } else {
+          finishSkippedHoldReply(submitFocusEpoch, holdInteractionEpoch);
+        }
+      } else {
+        dispatch({ type: "SPEAK" });
+        window.setTimeout(() => {
+          completeTextTurn(submitFocusEpoch);
+        }, 900);
+      }
     } catch (error) {
       if (isAuthFailure(error)) {
         requireAuth(SESSION_EXPIRED_MESSAGE);

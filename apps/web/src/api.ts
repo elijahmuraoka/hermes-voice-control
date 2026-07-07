@@ -4,6 +4,7 @@ import type {
   SpeechTranscriptionResponse,
   TextChatResponse,
   TranscriptEntry,
+  TtsResponse,
 } from "./types";
 import { apiBase } from "./config";
 
@@ -24,6 +25,7 @@ export class ApiRequestTimeoutError extends Error {
 
 const TEXT_JOB_CREATE_TIMEOUT_MS = 15000;
 const TEXT_JOB_INTERACTIVE_BUDGET_MS = 750;
+const TTS_TIMEOUT_MS = 22000;
 export const SPEECH_TRANSCRIPTION_TIMEOUT_MS = 4000;
 const textRequestId = () =>
   `text-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -165,6 +167,34 @@ export async function transcribeSpeechAudio(
       (error instanceof DOMException && error.name === "AbortError")
     ) {
       throw new ApiRequestTimeoutError("");
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+export async function synthesizeSpeech(
+  text: string,
+  timeoutMs = TTS_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await jsonFetch<TtsResponse>("/tts", {
+      method: "POST",
+      signal: controller.signal,
+      body: JSON.stringify({ text }),
+    });
+  } catch (error) {
+    if (
+      timedOut ||
+      (error instanceof DOMException && error.name === "AbortError")
+    ) {
+      throw new ApiRequestTimeoutError("Voice playback request timed out");
     }
     throw error;
   } finally {

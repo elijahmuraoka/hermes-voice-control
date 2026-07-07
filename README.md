@@ -213,6 +213,12 @@ operator-needed states rather than approving them automatically. API mode is
 intentionally loopback-only so the dashboard token is never sent to a remote
 websocket.
 
+In API mode, Hold replies can also speak through the configured Hermes voice.
+The browser calls HVC `POST /tts`, and the backend proxies the text to Hermes
+serve `POST /api/audio/speak` with the same dashboard token used by the API
+adapter. The token and voice provider details stay server-side; non-API
+deployments fall back to browser speech or deterministic mock audio in tests.
+
 ## Production Controls
 
 These defaults are intentionally conservative:

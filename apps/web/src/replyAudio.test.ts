@@ -64,6 +64,48 @@ describe("reply audio", () => {
     expect(context.sources).toHaveLength(0);
   });
 
+  it("declares a playback audio session so audio plays through the iOS silent switch", async () => {
+    const context = new FakeAudioContext();
+    const audioSession = { type: "auto" };
+    vi.stubGlobal("navigator", { audioSession });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Uint8Array([1, 2, 3]).buffer)),
+    );
+    const controller = createReplyAudioController({
+      AudioContextCtor: function () {
+        return context;
+      } as unknown as typeof AudioContext,
+    });
+
+    const played = await controller.playDataUrl("data:audio/mpeg;base64,AAECAw==");
+    expect(played).toBe(true);
+    expect(audioSession.type).toBe("playback");
+
+    // Ending playback releases the session so a later hold can record.
+    context.sources[0].onended?.();
+    expect(audioSession.type).toBe("auto");
+  });
+
+  it("falls back (returns false) when the context cannot be resumed to running", async () => {
+    const context = new FakeAudioContext();
+    context.state = "suspended";
+    context.resume = vi.fn(async () => undefined); // stays suspended
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Uint8Array([1, 2, 3]).buffer)),
+    );
+    const controller = createReplyAudioController({
+      AudioContextCtor: function () {
+        return context;
+      } as unknown as typeof AudioContext,
+    });
+
+    const played = await controller.playDataUrl("data:audio/mpeg;base64,AAECAw==");
+    expect(played).toBe(false);
+    expect(context.sources).toHaveLength(0);
+  });
+
   it("does not stop newer playback when an older attempt fails late", async () => {
     let rejectFirst!: (error: Error) => void;
     let fetchCalls = 0;

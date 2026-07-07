@@ -16,6 +16,7 @@ from .gemini import build_broker, build_transcriber
 from .security import AuthManager, hash_secret
 from .store import Store
 from .tools import ADAPTER_DIAGNOSTICS_HEADER, ADAPTER_DIAGNOSTICS_RESPONSE_KEY, ToolCallRequest, ToolCancelRequest, ToolService, adapter_diagnostics_headers
+from .tts import TtsTextTooLongError, TtsUnavailableError, TtsUpstreamError, synthesize_with_hermes, tts_available
 
 class PinRequest(BaseModel):
     pin: str
@@ -32,6 +33,8 @@ class SttTranscribeRequest(BaseModel):
     mime_type: str = "audio/pcm;rate=16000"
     sample_rate: int = Field(default=16_000, ge=8_000, le=48_000)
     fallback_transcript: str = ""
+class TtsRequest(BaseModel):
+    text: str
 
 LOCAL_HOST_HEADERS = {"127.0.0.1", "localhost", "::1", "testserver"}
 CHAT_JOB_HEADER = "X-HVC-Chat-Job"
@@ -279,6 +282,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "gemini_api_key_configured": broker.api_key_configured,
             "gemini_client_available": gemini_client_available,
             "stt_provider": transcriber.provider,
+            "tts_available": tts_available(adapter),
             "hermes_adapter": settings.hermes_adapter,
             "hermes": adapter.diagnostics(),
             "pin_required": settings.require_pin,
@@ -389,6 +393,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "provider": result.provider,
             "model": result.model,
             "fallback": result.fallback,
+        }
+    @app.post("/tts")
+    def text_to_speech(payload: TtsRequest, session_hash: str = Depends(session_dep)):
+        try:
+            result = synthesize_with_hermes(adapter, payload.text)
+        except TtsUnavailableError as exc:
+            raise HTTPException(status_code=422, detail="Speech text is required") from exc
+        except TtsTextTooLongError as exc:
+            raise HTTPException(status_code=413, detail="Speech text is too long") from exc
+        except TtsUpstreamError as exc:
+            raise HTTPException(status_code=503, detail="Voice synthesis is unavailable") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Voice synthesis failed") from exc
+        return {
+            "audio_data_url": result.audio_data_url,
+            "mime_type": result.mime_type,
+            "provider": result.provider,
         }
     @app.get("/tools")
     def list_tools(session_hash: str = Depends(session_dep)): return {"tools": tools.list_tools()}

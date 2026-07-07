@@ -76,6 +76,14 @@ the background chat job `partial_text` field so the transcript can show progress
 while the answer is still running. `session.interrupt` is used for cancellation
 or barge-in.
 
+Hold-mode voice output reuses the same Hermes serve trust boundary. The browser
+calls authenticated HVC `POST /tts` with answer text; the backend derives the
+Hermes HTTP base from `HVC_HERMES_API_URL`, calls Hermes serve
+`POST /api/audio/speak` with the dashboard token, and returns the audio data URL
+to the browser for playback through an already-unlocked `AudioContext`. This
+uses the voice configured in Hermes itself, such as Bob's ElevenLabs voice,
+without exposing the dashboard token to the browser.
+
 If Hermes emits `approval.request`, HVC returns a `pending_confirmation` result
 and the chat job becomes `needs_permission`. The voice/browser path does not call
 `approval.respond`; the operator must handle approval in the desktop Hermes

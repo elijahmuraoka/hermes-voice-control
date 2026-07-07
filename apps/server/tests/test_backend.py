@@ -11,6 +11,7 @@ import types
 import pytest
 from fastapi.testclient import TestClient
 from app import gemini as gemini_module
+from app import tts as tts_module
 from app.adapters import AdapterResult, HermesAdapter, LocalHermesAdapter
 from app.config import Settings
 from app.main import create_app
@@ -332,6 +333,7 @@ def test_readyz_reports_safe_runtime_posture(tmp_path):
     assert body["checks"]["gemini_voice_name"] == "Charon"
     assert body["checks"]["gemini_api_key_configured"] is False
     assert body["checks"]["gemini_client_available"] is True
+    assert body["checks"]["tts_available"] is False
     assert body["checks"]["hermes"] == {"kind": "mock", "available": True, "read_only": True}
     assert body["checks"]["audit_log_retention_days"] == 30
     assert body["checks"]["audit_log_max_rows"] == 5000
@@ -565,6 +567,149 @@ def test_real_gemini_token_is_single_use_and_constrained(monkeypatch):
     }
     assert created["config"]["lock_additional_fields"] == []
     assert "super-secret-gemini-key" not in str(created["config"])
+
+def test_tts_requires_auth_in_pin_mode(tmp_path):
+    client = make_pin_client(tmp_path)
+    res = client.post("/tts", json={"text": "hello"})
+    assert res.status_code == 401
+
+def test_mock_tts_returns_deterministic_audio_without_logging_text(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    res = client.post("/tts", json={"text": "say this privately"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body == {
+        "audio_data_url": tts_module.MOCK_AUDIO_DATA_URL,
+        "mime_type": "audio/wav",
+        "provider": "mock",
+    }
+    logs = client.get("/logs").text
+    assert "say this privately" not in logs
+    assert tts_module.MOCK_AUDIO_DATA_URL not in logs
+
+def test_local_tts_unavailable_triggers_client_fallback(tmp_path):
+    client = make_pin_client(
+        tmp_path,
+        hermes_adapter="local",
+        hermes_bin=str(tmp_path / "missing-hermes"),
+    )
+    login(client)
+    res = client.post("/tts", json={"text": "say this with browser fallback"})
+    assert res.status_code == 503
+    assert res.json() == {"detail": "Voice synthesis is unavailable"}
+    assert "say this with browser fallback" not in client.get("/logs").text
+
+def test_tts_rejects_oversized_text(tmp_path):
+    client = make_pin_client(tmp_path)
+    login(client)
+    private_text = "secret" * (tts_module.MAX_TTS_TEXT_CHARS + 1)
+    res = client.post("/tts", json={"text": private_text})
+    assert res.status_code == 413
+    assert res.json() == {"detail": "Speech text is too long"}
+    assert private_text not in res.text
+
+def test_tts_reports_api_capability_in_readyz_details(tmp_path):
+    client = make_pin_client(
+        tmp_path,
+        hermes_adapter="api",
+        hermes_api_url="ws://127.0.0.1:9912/api/ws",
+        hermes_api_token="test-token",
+    )
+    login(client)
+    res = client.get("/readyz/details")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["checks"]["tts_available"] is True
+    assert "test-token" not in res.text
+
+def test_tts_uses_no_proxy_opener_for_hermes_call(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self, limit):
+            captured["read_limit"] = limit
+            return json.dumps({
+                "ok": True,
+                "data_url": "data:audio/mpeg;base64,VEVTVA==",
+            }).encode("utf-8")
+
+    class FakeOpener:
+        def open(self, request, *, timeout):
+            captured["authorization"] = request.headers.get("Authorization")
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+    def fake_build_opener(*handlers):
+        captured["handlers"] = handlers
+        return FakeOpener()
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8080")
+    monkeypatch.setattr(tts_module.urllib.request, "build_opener", fake_build_opener)
+    client = make_pin_client(
+        tmp_path,
+        hermes_adapter="api",
+        hermes_api_url="ws://127.0.0.1:9912/api/ws",
+        hermes_api_token="secret-token",
+    )
+    login(client)
+    res = client.post("/tts", json={"text": "private answer"})
+    assert res.status_code == 200
+    assert res.json()["audio_data_url"] == "data:audio/mpeg;base64,VEVTVA=="
+    assert captured["authorization"] == "Bearer secret-token"
+    assert captured["timeout"] == tts_module.HERMES_TTS_TIMEOUT_SECONDS
+    assert captured["read_limit"] == tts_module.HERMES_TTS_RESPONSE_MAX_BYTES + 1
+    assert len(captured["handlers"]) == 1
+    assert getattr(captured["handlers"][0], "proxies", None) == {}
+
+def test_tts_accepts_valid_response_above_old_read_limit(tmp_path, monkeypatch):
+    old_limit = 4_000_000
+    data_url = "data:audio/mpeg;base64," + ("A" * old_limit)
+    response = json.dumps({"ok": True, "data_url": data_url}).encode("utf-8")
+    assert len(response) > old_limit
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self, limit):
+            assert limit == tts_module.HERMES_TTS_RESPONSE_MAX_BYTES + 1
+            return response
+
+    monkeypatch.setattr(
+        tts_module,
+        "_open_without_proxies",
+        lambda _request: FakeResponse(),
+    )
+    client = make_pin_client(
+        tmp_path,
+        hermes_adapter="api",
+        hermes_api_url="ws://127.0.0.1:9912/api/ws",
+        hermes_api_token="secret-token",
+    )
+    login(client)
+    res = client.post("/tts", json={"text": "private answer"})
+    assert res.status_code == 200
+    assert res.json()["audio_data_url"] == data_url
+
+def test_tts_upstream_failures_are_generic(tmp_path, monkeypatch):
+    def fail_tts_open(*_args, **_kwargs):
+        raise tts_module.urllib.error.URLError("token leaked upstream details")
+
+    monkeypatch.setattr(tts_module, "_open_without_proxies", fail_tts_open)
+    client = make_pin_client(
+        tmp_path,
+        hermes_adapter="api",
+        hermes_api_url="ws://127.0.0.1:9912/api/ws",
+        hermes_api_token="secret-token",
+    )
+    login(client)
+    res = client.post("/tts", json={"text": "private answer"})
+    assert res.status_code == 503
+    assert res.json() == {"detail": "Voice synthesis is unavailable"}
+    assert "secret-token" not in res.text
+    assert "private answer" not in client.get("/logs").text
 
 def test_stt_transcribe_requires_auth_in_pin_mode(tmp_path):
     client = make_pin_client(tmp_path)

@@ -2,6 +2,7 @@
 name: 2026-10-07-hvc-context-closeout
 status: active
 reconcile: manual
+pr: 88
 started: '2026-10-07'
 description: >-
   Preserve implementation history, decisions, evidence boundaries, and a safe

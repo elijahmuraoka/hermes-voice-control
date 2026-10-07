@@ -46,6 +46,8 @@ or provider/device tests. No cross-model writing-quality verdict is claimed.
 
 - `pnpm docs:verify`: passed after the scoped fixes; link and spec metadata
   verification includes the working tree.
+- Repo-local skill content auditor: exit 0, `ok:true`, all ten checks pass,
+  `missingRequired:[]`; independently rerun once after the format correction.
 - Tomoji compiled `docs-core.verifyIndex`: `inSync:true`.
 - Tomoji compiled `audit.runAudit`: `passed:true`, zero findings.
 - Tomoji compiled `reconcileBundles`: this bundle has manual retention and
@@ -67,7 +69,8 @@ a docs-core fallback, not a claim that CLI startup works or was repaired.
 
 ## Publication And Limits
 
-The spec's explicit `pr:` identifies the published review. Its exact final
+[PR #88](https://github.com/elijahmuraoka/hermes-voice-control/pull/88)
+is the published documentation review; the spec records it explicitly. Its exact final
 head, remote readback, mergeability, and terminal CI are recorded on that PR;
 do not infer them from this local report. The frozen GitHub metadata predates
 this preservation PR intentionally. Existing issues/PRs are not closed here.

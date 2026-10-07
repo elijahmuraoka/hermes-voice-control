@@ -15,6 +15,7 @@ Map of documentation for this repo. The `doc-maintenance` skill keeps this curre
 
 | Directory | Purpose |
 |---|---|
+| [decisions/](./decisions/) | System-wide architectural decisions (ADRs) |
 | [context/](./context/) | Background material: notes, references, research, agent orientation |
 | [specs/](./specs/) | Feature specs, see below |
 
@@ -30,6 +31,7 @@ Map of documentation for this repo. The `doc-maintenance` skill keeps this curre
 | Bundle | Spec |
 |---|---|
 | [specs/active/2026-06-07-hvc-hardening-live-verification/](./specs/active/2026-06-07-hvc-hardening-live-verification/) | Harden Hermes Voice Control for private Gemini Live use and document current verification |
+| [specs/active/2026-10-07-hvc-context-closeout/](./specs/active/2026-10-07-hvc-context-closeout/) | Preserve implementation history, decisions, evidence boundaries, and a safe upstream-adoption handoff |
 
 ### Archived spec inventory
 
@@ -82,4 +84,4 @@ Rule: if it applies across specs, it's system-wide. If it's tied to one initiati
 
 ## Maintained by
 
-The [`doc-maintenance` skill](../skills/doc-maintenance/SKILL.md) owns this structure. It handles the spec lifecycle (backlog → active → archived), keeps `INDEX.md`, `VISION.md`, and `ARCHITECTURE.md` current, and bootstraps this pattern in new repos.
+The `doc-maintenance` skill owns this structure. It handles the spec lifecycle (backlog → active → archived), keeps `INDEX.md`, `VISION.md`, and `ARCHITECTURE.md` current, and bootstraps this pattern in new repos.

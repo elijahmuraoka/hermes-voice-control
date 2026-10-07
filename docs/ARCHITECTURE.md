@@ -2,20 +2,32 @@
 
 ## Runtime Path
 
-```text
-Phone/laptop browser over localhost or Tailscale
-  -> React voice UI
-  -> FastAPI access check and optional PIN session
-  -> Gemini ephemeral token broker
-  -> browser realtime provider adapter
-  -> browser Gemini Live websocket session
-  -> basic hold-to-talk browser interim text and backend Gemini STT
-  -> /chat/text job lifecycle
-  -> Gemini tool call normalization
-  -> backend tool policy and cancellation checks
-  -> Hermes agent adapter
-  -> speakable response or recorded confirmation proposal
+```mermaid
+flowchart TD
+  Browser[Phone or laptop: same-origin React UI] --> Proxy[Private HTTPS proxy]
+  Proxy --> Auth[FastAPI session authentication]
+  Auth --> Hold[Hold: PCM audio + optional browser interim text]
+  Hold --> STT[Authenticated Gemini STT]
+  STT --> Chat[Chat inline response or visible background job]
+  Auth --> Text[Typed transcript chat]
+  Text --> Chat
+  Auth --> Broker[Gemini ephemeral token broker]
+  Broker --> Live[Browser Gemini Live audio]
+  Live --> Tools[Authenticated allowlisted agent tool]
+  Tools --> Agent[Hermes adapter]
+  Chat --> Agent
+  Agent --> API[Stateful loopback Hermes serve API]
+  Agent --> Fallback[Optional read-only local subprocess fallback]
+  API --> Approval[Approval needed: desktop operator]
+  Chat --> TTS[Authenticated Hermes TTS proxy]
+  TTS --> Playback[Unlocked browser AudioContext: Hold reply]
+  Tools --> Live
 ```
+
+The default private deployment uses Tailscale Serve for HTTPS and a loopback
+proxy serving both the built UI and API paths. Production API URLs are
+same-origin: a phone's localhost is never the agent host. This describes source
+at `c7c501f`, not a freshly checked live deployment.
 
 Live mode treats Gemini as the realtime audio transport, not the source of
 agent answers. The browser sends a session instruction that requires
@@ -27,12 +39,12 @@ chat and Basic Hold.
 ## Components
 
 - `apps/web`: React voice UI, orb state machine, audio worklets, realtime
-  provider boundary, Gemini Live protocol wrapper, opt-in basic hold-to-talk
+  provider boundary, Gemini Live protocol wrapper, default basic hold-to-talk
   audio capture with browser interim text, local diagnostics recorder,
   transcript drawer, and text fallback.
 - `apps/server`: FastAPI auth/session layer, Gemini token broker, tool allowlist,
-  Gemini STT transcription endpoint, SQLite store, confirmation records,
-  readiness/log controls, and Hermes adapter implementations.
+  Gemini STT and Hermes TTS endpoints, SQLite chat-job/session storage,
+  confirmation records, readiness/log controls, and Hermes adapters.
 - `scripts/browser-responsive.spec.ts`: Playwright responsive/browser smoke with
   fake microphone permission and screenshot capture.
 - `scripts/e2e-real-gemini-live.mjs`: credentialed Gemini Live smoke that mints
@@ -46,9 +58,20 @@ direct local-tool access. It receives backend-issued Gemini ephemeral tokens and
 can ask the backend to run only allowlisted HVC tools.
 
 Basic hold-to-talk records audio only while the operator holds the orb. Browser
-speech recognition provides interim text and fallback; the authenticated backend
-STT path can finalize the transcript before it enters the same chat job
-lifecycle as typed messages. Audio is not persisted to disk.
+speech recognition provides optional interim text and fallback; it is not
+required when server STT is usable (including standalone iOS/Firefox). The
+authenticated STT path finalizes the transcript before it enters the same chat
+job lifecycle as typed messages. Gemini STT sends audio to Google's cloud API,
+not merely to a private local recognizer. Hold capture is bounded to roughly
+60 seconds, with visible disclosure/cap feedback. Audio is not persisted to
+disk by HVC.
+
+Hold answers remain visible in the transcript and use `/tts` to call the
+existing Hermes `/api/audio/speak` endpoint with server-only credentials. This
+reuses the agent's configured TTS provider; it does not manufacture a new
+Gemini voice. Playback uses an already-unlocked AudioContext, supports
+barge-in, and has browser speech synthesis as a last-resort fallback. Live
+retains its separate Gemini audio path and configured voice.
 
 No-PIN mode is a localhost development convenience. Remote/proxied access
 without a PIN is blocked unless `HVC_ALLOW_NO_PIN_REMOTE=true` is set
@@ -67,22 +90,41 @@ late responses for that call to be ignored.
   `VITE_HVC_AGENT_NAME`.
 - **Live self-healing reconnect:** When the Gemini Live WebSocket drops, the
   client reconnects automatically — it re-mints a fresh ephemeral token from the
-  backend, re-establishes the WebSocket, and applies exponential backoff with
-  jitter. A wake lock is held during reconnect to prevent device sleep from
-  interrupting recovery on mobile.
+  backend, re-establishes the WebSocket, and applies bounded backoff. Healthy
+  sessions are not replaced simply because a tab becomes visible again;
+  suspended audio is resumed first. Wake locks are feature-detected and held
+  only during active voice/capture. Recovery cannot guarantee continuity after
+  an OS terminates the app.
 - **Unlock-time Hermes session warming:** When the operator unlocks the app
-  (PIN entry or device-cookie auth), the backend immediately warms the Hermes
-  session so the first agent answer is pre-warmed and lower-latency.
+  (PIN entry or device-cookie auth), the backend asynchronously attempts to
+  resume an existing stored Hermes session. It never creates a session while
+  warming: new or stale sessions remain cold until the first actual chat.
+  Warming may reduce later-answer latency; it is not a first-answer guarantee.
 
 ## Data Stores
 
 SQLite stores sessions, transcripts/events, confirmations, audit logs, and
-tool-call cancellation markers. Confirmation approval is intentionally not an
-external action executor in v1; it records intent for a future reviewed action
-path.
+tool-call cancellation markers, plus chat-job results and stored Hermes session
+IDs. When remembered-device auth is enabled, the agent principal uses the
+hashed device identity; ordinary session-cookie renewal does not itself reset
+that identity. Without remembered-device auth, the session principal can
+change on re-authentication. The browser also caches its transcript locally;
+this is not the canonical Hermes memory.
 
-`/healthz` is a basic liveness endpoint. `/readyz` checks database reachability
-and writeability plus safe runtime posture without exposing secrets. `/logs` is
+Chat requests use a 750 ms default inline budget and fall back to visible,
+pollable, cancellable jobs with partial text when work takes longer. Persisted
+job metadata does not imply restartable in-flight agent execution after an
+HVC process crash. The API adapter consumes streamed agent events and supports
+resume/interrupt; the local fallback is a separate one-shot CLI path. Hermes
+approval events become a permission-needed state requiring desktop action;
+HVC confirmation records do not execute actions themselves.
+
+`/healthz` is a basic liveness endpoint. `/readyz` reports a minimal pass/fail
+result without public adapter diagnostics. Authenticated `/readyz/details`
+contains readiness checks, adapter/STT configuration, and TTS availability.
+Availability configuration is not proof of successful agent/TTS execution.
+An expired session must re-authenticate; missing details must not show the agent
+as reachable. `/logs` is
 disabled by default and requires `HVC_ALLOW_LOGS_ENDPOINT=true`. Audit logs are
 pruned at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
 `HVC_AUDIT_LOG_MAX_ROWS`.
@@ -103,5 +145,8 @@ pruned at startup with `HVC_AUDIT_LOG_RETENTION_DAYS` and
 
 ## Current Work
 
-The active hardening and live-verification bundle is
-[2026-06-07-hvc-hardening-live-verification](specs/active/2026-06-07-hvc-hardening-live-verification/SPEC.md).
+The [project handoff](context/project-handoff.md) records the upstream-first
+maintenance direction and complete implementation references. The older
+[hardening/live-verification bundle](specs/active/2026-06-07-hvc-hardening-live-verification/SPEC.md)
+remains a historical unfinished verification record. The archived July bundle
+is not proof that phone or reboot acceptance passed.

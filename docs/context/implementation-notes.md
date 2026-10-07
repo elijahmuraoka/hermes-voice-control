@@ -1,5 +1,12 @@
 # Implementation notes
 
+## Preservation Update: 2026-10-07
+
+The [project handoff](project-handoff.md) is the current orientation record.
+It preserves the stateful API adapter, device-scoped identity, Hold TTS,
+integration failures, and upstream-first direction that these earlier notes
+do not fully cover. Dated test counts below remain historical, not fresh gates.
+
 ## Design decisions
 
 - Product name is `hermes-voice-control`; `hermes-voice-portal` remains
@@ -75,6 +82,12 @@
   Serve should use PIN/session auth.
 - `LocalHermesAdapter` launches Hermes with a direct argv, safe toolset, timeout
   handling, cancellation handling, and launch-error handling.
+- `ApiHermesAdapter` uses the loopback Hermes serve protocol with persistent
+  stored sessions, partial text, interrupt, and desktop-only approval handling.
+  The remembered-device principal keeps context stable across session renewal.
+- Hold replies use authenticated `/tts` and Hermes's configured speech provider;
+  Live still uses its own Gemini audio path. Browser Web Speech is optional
+  when server STT is usable.
 - Root operator scripts now include `pnpm dev`, `pnpm env:check`,
   `pnpm smoke:browser`, `pnpm screenshots:update`, and `pnpm perf:budget`.
 - `pnpm perf:budget` validates bundle size plus launch latency/reliability

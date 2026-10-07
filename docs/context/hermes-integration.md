@@ -43,7 +43,7 @@ hang behind or misreport a failed local Hermes bridge. The quiet chat query path
 preserves Hermes approval semantics while keeping stdout limited to the final
 answer text for the bridge.
 
-`/readyz` includes local-adapter diagnostics when `HVC_HERMES_ADAPTER=local`,
+Authenticated `/readyz/details` includes local-adapter diagnostics when `HVC_HERMES_ADAPTER=local`,
 including whether the configured binary resolves, the read-only command shape,
 the safe toolset, and the adapter timeout. A missing local Hermes binary makes
 readiness fail closed with a controlled diagnostic.
@@ -69,19 +69,25 @@ HVC_HERMES_API_TOKEN=<same-token-used-by-hermes-serve>
 startup and `pnpm env:check` reject remote URLs so a dashboard token is not sent
 outside the local machine.
 
-On each private HVC session, the adapter creates or resumes a Hermes serve
+For each HVC agent principal, the adapter creates or resumes a Hermes serve
 session, persists the returned `stored_session_id` in the HVC SQLite store, and
 submits prompts through `prompt.submit`. It streams `message.delta` text into
 the background chat job `partial_text` field so the transcript can show progress
 while the answer is still running. `session.interrupt` is used for cancellation
 or barge-in.
 
+With remembered-device auth enabled, the principal prefers a validated hashed
+device identity, so ordinary session-cookie refresh does not reset agent
+context. Without it, context is scoped to the shorter-lived session principal.
+The local fallback remains a separate one-shot path; API context continuity
+does not fix the open local-fallback issue #65.
+
 Hold-mode voice output reuses the same Hermes serve trust boundary. The browser
 calls authenticated HVC `POST /tts` with answer text; the backend derives the
 Hermes HTTP base from `HVC_HERMES_API_URL`, calls Hermes serve
 `POST /api/audio/speak` with the dashboard token, and returns the audio data URL
 to the browser for playback through an already-unlocked `AudioContext`. This
-uses the voice configured in Hermes itself, such as Bob's ElevenLabs voice,
+uses the voice configured in Hermes itself, such as an ElevenLabs voice,
 without exposing the dashboard token to the browser.
 
 If Hermes emits `approval.request`, HVC returns a `pending_confirmation` result

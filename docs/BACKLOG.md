@@ -1,91 +1,42 @@
 # Backlog
 
-Open work not yet scoped into its own spec.
+Snapshot: 2026-10-07, before the preservation PR. GitHub state is enumerated in
+the complete [issue ledger](specs/active/2026-10-07-hvc-context-closeout/context/issue-ledger.md)
+and [PR ledger](specs/active/2026-10-07-hvc-context-closeout/context/pull-request-ledger.md).
+Historical checklists are preserved in their owning specs and Git history;
+they are not a current open-issue list.
 
-## Verification
+## Current Direction
 
-- [x] Start the Vite app and run `pnpm smoke:browser` against
-  `http://127.0.0.1:5173`.
-- [x] Run `scripts/e2e-real-gemini-live.mjs` with real Gemini credentials and
-  record the redacted result in the active spec.
-- [ ] Do a fresh independent final review after the live Gemini/browser smoke,
-  because the existing review reports predate some productionization fixes.
+Preserve HVC and compare upstream Hermes voice before adding more custom-client
+features. No replacement has been accepted. See the
+[upstream-first decision](decisions/2026-10-07-upstream-first-voice.md) and
+[resumption plan](specs/active/2026-10-07-hvc-context-closeout/plans/resumption-and-retirement.md).
 
-## Release Hygiene
+## Open Gates
 
-- [x] Choose the Git remote owner and visibility, add `origin`, then push
-  `main`.
-- [ ] Decide whether the untracked review screenshots should be committed with
-  the review evidence or regenerated on demand.
-- [x] Add CI once the remote exists: `pnpm test`, `pnpm build`,
-  `pnpm smoke:browser`, and a repo-contained docs verification gate.
-- [x] Add dependency update policy and remove frontend `latest` dependency
-  specs.
+| Record | What remains | Disposition to decide |
+| --- | --- | --- |
+| [#20](https://github.com/elijahmuraoka/hermes-voice-control/issues/20), [draft #25](https://github.com/elijahmuraoka/hermes-voice-control/pull/25) | Physical phone/browser/audio acceptance; automated smoke is insufficient | Complete on devices if maintaining HVC; otherwise close as superseded only after accepting a replacement |
+| [#33](https://github.com/elijahmuraoka/hermes-voice-control/issues/33) | Full durable reboot/logout/headless acceptance | Historical crash-restart evidence exists; recheck installed service and obtain approval for a reboot/system change |
+| [#36](https://github.com/elijahmuraoka/hermes-voice-control/issues/36) | Operator access/policy evidence | Verify real operator devices; no policy mutation inferred from this document |
+| [#65](https://github.com/elijahmuraoka/hermes-voice-control/issues/65) | Stateless local-fallback transcript/context defect | Primary API path shipped in #69; fix retained fallback or explicitly retire that fallback |
+| [#87](https://github.com/elijahmuraoka/hermes-voice-control/pull/87) | Frontend dependency update | Independently review/test if maintaining; do not merge merely for an empty queue |
 
-## GitHub Production Issues
+## Closed Source Work
 
-- [#1](https://github.com/elijahmuraoka/hermes-voice-control/issues/1):
-  CI for tests, build, docs audit, and smoke prerequisites.
-- [#2](https://github.com/elijahmuraoka/hermes-voice-control/issues/2):
-  Playwright responsive smoke from a fresh checkout.
-- [#3](https://github.com/elijahmuraoka/hermes-voice-control/issues/3):
-  real Gemini Live setup and credentialed smoke verification. Redacted
-  evidence is recorded in the active spec; the GitHub issue can close once the
-  evidence-bearing PR merges.
-- [#4](https://github.com/elijahmuraoka/hermes-voice-control/issues/4):
-  auth, cookies, and log access hardening.
-- [#5](https://github.com/elijahmuraoka/hermes-voice-control/issues/5):
-  generic internal agent/tool identifiers. Implemented by `ask_agent`,
-  `agent-*` states, and `agent` transcript role; `ask_bob` remains a backend
-  compatibility alias.
-- [#6](https://github.com/elijahmuraoka/hermes-voice-control/issues/6):
-  dependency version pinning and update policy.
-- [#7](https://github.com/elijahmuraoka/hermes-voice-control/issues/7):
-  one-command local/dev production runbooks and env validation. Implemented
-  with `pnpm dev`, `pnpm env:check`, and the private-network runbook.
-- [#8](https://github.com/elijahmuraoka/hermes-voice-control/issues/8):
-  production health, observability, and log-retention controls. Implemented
-  with `/readyz`, DB writeability checks, log pruning, and tests.
-- [#9](https://github.com/elijahmuraoka/hermes-voice-control/issues/9):
-  UX, accessibility, and performance QA. Implemented with responsive,
-  keyboard/focus, reduced-motion, screenshot, and bundle-budget checks.
-- [#10](https://github.com/elijahmuraoka/hermes-voice-control/issues/10):
-  confirmation-gated action semantics. Decided as read-only v1; approvals
-  record intent only and do not execute external actions.
+The CI, auth, security, provider boundary, diagnostics, real-bridge harness,
+chat-job lifecycle, stateful API adapter, transcript/default-Hold UX, STT,
+reconnect, design, and Hold TTS deliveries are recorded with their merged PRs
+and historical evidence. Their closed status does not remove the open physical
+acceptance gates above. In particular, frontend update PR #42 already merged;
+it is not an outstanding issue.
 
-## Product Decisions
+## Intentionally Unscheduled
 
-- [x] Choose the v1 default Gemini voice/personality guidance.
-  Default Live voice is configurable with `HVC_GEMINI_VOICE_NAME` and currently
-  defaults to `Charon`.
-- [x] Decide v1 action semantics: `LocalHermesAdapter` stays read-only and
-  confirmation approval records intent only. A future executor would need its
-  own design and issue.
-- [ ] Revisit LiveKit/Pipecat only if HVC needs multi-device rooms, telephony,
-  or provider-neutral media pipelines.
-
-## Launch Plan Issues
-
-- [#12](https://github.com/elijahmuraoka/hermes-voice-control/issues/12):
-  realtime voice provider bakeoff and v1 default decision. The docs decision
-  artifact is in
-  [realtime-provider-bakeoff.md](context/research/realtime-provider-bakeoff.md);
-  credentialed Gemini plus alternate-provider smoke evidence is still pending.
-- [#13](https://github.com/elijahmuraoka/hermes-voice-control/issues/13):
-  provider-neutral realtime adapter boundary.
-- [#14](https://github.com/elijahmuraoka/hermes-voice-control/issues/14):
-  private Tailscale deployment and rollback rehearsal.
-- [#15](https://github.com/elijahmuraoka/hermes-voice-control/issues/15):
-  production security threat model and hardening gate.
-- [#16](https://github.com/elijahmuraoka/hermes-voice-control/issues/16):
-  safe real Hermes bridge integration harness.
-- [#17](https://github.com/elijahmuraoka/hermes-voice-control/issues/17):
-  realtime latency and reliability instrumentation.
-- [#18](https://github.com/elijahmuraoka/hermes-voice-control/issues/18):
-  final independent review gauntlet before launch.
-- [#19](https://github.com/elijahmuraoka/hermes-voice-control/issues/19):
-  open-source release safety and fresh-checkout gate.
-- [#20](https://github.com/elijahmuraoka/hermes-voice-control/issues/20):
-  mobile browser and audio QA matrix.
-- [#33](https://github.com/elijahmuraoka/hermes-voice-control/issues/33):
-  durable launchd service for the private HVC runner.
+- No broad voice-framework migration, telephony, multi-user rooms, or public
+  hosting until a demonstrated need survives the upstream comparison.
+- No automatic Hermes approval responder or arbitrary remote tool endpoint.
+- No claim that background jobs durably resume after an HVC process crash.
+- No service retirement, secret rotation, cleanup deletion, or issue closure
+  performed by this preservation update.

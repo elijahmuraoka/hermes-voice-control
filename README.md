@@ -1,5 +1,11 @@
 # Hermes Voice Control
 
+> **Maintenance direction, 2026-10-07:** preserve this custom client while
+> evaluating upstream Hermes voice rather than expanding another voice stack.
+> Start with the [project handoff](docs/context/project-handoff.md) for the
+> implementation history, decisions, complete PR references, and safe recovery
+> steps. No replacement or service retirement is claimed.
+
 Hermes Voice Control is a private-by-default browser voice surface for talking
 to your Hermes agent from a phone or laptop.
 
@@ -23,6 +29,8 @@ build time as "Hermes Voice Control" (short name "Hermes").
 - Basic hold-to-talk dictation with browser interim text, Gemini STT
   finalization, and the same reliable background chat job path as typed
   messages.
+- Spoken Hold replies through your Hermes agent's configured TTS provider;
+  Live retains its separate Gemini voice path.
 - Text fallback for moments when voice is not right.
 - Persistent transcript drawer for conversation state and recovery.
 - Backend-issued Gemini Live ephemeral tokens so long-lived API keys never reach
@@ -43,6 +51,7 @@ Browser voice UI
   -> allowlisted backend tool calls
   -> Hermes agent adapter
   -> speakable answer or recorded confirmation proposal
+  -> Hermes TTS and browser playback for Hold replies
 ```
 
 The browser is intentionally untrusted. It can request short-lived Gemini Live
@@ -80,7 +89,8 @@ Hermes Voice Control is designed for private use before public exposure:
 - `HVC_REQUIRE_PIN=true` enables server-side PIN/session auth.
 - No-PIN mode is intended for direct localhost development only.
 - Unknown tools are denied.
-- Agent-answer tool calls are read-only by default.
+- The local subprocess fallback is read-only. The stateful API adapter uses
+  the configured Hermes policy and never auto-answers agent approval requests.
 - Action-like requests can become confirmation records; approval records intent
   only and does not execute external actions in v1.
 - Basic Hold records audio only while held, finalizes the transcript through the
@@ -207,7 +217,7 @@ HVC_HERMES_API_TOKEN=<same-token-used-by-hermes-serve>
 ```
 
 The API adapter keeps the browser behind the HVC backend, persists the Hermes
-stored session id per private HVC session, streams partial replies into the
+stored session id per agent principal (remembered device when available), streams partial replies into the
 background chat job state, and surfaces Hermes approval requests as
 operator-needed states rather than approving them automatically. API mode is
 intentionally loopback-only so the dashboard token is never sent to a remote

@@ -73,6 +73,13 @@ discussion payloads and deployment notes are retained locally under ignored
 `.private/closeout-2026-10-07/`. Existing private evidence remains in place.
 It is not in a fresh clone and needs a separate secure backup.
 
+Historical tracked docs already contain deployment identifiers; this PR's
+changed-file scan is not a clean-tree or clean-history claim. The
+[coverage map](../specs/active/2026-10-07-hvc-context-closeout/audits/evidence-and-coverage.md)
+records the inherited exceptions and separately gated redaction decision.
+The preservation bundle is manually retained so reconciliation cannot break
+this handoff's links; an approved archive must repair those links atomically.
+
 Not every historical agent session has been exported or fully read. The
 coverage map names those gaps. Historical instructions and approvals are
 provenance, not current permission to merge, install, delete, rotate secrets,

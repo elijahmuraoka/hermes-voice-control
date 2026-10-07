@@ -87,3 +87,25 @@ docs-only update**, not passed production gates. Physical acceptance is still
 external if HVC is retained; installation/network/retirement mutations remain
 approval-gated. A fresh clone cannot contain the ignored private evidence;
 separate secure backup remains an operator responsibility.
+The [publication review](../reviews/2026-10-07-publication-review.md) records
+the final review round, docs-core fallback, and lifecycle limitations.
+
+## Inherited Public Privacy Exceptions
+
+The targeted privacy scan covered this PR's changed files, not the entire
+repository, screenshots, or Git history. The independent publication review
+identified historical deployment references already tracked at baseline:
+
+- A deployment hostname in the older active
+  [verification status](../../2026-06-07-hvc-hardening-live-verification/STATUS.md).
+- A deployment hostname in the archived
+  [morning acceptance script](../../../archived/2026-07-04-hvc-production-path/qa/morning-acceptance-script.md).
+- An operator-specific home path in the archived
+  [production-path spec](../../../archived/2026-07-04-hvc-production-path/SPEC.md).
+
+Those identifiers are not credentials, but they prevent a blanket statement
+that the public tree/history has no deployment identity. Values are not
+repeated here. They remain unchanged in this preservation PR: archived
+snapshots are immutable, and redacted copies or Git-history treatment need a
+separately approved disposition. No repository-wide secret, screenshot, or
+history-cleanliness certification is claimed.

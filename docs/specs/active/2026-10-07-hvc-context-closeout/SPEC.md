@@ -1,6 +1,7 @@
 ---
 name: 2026-10-07-hvc-context-closeout
 status: active
+reconcile: manual
 started: '2026-10-07'
 description: >-
   Preserve implementation history, decisions, evidence boundaries, and a safe
@@ -65,3 +66,11 @@ coverage; see [evidence and coverage](audits/evidence-and-coverage.md).
 6. A documentation PR carries the verified branch and evidence. Source-lifecycle
    reconciliation after its merge is a separate step, not a claim that HVC's
    physical/reboot production gates passed.
+
+## Closeout Lifecycle
+
+This bundle uses `reconcile: manual`: living docs link to its active location,
+so an automatic move would break their references. An approved archival
+transaction must update every inbound living-doc link to the archived
+location, regenerate the index, and pass `pnpm docs:verify` before publication.
+Do not subsequently rewrite the archived snapshot.

@@ -10,6 +10,10 @@ documents current, scaffold specs through `tomoji docs spec-new`, record explici
 PR references, and preserve archived specs as immutable historical snapshots.
 After an approved merge, inspect `tomoji docs reconcile --json` before applying
 lifecycle changes. Use `ghx` for GitHub operations and `wt` for isolated worktrees.
+Retain bundles with inbound living-doc links using `reconcile: manual` until
+archival and link repair are approved together. The repo docs gate currently
+accepts only active status in the active directory; document blockers there
+rather than applying an unsupported blocked status.
 
 Do not commit `.private/`, credentials, PINs, cookies, tokens, raw transcripts,
 deployment environments, or machine-specific recovery artifacts. Public docs

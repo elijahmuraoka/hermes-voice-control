@@ -96,8 +96,10 @@ late responses for that call to be ignored.
   only during active voice/capture. Recovery cannot guarantee continuity after
   an OS terminates the app.
 - **Unlock-time Hermes session warming:** When the operator unlocks the app
-  (PIN entry or device-cookie auth), the backend immediately warms the Hermes
-  session so the first agent answer is pre-warmed and lower-latency.
+  (PIN entry or device-cookie auth), the backend asynchronously attempts to
+  resume an existing stored Hermes session. It never creates a session while
+  warming: new or stale sessions remain cold until the first actual chat.
+  Warming may reduce later-answer latency; it is not a first-answer guarantee.
 
 ## Data Stores
 

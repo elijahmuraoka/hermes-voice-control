@@ -4,6 +4,11 @@ Date: 2026-10-07. Scope: documentation-only changes on
 `docs/hvc-closeout-record`, baseline `c7c501f`. No runtime change or production
 acceptance is assessed by this report.
 
+This is the initial local review. The later
+[publication review](2026-10-07-publication-review.md) records the second
+review round, inherited privacy exceptions, lifecycle mitigations, and the
+later CLI environment failure; its results qualify the initial gates below.
+
 ## Executive Summary
 
 Verdict: **APPROVE_WITH_FIXES**; the one concrete finding is resolved below.
@@ -46,7 +51,7 @@ independent reviewer was not rerun on a second loop.
 | Structured ledger verification | 54 PR rows and 33 issue rows match the snapshot's unique IDs; 76 comment references mapped |
 | Metadata checksum | Matches the SHA-256 recorded in the coverage map |
 | Instruction/skill relative links | Both actual Markdown links checked; no missing target |
-| Public privacy/scope scan | No targeted provider-key/private-key/private-host/IP/path pattern matched; no source-code or archived-spec changes |
+| Changed-file privacy/scope scan | No targeted provider-key/private-key/private-host/IP/path pattern matched in the changed files; no source-code or archived-spec changes. Inherited historical identifiers elsewhere were not covered by that result; see the final publication review |
 | Ignored raw evidence | `git check-ignore` confirms private inventory/transcript paths are excluded |
 | Main checkout | Still has its one pre-existing modified harness evidence file; no tracked main edit was performed by this pass |
 | Raw transcript validation | 59,234 valid records, zero invalid lines; retained privately with checksum, not semantically re-audited in full |
@@ -68,8 +73,10 @@ unchanged. No code, lockfile, dependency, or workflow was modified.
 Sensitive-history disclosure is the main risk of this documentation task.
 Raw GitHub bodies, the original transcript, and operational notes stay ignored;
 public files contain metadata, summaries, and reference links. Targeted scans
-did not find secret-shaped/private-deployment values, but are not an exhaustive
-secret detector. OWASP-relevant disclosure/auth boundaries are described, not
+of changed files did not find secret-shaped/private-deployment values. They
+do not certify the whole tree or history; inherited historical identifiers
+remain as documented in the coverage map. OWASP-relevant disclosure/auth
+boundaries are described, not
 penetration-tested. API-agent tool authority is distinguished from the local
 read-only fallback; provider retention is not inferred from inline transport.
 

@@ -11,7 +11,7 @@ exact-target cleanup approval. This is retirement, not a production upgrade.
 | Refresh repo/PR/issue and local ownership | Verified | Fresh exact-head/CI and runtime checks before #88 merge; only the classified old harness result and integration symlink remained locally |
 | Record scope, feature map and abandoned-work dossiers | Verified | Living handoff, 2026-10-14 ADR, feature map and dossier supplement; fresh reader recovered context |
 | Close abandoned records with reasoning | Verified | Issues #20/#33/#36/#65 not planned; PRs #25/#87 unmerged, linked rationale receipts |
-| Preserve known public draft/source heads remotely | Verified | Three retirement tags and original remote branches; no branch deletion |
+| Preserve known public draft/source heads remotely | Verified | Three retirement tags; QA and closeout branches survive. Original dependency branch is absent, but its exact tree remains tagged; no deletion was requested by this cleanup |
 | Classify local-only histories/dirty evidence | Verified for scoped branch tips | Recovery's 28-file source patch and one-line precheck CSS retained; public-equivalent tips not republished; private ancestry excluded |
 | Cold-start reader and docs/exact-head CI | Verified | Fresh reader PASS at `6c54451`; final head `5724ba3` and main merge `3d65681` CI success; portable docs/audit/index passed |
 | Deliver handoff on main | Verified | PR #88 merged at `3d65681684cb892ea2d9c0ef1f3bfa804b4b4e41`; merged tree equals reviewed head tree |

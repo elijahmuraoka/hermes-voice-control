@@ -11,7 +11,7 @@ excluded from public docs. [Retirement decision](../decisions/2026-10-14-remote-
 | --- | --- | --- |
 | Implemented main | Public at `c7c501f51c2649883cab291390b297a673af17c0` | `retirement/2026-10-14/implemented-source` tag |
 | QA draft #25 | Public unmerged head `cead0b82a775126a9c837fa06d691554a582be1e` | Closed PR, retained branch and `retirement/2026-10-14/mobile-qa` tag |
-| Dependency proposal #87 | Public unmerged head `ae9248311b79804283f345f9c7897f35235328d4` | Closed PR, retained branch and `retirement/2026-10-14/dependency-proposal` tag |
+| Dependency proposal #87 | Public unmerged head `ae9248311b79804283f345f9c7897f35235328d4` | Closed PR and verified `retirement/2026-10-14/dependency-proposal` tag; original branch absent at final readback |
 | Buttery-voice local tip `4f180126` | Already reachable through public main despite same-name branch being older | No missing source to republish |
 | Private-history tip `2e76ada` | Final source/support tree matches public `4ff7f75e426c17b84bca80c268c236f859d2c505` | Public implementation already retained; private ancestry is intentionally not uploaded |
 | Precheck tip `7d94dff` | Other examined source versions already public; one CSS padding variant remained | [Precheck patch](recovery-snapshots/precheck-safe-area.patch) against recorded public base |

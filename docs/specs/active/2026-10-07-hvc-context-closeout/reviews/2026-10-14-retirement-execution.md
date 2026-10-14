@@ -43,7 +43,7 @@ results were checked again after removal:
 | Other Serve routes | 3000-to-3001 and 8443-to-8790 unchanged; Tailscale remained Running/Online; no Funnel enabled |
 | Four approved linked worktrees | Removed using wt; scoped registry list returned an empty array |
 | Canonical HVC checkout | Exact path absent, including project-local ignored env/database/log/diagnostic/transcript copies and generated dependencies |
-| Remote recovery | Repo remains public/editable; reviewed branch, abandoned proposal branches, tags, closed discussions and main preserved |
+| Remote recovery | Repo remains public/editable; main, reviewed docs branch, QA branch, three retirement tags and closed discussions verified. Dependency branch is absent; its exact head survives in the retirement tag |
 | Unrelated resources | Main Hermes messaging gateway, global agent histories/credentials and unrelated trees not targeted; ambiguous live Claude session still present |
 
 No raw personal transcript, PIN, token, deployment environment or private Git

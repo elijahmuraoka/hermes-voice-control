@@ -108,5 +108,6 @@ Changing/deleting a goal is separate from deleting its supporting artifacts.
   or remove unrelated sessions as incidental cleanup.
 
 The [dossiers](../context/retirement-dossiers.md) contain actual record-closure
-receipts. Runtime/deletion status must come from explicit later receipts; a
-plan alone does not mean those mutations happened.
+receipts. The [execution receipt](../reviews/2026-10-14-retirement-execution.md)
+records completed HVC teardown and separately approval-gated Hermes Serve
+logging repair. This revival plan never grants future execution permission.

@@ -8,10 +8,14 @@ October 14 supplement: the [retirement dossiers](../context/retirement-dossiers.
 record later closures and remote recovery tags; the snapshot below remains
 frozen. The [retirement handoff review](../reviews/2026-10-14-retirement-handoff.md)
 and [source inventory](../../../../context/local-recovery-inventory.md) record
-source-only recovery, fresh-reader verification and pending operational gates.
+source-only recovery and fresh-reader verification. The later
+[execution receipt](../reviews/2026-10-14-retirement-execution.md) records actual
+HVC removal and the pending separate Hermes Serve logging repair.
 The operator's revised scope requires useful technical memory in Git, not a
 separate raw/private archive; original local copies are not a fresh-agent
-prerequisite and have not been deleted by this pass.
+prerequisite. Approved later checkout deletion removed project-local raw
+copies; capture counts below describe the former inventory, not files still
+available on the host. Global agent histories were left alone.
 
 ## Source Coverage
 

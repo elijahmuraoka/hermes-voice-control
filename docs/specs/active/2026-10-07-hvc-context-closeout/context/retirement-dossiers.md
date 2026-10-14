@@ -84,8 +84,11 @@ and `pnpm-lock.yaml`. It includes major TypeScript, Vite, jsdom and test-library
 updates, not just a harmless patch batch. Compatibility was not accepted by
 merging it; the snapshot must not imply those dependency versions shipped.
 
-Preserved remote branch: `dependabot/npm_and_yarn/frontend-65bb55f2ca`, head
+Original proposal branch: `dependabot/npm_and_yarn/frontend-65bb55f2ca`, head
 `ae9248311b79804283f345f9c7897f35235328d4` (verified before closure).
+At final readback, this branch was absent from GitHub; the dependency-proposal
+retirement tag still resolves to that exact head. The disappearance's cause is
+unverified. Use the tag for recovery; branch recreation is unnecessary.
 Close unmerged because maintaining the frozen client is unscheduled. On
 revival, research current supported versions and upgrade in a fresh tested
 PR rather than blindly merging this aged group. Existing Dependabot config
@@ -106,8 +109,9 @@ remote PR branch was requested for deletion. Exact rationale comments:
 | #25 | Closed unmerged | [Draft code and manual checklist retained remotely](https://github.com/elijahmuraoka/hermes-voice-control/pull/25#issuecomment-6161154289) |
 | #87 | Closed unmerged | [Proposed dependencies did not ship](https://github.com/elijahmuraoka/hermes-voice-control/pull/87#issuecomment-6161154912) |
 
-PR #88 remains open for reviewed main delivery. No merge, runtime retirement,
-or local deletion is claimed by this receipt.
+PR #88 subsequently merged at `3d65681684cb892ea2d9c0ef1f3bfa804b4b4e41`.
+The [later execution receipt](../reviews/2026-10-14-retirement-execution.md)
+records actual HVC teardown and the pending separate Hermes Serve log repair.
 
 ## Remote Recovery Anchors
 

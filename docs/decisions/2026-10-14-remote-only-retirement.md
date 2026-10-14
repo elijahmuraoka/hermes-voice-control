@@ -1,12 +1,14 @@
 # Remote-Only Retirement
 
-Date: 2026-10-14. Status: operator-approved direction; execution is recorded
-separately. Supersedes the retirement prerequisite in the
+Date: 2026-10-14. Status: operator-approved and executed for the exact HVC
+targets; a separate Hermes Serve logging repair awaits approval. See the
+[execution receipt](../specs/active/2026-10-07-hvc-context-closeout/reviews/2026-10-14-retirement-execution.md).
+Supersedes the retirement prerequisite in the
 [upstream-first decision](2026-10-07-upstream-first-voice.md).
 
 ## Decision
 
-End active HVC development and plan removal of its local deployment/checkouts.
+End active HVC development and remove its approved local deployment/checkouts.
 Keep the GitHub repository alive as the durable engineering memory. A future
 agent must be able to recover the project from code, docs, preserved remote
 refs, and linked GitHub discussions without this conversation or the old host.
@@ -26,8 +28,9 @@ is not the preservation strategy.
 
 ## Preservation Contract
 
-- Main is the intended entry point. Until the closeout PR is merged, its branch
-  is the pending handoff, not a completed main delivery.
+- Main is the entry point. PR #88 delivered the reviewed handoff at
+  `3d65681684cb892ea2d9c0ef1f3bfa804b4b4e41`; source recovery tags and patches
+  were verified remotely before local removal.
 - Preserve vision, feature/source map, implementation history, decisions,
   research references, failures/fixes, exact PR/issue dispositions, evidence
   boundaries, and steps for safe resumption.
@@ -53,7 +56,8 @@ Run docs/link/index/audit checks and exact-head CI. Verify remote code refs and
 closure receipts. No runtime production-readiness claim follows from those
 checks; real mobile/audio and reboot acceptance remain historically incomplete.
 
-Merge and destructive local cleanup need their explicit execution approvals.
+The operator approved the exact merge and destructive cleanup preview. That
+approval does not authorize future merges or a shared-service repair.
 Inventory exact owned targets first; shared Hermes, Tailscale, unrelated
 sessions, credentials, and services remain outside the retirement scope.
 Scheduled dependency updates are not implicitly disabled by closing one PR;

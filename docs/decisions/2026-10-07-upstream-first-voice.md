@@ -4,6 +4,10 @@ Date: 2026-10-07. Status: recommended maintenance direction, not a completed
 migration. Supersedes the assumption that HVC must keep expanding its own
 voice-client stack; does not remove the implementation or historical decisions.
 
+Historical note: the [2026-10-14 retirement decision](2026-10-14-remote-only-retirement.md)
+supersedes this document's requirement to accept a replacement before retiring
+HVC. Research below remains dated candidate material, not current acceptance.
+
 ## Problem
 
 The operator wants to speak to their existing Hermes agent from a phone, with

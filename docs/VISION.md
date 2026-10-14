@@ -36,16 +36,15 @@ to use on a private Tailscale network.
 - Mock first, real second: default adapters are deterministic so tests and UI
   work never spend Gemini quota or mutate local state by accident.
 
-## Current Bet
+## Current Direction
 
-As of 2026-10-07, preserve this client and evaluate upstream Hermes voice
-before further broad feature investment. Hold remains the implemented default;
-Live is optional. Both modes should speak agent answers, but they use different
-voice providers: Hold uses Hermes TTS, while Live uses Gemini audio.
+As of 2026-10-14, retire active custom-client work and preserve a remote-only
+restart point. The product intent above remains the historical vision for a
+future revival, not an active production roadmap. Hold is the implemented
+default and uses Hermes TTS; optional Live uses a separate Gemini voice path.
 
-Native Hermes voice and supported external voice surfaces are candidates, not
-accepted replacements. Do not retire the current fallback until the intended
-phone/laptop workflow, persistent context, permission handling, voice choice,
-and private deployment have been demonstrated. See the
-[upstream-first decision](decisions/2026-10-07-upstream-first-voice.md) and
-[project handoff](context/project-handoff.md) for rationale and remaining gates.
+The operator chose retirement without requiring an accepted replacement.
+Native/upstream voice candidates are research inputs, not deployed substitutes.
+Future agents must refresh that research before investing again. See the
+[remote-only decision](decisions/2026-10-14-remote-only-retirement.md),
+[feature map](context/feature-map.md), and [handoff](context/project-handoff.md).

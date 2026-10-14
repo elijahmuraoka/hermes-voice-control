@@ -5,8 +5,7 @@ reconcile: manual
 pr: 88
 started: '2026-10-07'
 description: >-
-  Preserve implementation history, decisions, evidence boundaries, and a safe
-  upstream-adoption handoff
+  Preserve HVC engineering history and a remote-only retirement/revival handoff
 owner:
   - Maintainers
 tags:
@@ -36,11 +35,19 @@ In scope: living docs, a dated upstream-first decision, complete paginated
 GitHub metadata ledgers, private raw-source preservation with checksums, source
 coverage, and an independently reviewed documentation PR.
 
+On 2026-10-14, scope expanded to the operator-approved remote-only handoff:
+feature/source map, detailed abandoned-work dispositions and closure receipts,
+recoverable remote code refs, and a fresh-agent cold-start assessment.
+
 Out of scope: implementation changes, accepting/installing a replacement,
-closing existing issues/PRs, merging, changing services or tailnet policy,
+merging, changing services or tailnet policy,
 rotating secrets, deleting worktrees, exporting private chat/audio publicly,
 or claiming a fresh production audit. Prior approval instructions in archived
 records are history, not current authority.
+
+The initial October 7 pass did not authorize issue closure. The later direct
+operator request does; local destructive cleanup still requires exact-target
+preview/approval. See the [retirement decision](../../../decisions/2026-10-14-remote-only-retirement.md).
 
 ## Evidence Boundary
 

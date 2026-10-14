@@ -1,20 +1,32 @@
 # Project Handoff
 
-Updated 2026-10-07. Source baseline:
+Updated 2026-10-14. Source baseline:
 [`c7c501f`](https://github.com/elijahmuraoka/hermes-voice-control/commit/c7c501f51c2649883cab291390b297a673af17c0).
 This preservation update changes documentation, not runtime behavior.
 
 ## Direction
 
-Preserve HVC as a private custom-client fallback. Evaluate maintained upstream
-Hermes voice before investing in another bespoke voice stack. A replacement
-has **not** been installed, tested against the operator's phone, or accepted.
-The repository has **not** been retired, and services have not been stopped.
+HVC is retired as an active development workstream. Preserve its code and
+engineering memory on GitHub so a fresh agent can resume without this thread
+or the old host. Plan removal of the local deployment and project after
+preservation and exact cleanup approval. No runtime shutdown/local deletion
+is claimed by this document yet.
+
+A replacement has **not** been installed or accepted, and is not required to
+close HVC. The operator changed that prerequisite on 2026-10-14; the
+[remote-only retirement decision](../decisions/2026-10-14-remote-only-retirement.md)
+is authoritative over the earlier fallback-retention recommendation.
 
 The operator wanted reliable access to their existing Hermes agent: persistent
 context, natural permission handling, quick interruption, accurate speech,
 and spoken answers. The purpose was never to build a second agent personality.
 See the [upstream-first decision](../decisions/2026-10-07-upstream-first-voice.md).
+
+Use the [feature/source map](feature-map.md) to locate each implemented path,
+its tests and remaining limitations. Research and implementation describe
+their recorded versions; recheck current Hermes/provider contracts before
+adoption or revival. Closed records can be reopened or replaced by new scoped
+issues/PRs; historical approvals are never execution permission.
 
 ## Reading Order
 
@@ -48,7 +60,12 @@ In particular, the July production-path spec was automatically archived after
 its associated documentation PR merged even though phone acceptance remained
 open. The archive label does not satisfy that acceptance gate.
 
-## Open Records At Capture
+## Abandoned Records And Their Context
+
+The following were open in the October 7 capture. The operator now approved
+closure, not completion. The [retirement dossiers](../specs/active/2026-10-07-hvc-context-closeout/context/retirement-dossiers.md)
+record original requests, proposed code, progress, unsolved gates, exact remote
+heads, rationale, resumption instructions and authoritative closure receipts.
 
 - [#20 / draft PR #25](https://github.com/elijahmuraoka/hermes-voice-control/issues/20):
   physical mobile/browser/audio acceptance.
@@ -62,16 +79,27 @@ open. The archive label does not satisfy that acceptance gate.
 - [PR #87](https://github.com/elijahmuraoka/hermes-voice-control/pull/87):
   unmerged frontend dependency update, not part of the voice delivery.
 
-No record was closed merely to make the queue look complete. Decide whether
-these gates remain necessary for a retained fallback or become superseded by
-an accepted replacement; record that reason explicitly.
+No physical/reboot/fallback test is invented to justify closure. PR #88 carries
+this handoff and remains pending main delivery until merged. The repository
+stays editable; abandoned records are history, not an active roadmap.
 
 ## Preservation Boundary
+
+The [local recovery inventory](local-recovery-inventory.md) classifies branch
+tips and generated evidence. [Source recovery snapshots](recovery-snapshots/README.md)
+preserve useful unpublished variants as reviewed, untested patches on public
+bases, without exporting private Git ancestry. The dossiers pin remote tags
+for implemented source and abandoned drafts. These artifacts are code memory,
+not permission to execute an old patch or claim it is better than current main.
 
 Git contains portable technical context and reference metadata. Full GitHub
 discussion payloads and deployment notes are retained locally under ignored
 `.private/closeout-2026-10-07/`. Existing private evidence remains in place.
-It is not in a fresh clone and needs a separate secure backup.
+Those raw files are not in a fresh clone. The selected retirement scope does
+not require a separate private recovery archive: useful technical findings
+must be summarized here before approved local removal. PINs, credentials and
+raw personal transcripts are excluded, not requirements for a future agent.
+Any useful local-only code must first be preserved as a verified remote ref.
 
 Historical tracked docs already contain deployment identifiers; this PR's
 changed-file scan is not a clean-tree or clean-history claim. The
@@ -84,3 +112,11 @@ Not every historical agent session has been exported or fully read. The
 coverage map names those gaps. Historical instructions and approvals are
 provenance, not current permission to merge, install, delete, rotate secrets,
 change tailnet policy, or restart a service.
+
+## Cold-Start Acceptance
+
+A new read-only agent receives only the repo path/README, no conversation or
+private notes. It must reconstruct intent, architecture, feature ownership,
+decisions, incidents, research limits, record dispositions and next steps.
+The dated review records whether that test actually ran. A readable handoff
+is not proof of a fresh live deployment or accepted replacement.

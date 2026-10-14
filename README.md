@@ -1,10 +1,13 @@
 # Hermes Voice Control
 
-> **Maintenance direction, 2026-10-07:** preserve this custom client while
-> evaluating upstream Hermes voice rather than expanding another voice stack.
-> Start with the [project handoff](docs/context/project-handoff.md) for the
-> implementation history, decisions, complete PR references, and safe recovery
-> steps. No replacement or service retirement is claimed.
+> **Inactive project, 2026-10-14:** active custom-client work is retired by
+> operator decision. Preserve code and engineering context on GitHub; local
+> decommissioning is planned, not claimed complete. Start with the
+> [project handoff](docs/context/project-handoff.md),
+> [feature/source map](docs/context/feature-map.md), and
+> [retirement decision](docs/decisions/2026-10-14-remote-only-retirement.md).
+> No upstream replacement or production readiness is claimed. Setup below is
+> for an approved future revival, not evidence of a currently running service.
 
 Hermes Voice Control is a private-by-default browser voice surface for talking
 to your Hermes agent from a phone or laptop.
@@ -305,8 +308,9 @@ HVC_PIN_FILE=.private/deployment/hvc-pin.txt
 HVC_GEMINI_MODE=real
 HVC_GEMINI_VOICE_NAME=Charon
 GEMINI_API_KEY=<redacted>
-HVC_HERMES_ADAPTER=local
-HVC_HERMES_BIN=/opt/homebrew/bin/hermes
+HVC_HERMES_ADAPTER=api
+HVC_HERMES_API_URL=ws://127.0.0.1:9912/api/ws
+HVC_HERMES_API_TOKEN=<new-server-only-token>
 HVC_TAILSCALE_HOSTNAME=DEVICE.TAILNET.ts.net
 EOF
 chmod 600 .private/deployment/launchd.env
@@ -314,6 +318,11 @@ chmod 600 .private/deployment/launchd.env
 pnpm private:launchd -- render
 sudo pnpm private:launchd -- install
 ```
+
+The loopback port is an example, not a claim that Hermes serve is already
+running. Check its current API/auth contract and use newly configured secrets
+for an approved revival. `HVC_HERMES_ADAPTER=local` is only the optional
+read-only CLI fallback; its transcript-window defect (#65) remains unfixed.
 
 Installing, bootstrapping, kickstarting, stopping, or uninstalling the
 LaunchDaemon changes local machine state. Review the generated plist under

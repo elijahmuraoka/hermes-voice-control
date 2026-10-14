@@ -3,6 +3,12 @@
 This is a plan, not a record of execution or permission to mutate services.
 Start at the [project handoff](../../../../context/project-handoff.md).
 
+Updated scope, 2026-10-14: the operator chose retirement without requiring an
+accepted replacement or a separate raw/private recovery archive. The
+[remote-only decision](../../../../decisions/2026-10-14-remote-only-retirement.md)
+supersedes earlier fallback-retention prerequisites. The acceptance matrix
+below is preserved for a future revival, not an active production goal.
+
 ## Resume Safely
 
 1. Read the handoff, architecture, decision register, ledgers, and coverage map.
@@ -64,18 +70,19 @@ token to the phone or make arbitrary tools callable publicly.
 
 Compare the exact tasks above, not demo polish. Decide whether exact Hermes
 TTS identity or duplex latency is more important when upstream modes use
-different speech providers. Preserve the current client until the operator
-accepts the new path and a rollback has been demonstrated.
+different speech providers. If a future operator wants continuity during a
+migration, accept the new path and demonstrate rollback before switching.
+That is a future deployment choice, not a prerequisite for current retirement.
 
 ## Resolve Open Records Without Rewriting History
 
-| Record | If retaining HVC | If an accepted replacement supersedes it |
+| Record | If reviving HVC | Current retirement disposition |
 | --- | --- | --- |
-| #20 / draft #25 | Attach actual device results; merge/close only for demonstrated coverage | Close as superseded/not planned with replacement evidence, not "QA passed" |
-| #33 | Attach installed service and full recovery acceptance | Record why custom-runner durability is no longer required; retire only with approval |
-| #36 | Verify each operator's private URL access and policy intent | Document the replacement access/security model before closure |
-| #65 | Fix/test the retained local adapter or explicitly remove that fallback in a reviewed PR | Explain that the API/native path replaces it; do not claim its defect was fixed |
-| #87 | Review dependency compatibility and green exact-head tests | Close unmerged as out of scope for the frozen client, not delivered updates |
+| #20 / draft #25 | Attach actual device results; compare draft to current source | Closed not planned/unmerged; physical QA did not pass by closure |
+| #33 | Attach installed service and full recovery acceptance | Closed not planned because the custom runtime is being retired |
+| #36 | Verify each operator's private URL access and policy intent | Closed not planned; no policy change or replacement acceptance implied |
+| #65 | Fix/test the retained local adapter or explicitly remove that fallback in a reviewed PR | Closed not planned; its defect is still real despite the primary API delivery |
+| #87 | Research supported dependency versions and test a fresh upgrade | Closed unmerged; old proposed updates did not ship |
 
 Do not leave a paused goal as the canonical work record. Repository docs and
 issue disposition should carry the durable context; a goal's administrative
@@ -89,13 +96,17 @@ Changing/deleting a goal is separate from deleting its supporting artifacts.
   Document archival as a frozen contract, not production acceptance.
 - Verify public main contains the complete handoff/ledgers and can be cloned.
   Keep Git history; do not squash/delete the repository to simplify closure.
-- Back up ignored `.private/` evidence separately in an approved secure
-  location; verify its manifest checksums. Do not commit raw payloads or keys.
+- Make useful technical context and recoverable code independent of local
+  `.private/`. Publish sanitized findings/decisions and verify remote code refs;
+  do not upload raw private payloads or keys. A raw private archive is optional,
+  not an operator-selected prerequisite for this engineering handoff.
 - Inventory active HVC services, worktrees, tmux/cloud sessions, and artifacts.
   Cleanup is audit/classify/preview first. Delete only explicitly approved,
   exact safe targets; retain dirty trees and recovery evidence.
-- Stop/disable only HVC services after replacement acceptance and approval.
+- Stop/disable only HVC services after exact-target preview and approval.
   Do not stop the Hermes gateway, change tailnet policy, revoke shared keys,
   or remove unrelated sessions as incidental cleanup.
 
-The current preservation pass performs none of those retirement mutations.
+The [dossiers](../context/retirement-dossiers.md) contain actual record-closure
+receipts. Runtime/deletion status must come from explicit later receipts; a
+plan alone does not mean those mutations happened.

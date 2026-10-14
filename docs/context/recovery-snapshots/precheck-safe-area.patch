@@ -1,0 +1,13 @@
+diff --git a/apps/web/src/styles.css b/apps/web/src/styles.css
+index 2d4bf85..d28f9ca 100644
+--- a/apps/web/src/styles.css
++++ b/apps/web/src/styles.css
+@@ -839,7 +839,7 @@ input {
+   }
+   .app-shell {
+     display: block;
+-    padding: calc(env(safe-area-inset-top) + 12px) 12px 12px;
++    padding: 12px;
+   }
+   .hero-panel {
+     min-height: 100dvh;

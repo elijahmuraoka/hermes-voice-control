@@ -5,6 +5,13 @@ this repository. The [project handoff](docs/context/project-handoff.md) is the
 entry point for resuming work; documentation closeout is not proof of runtime
 production readiness.
 
+HVC is an inactive, resumable project under the 2026-10-14 remote-only
+retirement decision. Treat code as retained implementation and dated docs as
+historical evidence; refresh upstream research, versions and host state before
+reviving it. Read the feature map and retirement dossiers to understand
+abandoned work. A fresh clone must be sufficient for technical orientation
+without `.private/`, prior conversations, the former PIN or credentials.
+
 Use `skills/doc-maintenance/SKILL.md` for documentation changes. Keep living
 documents current, scaffold specs through `tomoji docs spec-new`, record explicit
 PR references, and preserve archived specs as immutable historical snapshots.

@@ -31,7 +31,7 @@ Map of documentation for this repo. The `doc-maintenance` skill keeps this curre
 | Bundle | Spec |
 |---|---|
 | [specs/active/2026-06-07-hvc-hardening-live-verification/](./specs/active/2026-06-07-hvc-hardening-live-verification/) | Harden Hermes Voice Control for private Gemini Live use and document current verification |
-| [specs/active/2026-10-07-hvc-context-closeout/](./specs/active/2026-10-07-hvc-context-closeout/) | Preserve implementation history, decisions, evidence boundaries, and a safe upstream-adoption handoff |
+| [specs/active/2026-10-07-hvc-context-closeout/](./specs/active/2026-10-07-hvc-context-closeout/) | Preserve HVC engineering history and a remote-only retirement/revival handoff |
 
 ### Archived spec inventory
 

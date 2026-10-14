@@ -1,8 +1,11 @@
 # Hermes Voice Control
 
 > **Inactive project, 2026-10-14:** active custom-client work is retired by
-> operator decision. Preserve code and engineering context on GitHub; local
-> decommissioning is planned, not claimed complete. Start with the
+> operator decision. The engineering handoff is merged on main; the approved
+> HVC runner, route and five checkouts are removed. A separate Hermes Serve
+> logging repair is awaiting approval; see the
+> [execution receipt](docs/specs/active/2026-10-07-hvc-context-closeout/reviews/2026-10-14-retirement-execution.md).
+> Start with the
 > [project handoff](docs/context/project-handoff.md),
 > [feature/source map](docs/context/feature-map.md), and
 > [retirement decision](docs/decisions/2026-10-14-remote-only-retirement.md).

@@ -116,8 +116,11 @@ Keep public metadata and sanitized summaries in Git. Keep raw API discussion
 records and private operational notes in ignored `.private/`, with a local
 inventory and checksums. Never commit credentials, PINs, cookies, tokens,
 audio, raw personal transcripts, or deployment identity/policy exports.
-Private preservation needs a separate secure backup; a fresh clone does not
-contain `.private/`.
+If a workstream requires raw private retention, it needs a separately approved
+secure backup; a fresh clone never contains `.private/`. HVC's retirement scope
+instead preserves useful sanitized context and source upstream. The approved
+2026-10-14 cleanup removed project-local raw copies without a private archive;
+the execution receipt records that boundary. Do not assume those files remain.
 
 Describe privacy-scan scope precisely. Checking changed files does not certify
 the entire tree or Git history; inherited deployment identifiers in historical

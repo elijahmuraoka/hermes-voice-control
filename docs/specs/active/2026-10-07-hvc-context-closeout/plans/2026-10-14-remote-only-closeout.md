@@ -8,14 +8,16 @@ exact-target cleanup approval. This is retirement, not a production upgrade.
 
 | Stage | State | Evidence / condition |
 | --- | --- | --- |
-| Refresh repo/PR/issue and local ownership | Verified | Main `c7c501f`; PR #88 pending; exact runtime/worktree inventory is an audit, not teardown |
+| Refresh repo/PR/issue and local ownership | Verified | Fresh exact-head/CI and runtime checks before #88 merge; only the classified old harness result and integration symlink remained locally |
 | Record scope, feature map and abandoned-work dossiers | Verified | Living handoff, 2026-10-14 ADR, feature map and dossier supplement; fresh reader recovered context |
 | Close abandoned records with reasoning | Verified | Issues #20/#33/#36/#65 not planned; PRs #25/#87 unmerged, linked rationale receipts |
 | Preserve known public draft/source heads remotely | Verified | Three retirement tags and original remote branches; no branch deletion |
 | Classify local-only histories/dirty evidence | Verified for scoped branch tips | Recovery's 28-file source patch and one-line precheck CSS retained; public-equivalent tips not republished; private ancestry excluded |
-| Cold-start reader and docs/exact-head CI | Verified at 6c54451 | Fresh reader PASS for technical resumption; exact-head CI success. Final report-only commit is checked again before merge |
-| Deliver handoff on main | Approval-gated | PR #88 must merge; an open PR is not main delivery |
-| Stop/remove exact HVC-only local resources | Approval-gated | Preview service/routes/checkouts after preservation; shared services and ambiguous live sessions remain untouched |
+| Cold-start reader and docs/exact-head CI | Verified | Fresh reader PASS at `6c54451`; final head `5724ba3` and main merge `3d65681` CI success; portable docs/audit/index passed |
+| Deliver handoff on main | Verified | PR #88 merged at `3d65681684cb892ea2d9c0ef1f3bfa804b4b4e41`; merged tree equals reviewed head tree |
+| Stop/remove exact HVC-only local resources | Verified for previewed targets | Dedicated agent/plist and 443 route gone; four wt entries and canonical checkout absent; two unrelated routes unchanged |
+| Repair separate Hermes Serve logging dependency | Awaiting approval | API still running; stdout/stderr referenced removed HVC log files. No shared-service reload attempted |
+| Publish final execution receipt | This docs follow-up | Actual results, sequencing mistake and remaining approval are recorded without a production claim |
 
 ## Implementation Notes
 
@@ -32,10 +34,15 @@ supplement with authoritative GitHub comment URLs.
 from the public handoff. Useful technical content must be summarized first;
 a future operator configures new credentials instead of recovering old secrets.
 
-**Open questions:** local-only histories need source/ancestry classification;
-active agent sessions may not be owned exclusively by HVC. Exact main merge,
-runtime shutdown, route removal and deletion approvals are separate from
-approved record closure and docs publication.
+**Open question:** approve rehoming the separate Hermes Serve logs and
+reloading only that service. The live Claude session remains outside cleanup.
+Local source classification is complete within documented coverage limits;
+the exact merge and HVC cleanup preview were approved and executed.
+
+**Execution deviation:** the final canonical open-file check returned two
+entries, but deletion was not gated on that failure. They were the separate
+Hermes Serve stdout/stderr logs. The API process remains live; its logging
+needs repair. See the [execution receipt](../reviews/2026-10-14-retirement-execution.md).
 
 ## Verification
 

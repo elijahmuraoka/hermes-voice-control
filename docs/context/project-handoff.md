@@ -8,9 +8,12 @@ This preservation update changes documentation, not runtime behavior.
 
 HVC is retired as an active development workstream. Preserve its code and
 engineering memory on GitHub so a fresh agent can resume without this thread
-or the old host. Plan removal of the local deployment and project after
-preservation and exact cleanup approval. No runtime shutdown/local deletion
-is claimed by this document yet.
+or the old host. PR #88 merged on main; the approved dedicated HVC runner,
+private HTTPS route, four linked worktrees and canonical checkout are removed.
+The [execution receipt](../specs/active/2026-10-07-hvc-context-closeout/reviews/2026-10-14-retirement-execution.md)
+records verification and an unexpected logging dependency awaiting approval.
+The separate Hermes Serve API remains running; its removed log paths need
+repair before closeout is complete.
 
 A replacement has **not** been installed or accepted, and is not required to
 close HVC. The operator changed that prerequisite on 2026-10-14; the
@@ -79,9 +82,11 @@ heads, rationale, resumption instructions and authoritative closure receipts.
 - [PR #87](https://github.com/elijahmuraoka/hermes-voice-control/pull/87):
   unmerged frontend dependency update, not part of the voice delivery.
 
-No physical/reboot/fallback test is invented to justify closure. PR #88 carries
-this handoff and remains pending main delivery until merged. The repository
-stays editable; abandoned records are history, not an active roadmap.
+No physical/reboot/fallback test is invented to justify closure.
+[PR #88](https://github.com/elijahmuraoka/hermes-voice-control/pull/88) delivered
+this handoff on main at `3d65681684cb892ea2d9c0ef1f3bfa804b4b4e41`.
+The repository stays editable; abandoned records are history, not an active
+roadmap. Weekly dependency automation is unchanged and may create new PRs.
 
 ## Preservation Boundary
 
@@ -92,14 +97,14 @@ bases, without exporting private Git ancestry. The dossiers pin remote tags
 for implemented source and abandoned drafts. These artifacts are code memory,
 not permission to execute an old patch or claim it is better than current main.
 
-Git contains portable technical context and reference metadata. Full GitHub
-discussion payloads and deployment notes are retained locally under ignored
-`.private/closeout-2026-10-07/`. Existing private evidence remains in place.
-Those raw files are not in a fresh clone. The selected retirement scope does
-not require a separate private recovery archive: useful technical findings
-must be summarized here before approved local removal. PINs, credentials and
-raw personal transcripts are excluded, not requirements for a future agent.
-Any useful local-only code must first be preserved as a verified remote ref.
+Git contains portable technical context and reference metadata. Project-local
+ignored discussion captures, deployment notes, databases, logs, environment
+files and transcript copies were removed with the approved canonical checkout.
+They were never uploaded. Global agent histories and shared credentials were
+left alone. The operator did not require a private recovery archive; useful
+technical findings, reviewed source patches and remote refs were preserved
+first. A fresh agent supplies new credentials and refreshes research instead
+of depending on the former host or PIN.
 
 Historical tracked docs already contain deployment identifiers; this PR's
 changed-file scan is not a clean-tree or clean-history claim. The

@@ -39,15 +39,21 @@ On 2026-10-14, scope expanded to the operator-approved remote-only handoff:
 feature/source map, detailed abandoned-work dispositions and closure receipts,
 recoverable remote code refs, and a fresh-agent cold-start assessment.
 
+The operator then approved the exact preview: merge #88, unload/uninstall only
+the dedicated HVC agent, remove its one HTTPS route, remove four linked trees
+through wt and delete the canonical checkout including project-local ignored
+material. The [execution receipt](reviews/2026-10-14-retirement-execution.md)
+records results and the separately gated Hermes Serve logging repair.
+
 Out of scope: implementation changes, accepting/installing a replacement,
-merging, changing services or tailnet policy,
-rotating secrets, deleting worktrees, exporting private chat/audio publicly,
-or claiming a fresh production audit. Prior approval instructions in archived
-records are history, not current authority.
+shared-service or tailnet-policy changes, rotating secrets, deleting unrelated
+sessions, exporting private chat/audio publicly, or claiming a fresh production
+audit. Prior approvals in archived records are history, not current authority.
 
 The initial October 7 pass did not authorize issue closure. The later direct
-operator request does; local destructive cleanup still requires exact-target
-preview/approval. See the [retirement decision](../../../decisions/2026-10-14-remote-only-retirement.md).
+operator request did. The later exact cleanup preview was approved and
+executed; it does not authorize future cleanup. See the
+[retirement decision](../../../decisions/2026-10-14-remote-only-retirement.md).
 
 ## Evidence Boundary
 

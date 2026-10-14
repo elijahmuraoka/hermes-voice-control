@@ -1,5 +1,14 @@
 # Hermes Voice Control
 
+> **Inactive project, 2026-10-14:** active custom-client work is retired by
+> operator decision. Preserve code and engineering context on GitHub; local
+> decommissioning is planned, not claimed complete. Start with the
+> [project handoff](docs/context/project-handoff.md),
+> [feature/source map](docs/context/feature-map.md), and
+> [retirement decision](docs/decisions/2026-10-14-remote-only-retirement.md).
+> No upstream replacement or production readiness is claimed. Setup below is
+> for an approved future revival, not evidence of a currently running service.
+
 Hermes Voice Control is a private-by-default browser voice surface for talking
 to your Hermes agent from a phone or laptop.
 
@@ -23,6 +32,8 @@ build time as "Hermes Voice Control" (short name "Hermes").
 - Basic hold-to-talk dictation with browser interim text, Gemini STT
   finalization, and the same reliable background chat job path as typed
   messages.
+- Spoken Hold replies through your Hermes agent's configured TTS provider;
+  Live retains its separate Gemini voice path.
 - Text fallback for moments when voice is not right.
 - Persistent transcript drawer for conversation state and recovery.
 - Backend-issued Gemini Live ephemeral tokens so long-lived API keys never reach
@@ -43,6 +54,7 @@ Browser voice UI
   -> allowlisted backend tool calls
   -> Hermes agent adapter
   -> speakable answer or recorded confirmation proposal
+  -> Hermes TTS and browser playback for Hold replies
 ```
 
 The browser is intentionally untrusted. It can request short-lived Gemini Live
@@ -80,7 +92,8 @@ Hermes Voice Control is designed for private use before public exposure:
 - `HVC_REQUIRE_PIN=true` enables server-side PIN/session auth.
 - No-PIN mode is intended for direct localhost development only.
 - Unknown tools are denied.
-- Agent-answer tool calls are read-only by default.
+- The local subprocess fallback is read-only. The stateful API adapter uses
+  the configured Hermes policy and never auto-answers agent approval requests.
 - Action-like requests can become confirmation records; approval records intent
   only and does not execute external actions in v1.
 - Basic Hold records audio only while held, finalizes the transcript through the
@@ -207,7 +220,7 @@ HVC_HERMES_API_TOKEN=<same-token-used-by-hermes-serve>
 ```
 
 The API adapter keeps the browser behind the HVC backend, persists the Hermes
-stored session id per private HVC session, streams partial replies into the
+stored session id per agent principal (remembered device when available), streams partial replies into the
 background chat job state, and surfaces Hermes approval requests as
 operator-needed states rather than approving them automatically. API mode is
 intentionally loopback-only so the dashboard token is never sent to a remote
@@ -295,8 +308,9 @@ HVC_PIN_FILE=.private/deployment/hvc-pin.txt
 HVC_GEMINI_MODE=real
 HVC_GEMINI_VOICE_NAME=Charon
 GEMINI_API_KEY=<redacted>
-HVC_HERMES_ADAPTER=local
-HVC_HERMES_BIN=/opt/homebrew/bin/hermes
+HVC_HERMES_ADAPTER=api
+HVC_HERMES_API_URL=ws://127.0.0.1:9912/api/ws
+HVC_HERMES_API_TOKEN=<new-server-only-token>
 HVC_TAILSCALE_HOSTNAME=DEVICE.TAILNET.ts.net
 EOF
 chmod 600 .private/deployment/launchd.env
@@ -304,6 +318,11 @@ chmod 600 .private/deployment/launchd.env
 pnpm private:launchd -- render
 sudo pnpm private:launchd -- install
 ```
+
+The loopback port is an example, not a claim that Hermes serve is already
+running. Check its current API/auth contract and use newly configured secrets
+for an approved revival. `HVC_HERMES_ADAPTER=local` is only the optional
+read-only CLI fallback; its transcript-window defect (#65) remains unfixed.
 
 Installing, bootstrapping, kickstarting, stopping, or uninstalling the
 LaunchDaemon changes local machine state. Review the generated plist under

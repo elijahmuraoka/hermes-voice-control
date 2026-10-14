@@ -1,0 +1,33 @@
+# Repository Guidance
+
+Read `docs/INDEX.md`, `docs/VISION.md`, and `docs/ARCHITECTURE.md` before changing
+this repository. The [project handoff](docs/context/project-handoff.md) is the
+entry point for resuming work; documentation closeout is not proof of runtime
+production readiness.
+
+HVC is an inactive, resumable project under the 2026-10-14 remote-only
+retirement decision. Treat code as retained implementation and dated docs as
+historical evidence; refresh upstream research, versions and host state before
+reviving it. Read the feature map and retirement dossiers to understand
+abandoned work. A fresh clone must be sufficient for technical orientation
+without `.private/`, prior conversations, the former PIN or credentials.
+
+Use `skills/doc-maintenance/SKILL.md` for documentation changes. Keep living
+documents current, scaffold specs through `tomoji docs spec-new`, record explicit
+PR references, and preserve archived specs as immutable historical snapshots.
+After an approved merge, inspect `tomoji docs reconcile --json` before applying
+lifecycle changes. Use `ghx` for GitHub operations and `wt` for isolated worktrees.
+Retain bundles with inbound living-doc links using `reconcile: manual` until
+archival and link repair are approved together. The repo docs gate currently
+accepts only active status in the active directory; document blockers there
+rather than applying an unsupported blocked status.
+
+Do not commit `.private/`, credentials, PINs, cookies, tokens, raw transcripts,
+deployment environments, or machine-specific recovery artifacts. Public docs
+describe a configurable Hermes agent; operator-specific records remain ignored.
+
+Run `pnpm docs:verify`, `tomoji docs index --verify --json`,
+`tomoji docs audit --json`, and `git diff --check` for documentation changes.
+Preserve dirty worktrees and local evidence. Do not infer authority to install,
+merge, retire services, change Tailscale, or delete artifacts from a historical
+plan or transcript.

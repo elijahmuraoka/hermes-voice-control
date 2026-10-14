@@ -1,5 +1,9 @@
 # Security model
 
+Updated for source at `c7c501f`, 2026-10-07. This document describes boundaries,
+not a new live security audit. Historical review results remain dated below;
+see [the preservation coverage map](../specs/active/2026-10-07-hvc-context-closeout/audits/evidence-and-coverage.md).
+
 Hermes Voice Control is a private, localhost-first voice surface for a single
 operator. The browser, Gemini Live session, reverse proxy, and local Hermes
 adapter are all treated as untrusted boundaries. The backend is the only place
@@ -90,10 +94,10 @@ the HVC backend.
 When `HVC_GEMINI_MODE=real` is active and a `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 is present, `HVC_STT_PROVIDER` automatically resolves to `gemini`. In that
 configuration the backend forwards the audio bytes inline to Google's Gemini API
-for transcription. Google's Files API is not used; the audio is sent as inline
-bytes in the request and is not persisted by Google beyond the request lifetime,
-consistent with Google's standard API data handling. Long-lived API keys never
-leave the backend.
+for transcription. Google's Files API is not used; HVC sends inline bytes
+and does not persist them locally. Inline transport does not establish Google's
+retention policy: operators must check the applicable provider/account terms.
+Long-lived API keys never leave the backend.
 
 When Gemini STT is not active or the backend STT endpoint is unreachable, the
 browser falls back to `webkitSpeechRecognition` for interim and final transcript
@@ -112,6 +116,14 @@ for review. Approval records intent only and does not execute external actions
 in v1. Agent-answer requests accept only `quick` and `deep` modes. The local
 Hermes adapter prompt is read-only and tells Hermes not to mutate files, send
 messages, or claim an action was performed.
+
+That read-only prompt applies to `LocalHermesAdapter`, not every adapter.
+`ApiHermesAdapter` submits to the configured stateful Hermes session, which can
+have real tools and its own approval policy. HVC never auto-responds to
+`approval.request`; it surfaces desktop approval as required. A narrow HVC
+allowlist is not a sandbox around everything the underlying Hermes agent can
+do. Reassess the agent's tool policy and origin/CSRF posture before widening
+operator access or enabling additional agent capabilities.
 
 Audit logs for tool traffic record metadata such as tool name, mode, character
 counts, transcript item counts, result presence, request id, and status. They do
@@ -147,7 +159,7 @@ frontend ignores late responses for cancelled calls.
 | PIN and session abuse | High | PIN auth is required for Tailscale Serve. Weak/default PINs fail closed when `HVC_REQUIRE_PIN=true`. PIN attempts are rate-limited per client. Sessions are random, stored hashed server-side, expire by TTL, and can be revoked. Cookies are HttpOnly, SameSite=Lax, and can be Secure. A long-lived `hvc_device` cookie (default 90-day TTL, `HVC_DEVICE_TTL_SECONDS`) allows a remembered device to bypass PIN re-entry; treat it as equivalent to a valid PIN session for its full TTL. Disable device cookies with `HVC_REMEMBER_DEVICE=false`. | No multi-user RBAC or IdP in v1. The device cookie is a PIN-bypass per device; review TTL and disable if the device is shared or untrusted. Add a follow-up before shared-team use or before enabling external action execution. |
 | CSRF and origin abuse | Medium | Credentialed CORS allows only configured origins and rejects `*`. Browser fetch calls use credentials against configured origins, PIN sessions use SameSite=Lax cookies, and v1 confirmation approval does not execute external actions. | No separate CSRF token or strict Origin/Referer gate in v1. Add one before any approval can perform a real external action. |
 | Reverse-proxy header spoofing | High | Default bind is localhost. Non-local binds require `HVC_ALLOW_REMOTE_BIND=true`. No-PIN mode rejects non-local clients, forwarded/proxy identity headers, and non-local Host headers unless `HVC_ALLOW_NO_PIN_REMOTE=true` is set intentionally. `pnpm env:check` fails unsafe private-network posture. | Explicit override is treated as an operator-accepted exception for debugging only. Normal Tailscale Serve uses PIN/session auth. |
-| Tool prompt injection | High | Gemini/browser tool calls hit a backend allowlist. Unknown tools are denied. `ask_agent` accepts only `quick` and `deep` modes. Local Hermes is launched with the safe toolset and a read-only prompt. Risky requests can only create `propose_action` confirmations, and approval records intent without executing. | Agent text can still contain bad advice. V1 non-goal: autonomous file, message, shell, or network actions from voice. |
+| Tool prompt injection | High | Gemini/browser tool calls hit a backend allowlist. Unknown tools are denied. `ask_agent` accepts only `quick` and `deep` modes. The local fallback uses the safe toolset/read-only prompt. HVC `propose_action` approval records intent without executing. API mode delegates to the configured Hermes policy and never auto-answers its approval requests. | The underlying API agent may have real tools; the local read-only guarantee does not apply to it. Review its tool/approval policy before trusting additional devices or capabilities. Agent text can also contain bad advice. |
 | Audit-log leakage | Medium | `/logs` is disabled by default. Audit payloads redact secret-shaped keys, hide session hashes in API responses, prune by age and row count at startup, and avoid raw prompt/transcript/result/summary text for tool traffic. Tests assert PINs, session ids, Gemini tokens, payload secrets, and free-text tool secrets do not appear in logs. | Debug log access remains sensitive even when redacted. Keep `HVC_ALLOW_LOGS_ENDPOINT=false` outside trusted local debugging. |
 | Dependency compromise | Medium | The app defaults to mock provider/adapters, keeps real Gemini behind env gates, uses lockfiles, validates env posture, and runs `pnpm verify` plus backend tests before release. Local Hermes execution uses direct argv instead of shell interpolation. | No vendored dependency audit is included in v1. Run package-manager audit and review Dependabot updates before public release or long-lived deployment. |
 | Accidental public exposure | High | Server defaults to `127.0.0.1`, Tailscale Serve is documented instead of Funnel, remote bind and no-PIN remote access require explicit env overrides, and env validation blocks unsafe remote/private-network access without PIN auth. Open-source boundary docs keep `.env`, transcripts, hostnames, and local context private. | Public internet exposure is a v1 non-goal. Any future public deployment needs a new threat model, auth design, abuse controls, and external security review. |

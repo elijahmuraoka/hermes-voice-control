@@ -11,9 +11,10 @@ answers through the same backend tool surface. In both modes the browser is
 convenient but untrusted: long-lived API keys, Hermes config, and arbitrary
 local tool access stay on the backend.
 
-The first product shape is deliberately narrow: a phone or laptop browser broker
-connects to a small backend tool surface that asks local Hermes for read-only
-answers or records read-only action proposals.
+The initial subprocess bridge was deliberately read-only. The primary API
+bridge now delegates to the configured Hermes session and its approval policy;
+HVC never auto-answers Hermes approval requests. A phone or laptop is a surface
+for the existing agent, not a new agent with the same display name.
 
 The repo is not trying to become a public voice-agent platform, a telephony
 service, or a generic desktop automation suite. Its job is to make a personal
@@ -29,15 +30,21 @@ to use on a private Tailscale network.
 - Voice should stay fluid: hold captures a thought in the default push-to-talk
   mode; Live mode adds tap-to-start/pause, continuous listening, and holding
   while the agent speaks as the barge-in gesture.
-- Tools stay narrow: the agent-answer tool returns speakable read-only answers;
-  risky work is represented as a proposal record, not silently executed.
+- Tools stay narrow: HVC exposes a small tool surface. The local subprocess
+  fallback remains read-only; Hermes API approvals must be handled on desktop,
+  not silently approved by a voice client.
 - Mock first, real second: default adapters are deterministic so tests and UI
   work never spend Gemini quota or mutate local state by accident.
 
-## Current Bet
+## Current Direction
 
-Hold-to-talk is the reliable, low-friction default for v1. Keep the custom
-Gemini Live browser path as the opt-in richer surface. Borrow proven patterns
-from larger open-source voice systems, but avoid a framework migration until HVC
-needs multi-user rooms, telephony, provider-neutral pipelines, or hosted agent
-workers.
+As of 2026-10-14, retire active custom-client work and preserve a remote-only
+restart point. The product intent above remains the historical vision for a
+future revival, not an active production roadmap. Hold is the implemented
+default and uses Hermes TTS; optional Live uses a separate Gemini voice path.
+
+The operator chose retirement without requiring an accepted replacement.
+Native/upstream voice candidates are research inputs, not deployed substitutes.
+Future agents must refresh that research before investing again. See the
+[remote-only decision](decisions/2026-10-14-remote-only-retirement.md),
+[feature map](context/feature-map.md), and [handoff](context/project-handoff.md).

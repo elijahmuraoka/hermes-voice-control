@@ -4,6 +4,15 @@ Snapshot date: 2026-10-07. Baseline main:
 [`c7c501f51c2649883cab291390b297a673af17c0`](https://github.com/elijahmuraoka/hermes-voice-control/commit/c7c501f51c2649883cab291390b297a673af17c0).
 This is a preservation audit, not a live production-readiness rerun.
 
+October 14 supplement: the [retirement dossiers](../context/retirement-dossiers.md)
+record later closures and remote recovery tags; the snapshot below remains
+frozen. The [retirement handoff review](../reviews/2026-10-14-retirement-handoff.md)
+and [source inventory](../../../../context/local-recovery-inventory.md) record
+source-only recovery, fresh-reader verification and pending operational gates.
+The operator's revised scope requires useful technical memory in Git, not a
+separate raw/private archive; original local copies are not a fresh-agent
+prerequisite and have not been deleted by this pass.
+
 ## Source Coverage
 
 | Source | Coverage | Where preserved / limitation |

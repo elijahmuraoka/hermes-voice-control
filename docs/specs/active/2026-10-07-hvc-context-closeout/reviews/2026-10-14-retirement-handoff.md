@@ -40,7 +40,24 @@ could not consume the advertised new files under its tracked-only rule. It
 also identified the old README launchd example selecting the defective local
 fallback. That example now uses the configurable API path and labels the
 fallback limitation. The complete committed/published handoff needs a final
-reader check; no final PASS is claimed before that result.
+reader check; that later result is recorded below.
+
+The fresh reader at committed/published `6c544516e70f14bcd3421e3e6964acd329e7180c`
+returned **PASS for technical resumption**, with no blocking missing or
+contradictory technical context. It used ten targeted reads, starting README
+then AGENTS, and no conversation, private files, memory, network, runtime,
+tests or delegation. It recovered the architecture, per-device agent session
+boundary, voice/providers/permissions, job limitations, dated research,
+closure reasons, exact recovery anchors and untested source variants.
+Publication/ref truth was verified by the orchestrator, not this reader.
+This is a bounded onboarding/reconstruction gate, not full semantic rereading
+of every artifact, current production acceptance, or proof of zero possible
+future questions.
+
+Exact-head [CI at 6c54451](https://github.com/elijahmuraoka/hermes-voice-control/actions/runs/38516013781)
+completed successfully: tests, frontend build, performance budget, browser
+smoke and portable docs gate. A subsequent report-only commit needs its own
+final-head checks; the PR records that final result separately.
 
 ## Recovery Artifacts
 

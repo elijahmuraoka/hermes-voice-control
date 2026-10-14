@@ -9,11 +9,11 @@ exact-target cleanup approval. This is retirement, not a production upgrade.
 | Stage | State | Evidence / condition |
 | --- | --- | --- |
 | Refresh repo/PR/issue and local ownership | Verified | Main `c7c501f`; PR #88 pending; exact runtime/worktree inventory is an audit, not teardown |
-| Record scope, feature map and abandoned-work dossiers | Implemented, review pending | Living handoff, 2026-10-14 ADR, feature map and dossier supplement |
+| Record scope, feature map and abandoned-work dossiers | Verified | Living handoff, 2026-10-14 ADR, feature map and dossier supplement; fresh reader recovered context |
 | Close abandoned records with reasoning | Verified | Issues #20/#33/#36/#65 not planned; PRs #25/#87 unmerged, linked rationale receipts |
 | Preserve known public draft/source heads remotely | Verified | Three retirement tags and original remote branches; no branch deletion |
 | Classify local-only histories/dirty evidence | Verified for scoped branch tips | Recovery's 28-file source patch and one-line precheck CSS retained; public-equivalent tips not republished; private ancestry excluded |
-| Cold-start reader and docs/exact-head CI | In progress | Reader restricted to tracked repo, no conversation/private notes; fix concrete gaps before cleanup |
+| Cold-start reader and docs/exact-head CI | Verified at 6c54451 | Fresh reader PASS for technical resumption; exact-head CI success. Final report-only commit is checked again before merge |
 | Deliver handoff on main | Approval-gated | PR #88 must merge; an open PR is not main delivery |
 | Stop/remove exact HVC-only local resources | Approval-gated | Preview service/routes/checkouts after preservation; shared services and ambiguous live sessions remain untouched |
 

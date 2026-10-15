@@ -43,7 +43,8 @@ The operator then approved the exact preview: merge #88, unload/uninstall only
 the dedicated HVC agent, remove its one HTTPS route, remove four linked trees
 through wt and delete the canonical checkout including project-local ignored
 material. The [execution receipt](reviews/2026-10-14-retirement-execution.md)
-records results and the separately gated Hermes Serve logging repair.
+records results and the later approved retirement of the extra HVC API. The
+main messaging gateway and shared Hermes data/configuration were left alone.
 
 Out of scope: implementation changes, accepting/installing a replacement,
 shared-service or tailnet-policy changes, rotating secrets, deleting unrelated

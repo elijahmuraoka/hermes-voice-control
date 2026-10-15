@@ -111,7 +111,8 @@ remote PR branch was requested for deletion. Exact rationale comments:
 
 PR #88 subsequently merged at `3d65681684cb892ea2d9c0ef1f3bfa804b4b4e41`.
 The [later execution receipt](../reviews/2026-10-14-retirement-execution.md)
-records actual HVC teardown and the pending separate Hermes Serve log repair.
+records actual HVC teardown and the 2026-10-15 retirement of the extra HVC API
+instance, which resolved the logging dependency without a repair.
 
 ## Remote Recovery Anchors
 

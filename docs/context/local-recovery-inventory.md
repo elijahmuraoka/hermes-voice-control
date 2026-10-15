@@ -49,8 +49,10 @@ contains a live Claude process whose ownership is not established by its name.
 The operator subsequently approved the exact preview. HVC's LaunchAgent,
 single owned route and five checkouts are removed; wt lists no linked HVC
 trees. Two unrelated Serve routes and the live Claude session were retained.
-The separate Hermes Serve service remains running but had stdout/stderr logs
-inside the removed directory. Repairing those paths and reloading that service
-requires separate approval. Do not reset all Serve configuration, stop
+The extra Hermes Serve API had stdout/stderr logs inside the removed directory.
+On 2026-10-15, a bounded audit found no other consumers and the operator's
+conditional retirement approval was executed: only that API job and plist were
+removed, with its helper exiting too. The main messaging gateway stayed up.
+No log repair is pending. Do not reset all Serve configuration, stop
 shared Hermes, rotate shared provider credentials, or kill that live session
 merely to make the inventory empty. Use wt for any future linked-tree lifecycle.

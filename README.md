@@ -2,8 +2,8 @@
 
 > **Inactive project, 2026-10-14:** active custom-client work is retired by
 > operator decision. The engineering handoff is merged on main; the approved
-> HVC runner, route and five checkouts are removed. A separate Hermes Serve
-> logging repair is awaiting approval; see the
+> HVC runner, route and five checkouts are removed. The extra HVC API service
+> was also retired on 2026-10-15; see the
 > [execution receipt](docs/specs/active/2026-10-07-hvc-context-closeout/reviews/2026-10-14-retirement-execution.md).
 > Start with the
 > [project handoff](docs/context/project-handoff.md),

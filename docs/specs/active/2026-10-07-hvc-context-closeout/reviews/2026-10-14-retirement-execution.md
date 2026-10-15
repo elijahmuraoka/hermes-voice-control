@@ -1,7 +1,8 @@
 # Retirement Execution Receipt
 
-Date: 2026-10-14. Status: HVC targets removed; awaiting approval for a separate
-Hermes Serve logging repair. This is retirement, not production acceptance.
+Dates: 2026-10-14 execution, 2026-10-15 resolution. Status: approved HVC
+retirement targets removed, including the extra API instance. No log repair
+remains pending. This is retirement, not production acceptance.
 
 ## Main Delivery And Recovery
 
@@ -51,7 +52,7 @@ ancestry was uploaded. This is not an exhaustive clean-history certification.
 Earlier docs contain inherited operational identifiers; their disposition is
 recorded in the [coverage map](../audits/evidence-and-coverage.md).
 
-## Cleanup Sequencing Mistake And Pending Repair
+## October 14 Sequencing Mistake And Repair Proposal
 
 The final open-file check found two entries under the canonical project path,
 but deletion was not gated on that failure. Follow-up identified the separate
@@ -59,17 +60,51 @@ Hermes Serve API process's stdout/stderr logs. Those files were unlinked when
 the approved project directory was removed. This was a cleanup sequencing
 mistake, not a clean quiescence result.
 
-The separate user LaunchAgent still runs the API on loopback 9912. Its working
-directory and credentials are independent of HVC; its two log paths reference
-the former HVC directory. The process was not stopped or reloaded. A listening
-port proves continuity of the process, not a fresh authenticated API or logging
-health check.
+At the October 14 closeout, the separate user LaunchAgent still ran the API on
+loopback 9912. Its working directory and credentials were independent of HVC;
+its two log paths referenced the former HVC directory. It was conservatively
+left running pending a consumer audit. A listening port did not establish API
+or logging health.
 
-Requested approval: move only that service's log paths to a dedicated user-log
-directory and reload that service. This briefly interrupts 9912 and is outside
-the original HVC-only service boundary. Do not restart the main messaging
-gateway or rotate credentials as part of that repair. Until approved and
-verified, the overall execution remains awaiting approval.
+The initial proposal was to rehome its logs and reload it, which required
+additional approval. The operator instead approved checking for other consumers
+and retiring the API if it was HVC-only. That resolution is recorded below;
+the original sequencing mistake is not erased by the later cleanup.
+
+## October 15 API Retirement Resolution
+
+The bounded audit found no other consumers of this API instance:
+
+- Repeated TCP checks found no connected clients on 9912 and no established
+  outbound connections from the API or its owned QMD helper.
+- Searches of the checked launchd, configuration, repository, active-worktree
+  and agent-tool locations found no non-HVC references to the instance. One
+  matching text artifact was an HVC historical note, not runtime config. The
+  Hermes application-support directory was empty and no Hermes desktop client
+  process was found. Inaccessible old recovery worktrees were excluded from
+  coverage; this was not an exhaustive machine-wide or future-client audit.
+- An independent source reviewer confirmed serve and messaging gateway use
+  separate entrypoints/shutdown paths. This instance explicitly used 9912;
+  current installed source defaults to 9119. Source inspection does not prove
+  that the running process loaded every current on-disk revision.
+- A read-only API status request timed out after five seconds. This is a failed
+  health probe, not evidence of healthy or idle agent sessions. No chat, model
+  request, credential rotation or shared gateway restart was performed.
+
+Only the exact extra API launchd job was booted out. Its process and owned QMD
+helper exited, 9912 stopped listening, and the job lookup reported not found.
+Only then was its verified plist removed. The main messaging gateway retained
+its original PID and run count; its helper and the unrelated work dashboard
+also remained running. No launchd configuration in the checked user/system
+locations still referenced the deleted HVC directory.
+
+Shared Hermes home, session data, binaries and credential files were not
+removed. Tailscale remained online, the two unrelated Serve routes stayed
+configured, and Funnel remained off. The extra API is no longer needed for the
+retired HVC installation, so rehoming its logs would have retained an unused
+service. No service repair or additional approval gate remains for this
+retirement scope. This does not authorize stopping another serve instance or
+the main messaging gateway during a future deployment.
 
 ## Closed Queue And Skipped Gates
 
@@ -83,7 +118,8 @@ Physical phone/audio/reboot and new real Gemini/Hermes response checks are
 descoped: active product acceptance was withdrawn, not passed. Replacement
 selection/install is descoped, not assumed complete. Repo-local checks after
 checkout deletion are unnecessary; exact-head remote CI verifies this final
-docs follow-up. Separate Hermes Serve logging repair is approval-gated.
+docs follow-up. The separate log-repair gate was resolved by the later approved
+API retirement, not by claiming the failed API health probe passed.
 Global registry drift, unrelated caches and ambiguous live sessions are
 unnecessary cleanup targets and were left alone.
 

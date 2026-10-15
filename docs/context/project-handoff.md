@@ -1,6 +1,6 @@
 # Project Handoff
 
-Updated 2026-10-14. Source baseline:
+Updated 2026-10-15. Source baseline:
 [`c7c501f`](https://github.com/elijahmuraoka/hermes-voice-control/commit/c7c501f51c2649883cab291390b297a673af17c0).
 This preservation update changes documentation, not runtime behavior.
 
@@ -11,9 +11,10 @@ engineering memory on GitHub so a fresh agent can resume without this thread
 or the old host. PR #88 merged on main; the approved dedicated HVC runner,
 private HTTPS route, four linked worktrees and canonical checkout are removed.
 The [execution receipt](../specs/active/2026-10-07-hvc-context-closeout/reviews/2026-10-14-retirement-execution.md)
-records verification and an unexpected logging dependency awaiting approval.
-The separate Hermes Serve API remains running; its removed log paths need
-repair before closeout is complete.
+records verification and the unexpected logging dependency. On 2026-10-15,
+the extra HVC API instance was retired after a bounded consumer audit found no
+other consumers. Its job, helper and plist are gone; the main Hermes messaging
+gateway remained running. No log-path repair or replacement install was needed.
 
 A replacement has **not** been installed or accepted, and is not required to
 close HVC. The operator changed that prerequisite on 2026-10-14; the

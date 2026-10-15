@@ -1,7 +1,7 @@
 # Remote-Only Retirement
 
-Date: 2026-10-14. Status: operator-approved and executed for the exact HVC
-targets; a separate Hermes Serve logging repair awaits approval. See the
+Date: 2026-10-14; resolution updated 2026-10-15. Status: operator-approved
+retirement executed for the exact HVC targets and extra HVC API instance. See the
 [execution receipt](../specs/active/2026-10-07-hvc-context-closeout/reviews/2026-10-14-retirement-execution.md).
 Supersedes the retirement prerequisite in the
 [upstream-first decision](2026-10-07-upstream-first-voice.md).

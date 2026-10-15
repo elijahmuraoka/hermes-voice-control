@@ -10,7 +10,9 @@ frozen. The [retirement handoff review](../reviews/2026-10-14-retirement-handoff
 and [source inventory](../../../../context/local-recovery-inventory.md) record
 source-only recovery and fresh-reader verification. The later
 [execution receipt](../reviews/2026-10-14-retirement-execution.md) records actual
-HVC removal and the pending separate Hermes Serve logging repair.
+HVC removal and the 2026-10-15 retirement of the extra HVC API instance instead
+of repairing its logging. The bounded consumer audit and its gaps are recorded
+there; no exhaustive machine-wide dependency audit is claimed.
 The operator's revised scope requires useful technical memory in Git, not a
 separate raw/private archive; original local copies are not a fresh-agent
 prerequisite. Approved later checkout deletion removed project-local raw

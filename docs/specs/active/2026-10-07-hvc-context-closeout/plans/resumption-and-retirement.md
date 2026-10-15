@@ -109,5 +109,5 @@ Changing/deleting a goal is separate from deleting its supporting artifacts.
 
 The [dossiers](../context/retirement-dossiers.md) contain actual record-closure
 receipts. The [execution receipt](../reviews/2026-10-14-retirement-execution.md)
-records completed HVC teardown and separately approval-gated Hermes Serve
-logging repair. This revival plan never grants future execution permission.
+records completed HVC teardown and the subsequent retirement of the extra HVC
+API instance. This revival plan never grants future execution permission.
